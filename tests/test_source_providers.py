@@ -675,7 +675,9 @@ class SourceProviderTest(unittest.TestCase):
 
     def test_paperhub_provider_uses_last_complete_snapshot_when_refresh_fails(self):
         PaperHubProvider._paper_cache = [{"id": "cached", "title": "Graph Retrieval", "authors": ["Ada"]}]
-        PaperHubProvider._paper_cache_loaded_at = 0.0
+        PaperHubProvider._paper_cache_loaded_at = (
+            time.monotonic() - PaperHubProvider.CACHE_TTL_SECONDS - 1
+        )
         PaperHubProvider._paper_cache_manifest_version = "old"
 
         def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
