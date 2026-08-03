@@ -1,12 +1,18 @@
 const form = document.getElementById("searchForm");
 const workflow = document.getElementById("workflow");
 const logOutput = document.getElementById("logOutput");
+const rightPane = document.getElementById("rightPane");
+const logPanel = document.getElementById("logPanel");
+const logToggle = document.getElementById("logToggle");
+const logErrorBadge = document.getElementById("logErrorBadge");
 const runId = document.getElementById("runId");
 const stateLabel = document.getElementById("stateLabel");
 const stepLabel = document.getElementById("stepLabel");
 const searchButton = document.getElementById("searchButton");
 const stopButton = document.getElementById("stopButton");
 const dataSourceSelect = document.getElementById("dataSource");
+const searchBudgetInputs = [...document.querySelectorAll("input[name='searchBudget']")];
+const searchBudgetHelp = document.getElementById("searchBudgetHelp");
 const providerSelect = document.getElementById("llmProvider");
 const apiTypeSelect = document.getElementById("llmApiType");
 const modelInput = document.getElementById("llmModel");
@@ -18,7 +24,6 @@ const retrievalRerankerProviderSelect = document.getElementById("retrievalRerank
 const retrievalRerankerModelInput = document.getElementById("retrievalRerankerModel");
 const retrievalRerankerBaseUrlInput = document.getElementById("retrievalRerankerBaseUrl");
 const exportLogButton = document.getElementById("exportLogButton");
-const exportCsvButton = document.getElementById("exportCsvButton");
 const checkConfigButton = document.getElementById("checkConfigButton");
 const disciplinePicker = document.getElementById("disciplinePicker");
 const disciplinePickerLabel = document.getElementById("disciplinePickerLabel");
@@ -47,6 +52,8 @@ const translations = {
     "Results": "结果",
     "Citation Map": "引用图谱",
     "History": "历史",
+    "Resume from checkpoint": "从检查点继续",
+    "Checkpoint": "检查点",
     "Export Results CSV": "导出结果 CSV",
     "Export Log": "导出日志",
     "Ready": "就绪",
@@ -56,6 +63,15 @@ const translations = {
     "Stopped": "已停止",
     "Error": "错误",
     "Research Question": "研究问题",
+    "Search budget": "检索预算",
+    "Fast": "快速",
+    "Medium": "中",
+    "High": "高",
+    "Max": "最大",
+    "Fewest requests for faster searches.": "请求次数最少，检索更快。",
+    "Balanced recall, ranking depth, and API use. Recommended.": "在召回范围、排序深度和 API 使用量之间取得平衡，推荐使用。",
+    "Wider recall and deeper citation traversal; takes longer.": "扩大召回范围并加深引用遍历，耗时更长。",
+    "Largest candidate and ranking budget; intended for difficult searches.": "使用最大的候选池和排序预算，适合较困难的检索。",
     "Paste a research question, gap paragraph, or plain language search intent.": "粘贴研究问题、研究空白段落，或用自然语言描述检索意图。",
     "Discipline Fields": "学科领域",
     "Any field": "不限学科",
@@ -124,6 +140,9 @@ const translations = {
     "Expand citations": "扩展引用",
     "Adds forward and backward citation traversal; searches may take longer.": "会进行前后向引用遍历，检索耗时可能增加。",
     "System Dashboard": "系统面板",
+    "System Log": "系统日志",
+    "Expand system log": "展开系统日志",
+    "Collapse system log": "收起系统日志",
     "idle": "空闲",
     "Configuration check": "配置检查",
     "Configuration failed": "配置失败",
@@ -132,12 +151,15 @@ const translations = {
     "Open Advanced Settings": "打开高级设置",
     "Close": "关闭",
     "Query Generation": "查询生成",
+    "Search Intent & Query": "检索意图与检索式",
     "LLM will translate the research question into a source-specific search query.": "LLM 会把研究问题转换成适配数据源的检索式。",
     "No query generated yet.": "尚未生成检索式。",
     "Source Request": "数据源请求",
+    "Search Iteration": "检索迭代",
     "The selected database will be queried and adjusted by result counts.": "系统会查询所选数据库，并根据结果数量调整检索式。",
     "No source request has run.": "尚未请求数据源。",
     "Metadata Ranking": "元数据排序",
+    "Candidate Retrieval & Ranking": "候选召回与排序",
     "Returned records will be ranked with available metadata and abstracts when present.": "返回记录会基于可用元数据和摘要进行排序。",
     "No ranking request has run.": "尚未执行排序。",
     "Literature Results": "文献结果",
@@ -158,7 +180,17 @@ const translations = {
     "TOTAL RECORDS": "总记录",
     "TOP SCORE": "最高分",
     "CANDIDATES SCORED": "已评分候选",
+    "CANDIDATE POOL": "候选池",
     "CITATION ADDS": "引用新增",
+    "SOURCE HITS": "数据源命中",
+    "FUSED CANDIDATES": "融合候选",
+    "ITERATIONS": "迭代轮数",
+    "FINAL HITS": "最终命中",
+    "FINAL ACTION": "最终动作",
+    "SCORED >= 5": "5 分及以上",
+    "LEDGER CANDIDATES": "账本候选",
+    "SELECTED FOR LLM": "送入 LLM",
+    "FINAL OUTPUT": "最终输出",
     "Review Results": "查看结果",
     "Open Citation Map": "打开引用图谱",
     "Input Required": "需要输入",
@@ -239,6 +271,10 @@ const translations = {
     "SEED PAPERS": "种子论文",
     "ADDED CANDIDATES": "新增候选",
     "PROMOTED RESULTS": "提升为结果",
+    "FRONTIER ITEMS": "前沿任务",
+    "FRONTIER REQUESTS": "前沿请求",
+    "BACKWARD ADDS": "后向新增",
+    "FORWARD ADDS": "前向新增",
     "Result": "结果",
     "Seed": "种子",
     "Forward citation": "前向引用",
@@ -280,6 +316,27 @@ const translations = {
     "Optional; defaults to Model API key": "可选；默认复用模型 API Key",
     "Optional": "可选",
     "Configured via environment": "已通过环境变量配置",
+    "Core concepts": "核心概念",
+    "Question type": "问题类型",
+    "Full intent analysis": "完整意图分析",
+    "Likely synonyms": "可能的同义表达",
+    "Adjacent concepts": "相邻概念",
+    "Boundaries": "检索边界",
+    "Ambiguities": "待澄清歧义",
+    "Adjustment strategy": "调整策略",
+    "Query views": "查询视角",
+    "Query portfolio": "补充查询视角",
+    "Technical audit": "技术审计",
+    "Recovery and candidate audit": "恢复与候选审计",
+    "Recovered issue": "已恢复问题",
+    "Recovered issues": "已恢复问题",
+    "Current operation": "当前操作",
+    "View stage details": "展开阶段详情",
+    "Hide stage details": "收起阶段详情",
+    "View details": "展开详情",
+    "Hide details": "收起详情",
+    "No structured intent details available.": "暂无结构化意图详情。",
+    "No query portfolio views were executed.": "本次未执行补充查询视角。",
   },
 };
 
@@ -296,8 +353,10 @@ const runtimeTranslations = {
       "Embedding similarity": "向量相似度",
       "RRF fusion": "RRF 融合重排",
       "External reranker": "外部重排模型",
-      "Citation seed ranking": "引用扩展种子排序",
+      "Citation seed ranking": "引用扩展种子选择",
+      "Citation seed selection": "引用扩展种子选择",
       "Citation expansion": "引用扩展",
+      "Citation-aware candidate fusion": "引用扩展候选重融合",
       "LLM reranking": "LLM 重排序",
       "Result ranking": "结果排序",
       "Fetching missing abstracts when available.": "正在尽可能补全缺失摘要。",
@@ -319,6 +378,22 @@ const runtimeTranslations = {
       "Converted the generated query to the stable WoS Starter subset before calling the API.": "调用 API 前已将检索式转换为稳定的 WoS Starter 子集。",
       "WoS returned HTTP 512; rewrote the query into a simpler supported form and retried.": "WoS 返回 HTTP 512；已将检索式改写为更简单的受支持形式并重试。",
       "WoS rejected the query syntax; generated a broader replacement query.": "WoS 拒绝了检索式语法；已生成更宽的替代检索式。",
+      "Candidate ledger": "候选账本",
+      "Ledger details retained": "保留的账本明细",
+      "Uncertain candidates": "待定候选",
+      "Selected for LLM": "送入 LLM",
+      "Final output candidates": "最终输出候选",
+      "Truncated before LLM": "LLM 前截断",
+      "Search loop audit": "检索循环审计",
+      "Ranking recovery audit": "排序恢复审计",
+      "Source recovery": "数据源恢复",
+      "Ranking recovery": "排序恢复",
+      "Citation recovery": "引用扩展恢复",
+      "Citation frontier": "引用前沿",
+      "Frontier stop reason": "前沿停止原因",
+      "Loop decisions": "循环决策",
+      "Candidate queue": "候选队列",
+      "Duplicate candidates": "重复候选",
     },
     status: {
       processing: "处理中",
@@ -334,14 +409,32 @@ const runtimeTranslations = {
       narrow: "收窄",
       accept: "接受",
       accept_low: "接受偏少结果",
-      accept_high: "接受偏多结果",
+      accept_high: "有界接受宽结果",
+      accept_pool: "接受候选池",
       empty: "无结果",
+      selected_for_llm: "送入 LLM",
+      truncated_before_llm: "LLM 前截断",
+      llm_scored: "LLM 已评分",
+      final_output: "最终输出",
+      completed: "完成",
+      complete: "完成",
+      portfolio: "补充视角",
+      selected: "已选择",
+      reserve: "候补",
+      skipped_budget: "预算跳过",
+      skipped_duplicate: "重复跳过",
+      failed: "失败",
+      low_yield: "低收益停止",
+      max_records: "达到候选上限",
+      request_budget: "达到请求预算",
     },
     lane: {
       relevance: "相关性",
+      semantic: "语义",
       impact: "影响力",
       recent: "近期文献",
       local_quality: "本地质量",
+      citation_expansion: "引用扩展",
     },
   },
 };
@@ -425,9 +518,18 @@ const sourceMetaLabels = {
   crossref: "Crossref email is optional but recommended in Advanced settings.",
   wos: "WoS requires an API key in Advanced settings.",
 };
+const searchBudgetHelpText = {
+  fast: "Fewest requests for faster searches.",
+  medium: "Balanced recall, ranking depth, and API use. Recommended.",
+  high: "Wider recall and deeper citation traversal; takes longer.",
+  max: "Largest candidate and ranking budget; intended for difficult searches.",
+};
 
 let activeLanguage = loadLanguage();
 let workflowState = createWorkflowState();
+let disclosureState = createDisclosureState();
+let logPanelExpanded = false;
+let logHasError = false;
 let latestPayload = null;
 let latestResult = null;
 let latestError = "";
@@ -449,6 +551,8 @@ let historyLoading = false;
 let historyError = "";
 let activeSearchController = null;
 let activeSearchToken = 0;
+let activeBackendRunId = "";
+let pendingResumeRunId = "";
 let latestStreamHeartbeatLogAt = 0;
 let disciplineOptions = [];
 let sourceFilterDefinitions = {};
@@ -475,6 +579,10 @@ function translatedText(text) {
   return translations.zh[value] || value;
 }
 
+function localizedText(englishText, chineseText) {
+  return activeLanguage === "zh" ? chineseText : englishText;
+}
+
 function translatedRuntimeText(text) {
   const value = String(text ?? "");
   if (activeLanguage !== "zh" || !value) {
@@ -498,6 +606,11 @@ function translatedRuntimeText(text) {
     [/^Traversing references and citing works for (\d+) seed papers\.$/, (_, count) => `正在遍历 ${count} 篇种子论文的参考文献和施引文献。`],
     [/^Citation traversal failed: (.+)$/, (_, reason) => `引用遍历失败：${reason}`],
     [/^Added (\d+) citation-neighbor candidates; candidate pool=(\d+)\.$/, (_, added, total) => `新增 ${added} 个引用邻近候选；候选池共 ${total} 个。`],
+    [/^Re-ranking the complete candidate pool after citation expansion with local BM25, sparse hashing similarity, and RRF\.$/, () => "引用扩展完成后，正在使用本地 BM25、稀疏哈希相似度和 RRF 对完整候选池重新排序。"],
+    [/^Re-fused (\d+) candidates after citation expansion; citation candidates=(\d+)\.$/, (_, total, citations) => `引用扩展后已重新融合 ${total} 个候选，其中引用候选 ${citations} 个。`],
+    [/^Query view (.+) completed; returned (\d+) and added (\d+) unique candidates\.$/, (_, view, returned, added) => `查询视图 ${view} 已完成；返回 ${returned} 条并新增 ${added} 个去重候选。`],
+    [/^Query view (.+) skipped_budget; returned (\d+) and added (\d+) unique candidates\.$/, (_, view) => `查询视图 ${view} 因达到请求预算而保留未执行。`],
+    [/^Query view (.+) skipped_duplicate; returned (\d+) and added (\d+) unique candidates\.$/, (_, view) => `查询视图 ${view} 与已执行检索式重复，已跳过。`],
     [/^Scoring (\d+) candidates in one LLM batch\.$/, (_, count) => `正在用 1 个 LLM 批次为 ${count} 个候选评分。`],
     [/^Scored (\d+) candidates\.$/, (_, count) => `已为 ${count} 个候选评分。`],
     [/^Scoring (\d+) candidates in (\d+) LLM batches; concurrency=(\d+)\.$/, (_, count, batches, concurrency) => `正在用 ${batches} 个 LLM 批次为 ${count} 个候选评分；并发=${concurrency}。`],
@@ -544,7 +657,7 @@ function translatedLaneList(value) {
 function translatedActionText(value) {
   const text = String(value || "");
   if (activeLanguage !== "zh") {
-    return text;
+    return text === "accept_high" ? "accept bounded broad pool" : text;
   }
   return runtimeTranslations.zh.action[text] || translatedRuntimeText(text);
 }
@@ -652,15 +765,31 @@ function setLanguage(language) {
   if (window.localStorage) {
     window.localStorage.setItem(languageStorageKey, activeLanguage);
   }
-  applyLanguage();
-  if (activeView === "history") {
-    setTranslatedText(stepLabel, "History");
-  } else {
-    renderStepLabel();
-  }
   updateSourceSummary();
   updateCredentialPlaceholders();
   updateDisciplineSummary();
+  updateSearchBudgetHelp();
+  renderWorkflow();
+  applyLanguage();
+}
+
+function selectedSearchBudget() {
+  const selected = searchBudgetInputs.find((input) => input.checked);
+  return selected ? selected.value : "fast";
+}
+
+function setSearchBudget(value) {
+  const normalized = ["fast", "medium", "high", "max"].includes(String(value || "").toLowerCase())
+    ? String(value).toLowerCase()
+    : "fast";
+  searchBudgetInputs.forEach((input) => {
+    input.checked = input.value === normalized;
+  });
+  updateSearchBudgetHelp();
+}
+
+function updateSearchBudgetHelp() {
+  setTranslatedText(searchBudgetHelp, searchBudgetHelpText[selectedSearchBudget()] || searchBudgetHelpText.fast);
 }
 
 function initLanguageControls() {
@@ -732,6 +861,38 @@ function log(message) {
   logOutput.textContent += `${nowStamp()}  ${message}\n`;
   logOutput.scrollTop = logOutput.scrollHeight;
   updateExportButtons();
+}
+
+function renderLogPanelState() {
+  if (!logPanel || !rightPane || !logToggle) {
+    return;
+  }
+  logPanel.classList.toggle("is-collapsed", !logPanelExpanded);
+  rightPane.classList.toggle("log-collapsed", !logPanelExpanded);
+  logToggle.setAttribute("aria-expanded", logPanelExpanded ? "true" : "false");
+  setTranslatedAttribute(logToggle, "aria-label", logPanelExpanded ? "Collapse system log" : "Expand system log");
+  if (logErrorBadge) {
+    logErrorBadge.classList.toggle("is-hidden", !logHasError);
+  }
+}
+
+function setLogPanelExpanded(expanded, { error = false } = {}) {
+  logPanelExpanded = Boolean(expanded);
+  if (error) {
+    logHasError = true;
+  }
+  renderLogPanelState();
+  if (logPanelExpanded && logOutput) {
+    requestAnimationFrame(() => {
+      logOutput.scrollTop = logOutput.scrollHeight;
+    });
+  }
+}
+
+function resetLogPanel() {
+  logPanelExpanded = false;
+  logHasError = false;
+  renderLogPanelState();
 }
 
 function setBusy(isBusy) {
@@ -980,6 +1141,7 @@ async function loadServerDefaults() {
     if (data.data_source) {
       dataSourceSelect.value = data.data_source;
     }
+    setSearchBudget(data.search_budget || "fast");
     if (data.llm_provider && providerDefaults[data.llm_provider]) {
       providerSelect.value = data.llm_provider;
     }
@@ -997,9 +1159,6 @@ async function loadServerDefaults() {
     }
     if (Number.isFinite(Number(data.target_max))) {
       document.getElementById("targetMax").value = Number(data.target_max);
-    }
-    if (Number.isFinite(Number(data.max_iterations))) {
-      document.getElementById("maxIterations").value = Number(data.max_iterations);
     }
     if (Array.isArray(data.discipline_fields)) {
       setSelectedDisciplineFields(data.discipline_fields);
@@ -1169,9 +1328,14 @@ function updateExportButtons() {
   if (exportLogButton) {
     exportLogButton.disabled = !logOutput.textContent.trim();
   }
-  if (exportCsvButton) {
-    exportCsvButton.disabled = getExportPapers().length === 0;
-  }
+  document.querySelectorAll("[data-action='export-results-csv']").forEach((button) => {
+    button.disabled = getExportPapers().length === 0;
+  });
+}
+
+function exportResultsCsv() {
+  const filename = `${filenamePart(exportQuestionTheme())}-${dateStamp()}-papers.csv`;
+  downloadText(filename, papersToCsv(getExportPapers()), "text/csv;charset=utf-8");
 }
 
 function filenamePart(value, fallback = "literature-search") {
@@ -1270,28 +1434,83 @@ function clearValidationState() {
   }
 }
 
+function createDisclosureState() {
+  return {
+    stages: { query: true, search: false, ranking: false, results: false },
+    stageManual: {},
+    sections: {},
+  };
+}
+
+function resetDisclosureState() {
+  disclosureState = createDisclosureState();
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function isSectionExpanded(key, defaultExpanded = false) {
+  return hasOwn(disclosureState.sections, key) ? Boolean(disclosureState.sections[key]) : Boolean(defaultExpanded);
+}
+
+function syncStageDisclosure(stageKey, status) {
+  const normalizedStatus = String(status || "").toUpperCase();
+  if (normalizedStatus === "ERROR") {
+    stageOrder.forEach((key) => {
+      if (!hasOwn(disclosureState.stageManual, key) || key === stageKey) {
+        disclosureState.stages[key] = key === stageKey;
+      }
+    });
+    return;
+  }
+  if (normalizedStatus !== "PROCESSING") {
+    return;
+  }
+  stageOrder.forEach((key) => {
+    if (!hasOwn(disclosureState.stageManual, key)) {
+      disclosureState.stages[key] = key === stageKey;
+    }
+  });
+}
+
+function showFinalStage() {
+  stageOrder.forEach((key) => {
+    if (!hasOwn(disclosureState.stageManual, key)) {
+      disclosureState.stages[key] = key === "results";
+    }
+  });
+}
+
 function createWorkflowState() {
   return {
     query: {
       number: "01",
-      title: "Query Generation",
+      title: "Search Intent & Query",
       status: "WAITING",
       description: "LLM will translate the research question into a source-specific search query.",
       intent: "",
+      searchPlan: null,
       source: "",
       query: "",
-      body: emptyState("No query generated yet."),
+      bodyOverride: "",
     },
     search: {
       number: "02",
-      title: "Source Request",
+      title: "Search Iteration",
       status: "WAITING",
       description: "The selected database will be queried and adjusted by result counts.",
-      body: emptyState("No source request has run."),
+      history: [],
+      finalQuery: "",
+      preview: [],
+      totalRecords: 0,
+      auditData: null,
+      queryPortfolio: [],
+      bodyOverride: "",
     },
     ranking: {
       number: "03",
-      title: "Metadata Ranking",
+      title: "Candidate Retrieval & Ranking",
       status: "WAITING",
       description: "Returned records will be ranked with available metadata and abstracts when present.",
       candidateCount: 0,
@@ -1299,27 +1518,150 @@ function createWorkflowState() {
       totalRecords: 0,
       topScore: 0,
       rankingSteps: [],
-      body: emptyState("No ranking request has run."),
+      auditData: null,
+      bodyOverride: "",
     },
     results: {
       number: "04",
       title: "Literature Results",
       status: "WAITING",
       description: "Final ranked papers will appear here.",
-      body: emptyState("Run a search to populate the result list."),
+      totalRecords: 0,
+      outputCount: 0,
+      highScoreCount: 0,
+      topScore: 0,
+      candidatePool: 0,
+      citationAdds: 0,
+      bodyOverride: "",
     },
   };
 }
 
-function workflowCard(number, title, status, description, body, extraClass = "") {
+function compactText(value, limit = 150) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function intentSummary(item) {
+  if (item.searchPlan && item.searchPlan.intent) {
+    return String(item.searchPlan.intent);
+  }
+  const raw = String(item.intent || "").trim();
+  const match = raw.match(/^intent:\s*(.+)$/im);
+  return match ? match[1].trim() : (raw.split(/\r?\n/).find(Boolean) || "");
+}
+
+function mainHistoryRows(history) {
+  return (Array.isArray(history) ? history : []).filter((row) => String(row.action || "") !== "portfolio");
+}
+
+function finalHistoryRow(history) {
+  const rows = mainHistoryRows(history);
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
+function iterationCount(history) {
+  return mainHistoryRows(history).reduce((maximum, row) => Math.max(maximum, Number(row.iteration || 0)), 0);
+}
+
+function rankingStepById(item, ids) {
+  const candidates = new Set(Array.isArray(ids) ? ids : [ids]);
+  return [...(item.rankingSteps || [])].reverse().find((step) => candidates.has(String(step.id || ""))) || null;
+}
+
+function activeRankingStep(item) {
+  return [...(item.rankingSteps || [])].reverse().find((step) => String(step.status || "").toLowerCase() === "processing") || null;
+}
+
+function rankingLedgerSummary(item) {
+  const state = (item.auditData && item.auditData.search_state) || {};
+  const queue = state.candidate_queue || {};
+  const ledgerSummary = queue.ledger_summary || {};
+  return ledgerSummary.lifecycle_candidate_counts || {};
+}
+
+function stageSummary(key, item) {
+  if (item.bodyOverride && item.status === "ERROR") {
+    return item.description;
+  }
+  if (key === "query") {
+    const intent = intentSummary(item);
+    if (item.query) {
+      const source = compactSourceLabels[item.source] || item.source || getValue("dataSource");
+      return `${source} · ${compactText(item.query)}`;
+    }
+    return intent || item.description;
+  }
+  if (key === "search") {
+    const rounds = iterationCount(item.history);
+    const finalRow = finalHistoryRow(item.history);
+    if (item.totalRecords || rounds || finalRow) {
+      const action = finalRow ? translatedActionText(finalRow.action || "") : "";
+      return localizedText(
+        `${item.totalRecords || 0} hits · ${rounds} iteration${rounds === 1 ? "" : "s"}${action ? ` · ${action}` : ""}`,
+        `${item.totalRecords || 0} 条命中 · ${rounds} 轮${action ? ` · ${action}` : ""}`,
+      );
+    }
+    return item.description;
+  }
+  if (key === "ranking") {
+    const active = activeRankingStep(item);
+    if (active) {
+      const progress = Number(active.total || 0) > 0 ? ` ${Number(active.current || 0)}/${Number(active.total || 0)}` : "";
+      return `${translatedRuntimeText(active.title || active.id || "Ranking step")}${progress}`;
+    }
+    const lifecycle = rankingLedgerSummary(item);
+    const selected = Number(lifecycle.selected_for_llm || 0) || Number((rankingStepById(item, ["llm_reranking", "llm_ranking", "result_ranking"]) || {}).candidate_count || 0);
+    if (item.candidateCount || selected || item.rankedCount) {
+      return localizedText(
+        `${item.candidateCount || 0} candidates · ${selected} sent to LLM · ${item.rankedCount || 0} output`,
+        `${item.candidateCount || 0} 个候选 · ${selected} 个送入 LLM · ${item.rankedCount || 0} 个输出`,
+      );
+    }
+    return item.description;
+  }
+  if (key === "results" && ["READY", "EMPTY"].includes(item.status)) {
+    return localizedText(
+      `${item.outputCount || 0} ranked papers · ${item.highScoreCount || 0} scored 5 or higher`,
+      `${item.outputCount || 0} 篇排序文献 · ${item.highScoreCount || 0} 篇达到 5 分`,
+    );
+  }
+  return item.description;
+}
+
+function renderStageBody(key, item) {
+  if (item.bodyOverride) {
+    return item.bodyOverride;
+  }
+  if (key === "query") {
+    return renderQueryStage(item);
+  }
+  if (key === "search") {
+    return renderSearchStage(item);
+  }
+  if (key === "ranking") {
+    return renderRankingStage(item);
+  }
+  return renderResultsStage(item);
+}
+
+function workflowCard(key, item, extraClass = "") {
+  const expanded = Boolean(disclosureState.stages[key]);
+  const statusClass = item.status.toLowerCase().replaceAll(" ", "-");
+  const actionLabel = expanded ? "Hide stage details" : "View stage details";
   return `
-    <article class="workflow-card ${extraClass}">
-      <div class="card-topline">
-        <div class="card-title"><span>${number}</span><h3>${escapeHtml(title)}</h3></div>
-        <span class="status-badge ${status.toLowerCase().replaceAll(" ", "-")}">${escapeHtml(status)}</span>
+    <article id="workflow-card-${escapeHtml(key)}" class="workflow-card ${expanded ? "is-expanded" : "is-collapsed"} ${extraClass}" data-stage-card="${escapeHtml(key)}">
+      <button class="workflow-card-toggle" type="button" data-stage-toggle="${escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="workflow-stage-${escapeHtml(key)}" aria-label="${escapeHtml(translatedText(actionLabel))}">
+        <span class="card-title"><span>${escapeHtml(item.number)}</span><h3>${escapeHtml(translatedText(item.title))}</h3></span>
+        <span class="card-status-group">
+          <span class="status-badge ${escapeHtml(statusClass)}">${escapeHtml(translatedText(item.status))}</span>
+          <span class="disclosure-chevron" aria-hidden="true"></span>
+        </span>
+      </button>
+      <p class="card-description">${escapeHtml(stageSummary(key, item))}</p>
+      <div id="workflow-stage-${escapeHtml(key)}" class="workflow-card-body" ${expanded ? "" : "hidden"}>
+        ${renderStageBody(key, item)}
       </div>
-      <p class="card-description">${escapeHtml(description)}</p>
-      ${body}
     </article>
   `;
 }
@@ -1348,7 +1690,7 @@ function renderWorkflow() {
   workflow.innerHTML = stageOrder.map((key) => {
     const item = workflowState[key];
     const extra = item.status === "PROCESSING" ? "processing-card" : item.status === "ERROR" ? "error-card" : "";
-    return workflowCard(item.number, item.title, item.status, item.description, item.body, extra);
+    return workflowCard(key, item, extra);
   }).join("");
 
   applyLanguage(workflow);
@@ -1358,11 +1700,18 @@ function renderWorkflow() {
 function renderStepLabel() {
   const activeIndex = stageOrder.findIndex((key) => workflowState[key].status === "PROCESSING");
   if (activeIndex >= 0) {
-    stepLabel.textContent = activeLanguage === "zh" ? `步骤 ${activeIndex + 1}/4` : `Step ${activeIndex + 1}/4`;
+    const key = stageOrder[activeIndex];
+    const activeStep = key === "ranking" ? activeRankingStep(workflowState.ranking) : null;
+    const detail = activeStep
+      ? `${translatedRuntimeText(activeStep.title || activeStep.id || "Ranking step")}${Number(activeStep.total || 0) > 0 ? ` ${Number(activeStep.current || 0)}/${Number(activeStep.total || 0)}` : ""}`
+      : translatedText(workflowState[key].title);
+    stepLabel.textContent = `${activeIndex + 1}/4 · ${detail}`;
   } else if (workflowState.results.status === "READY" || workflowState.results.status === "EMPTY") {
-    stepLabel.textContent = activeLanguage === "zh" ? "步骤 4/4" : "Step 4/4";
+    stepLabel.textContent = activeLanguage === "zh"
+      ? `4/4 · ${workflowState.results.outputCount || 0} 条结果`
+      : `4/4 · ${workflowState.results.outputCount || 0} results`;
   } else {
-    stepLabel.textContent = activeLanguage === "zh" ? "步骤 0/4" : "Step 0/4";
+    stepLabel.textContent = "0/4";
   }
 }
 
@@ -1388,23 +1737,101 @@ function chipList(items) {
   return `<div class="chip-list">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
 }
 
+function renderDisclosureSection(key, title, body, { defaultExpanded = false, badge = "", className = "" } = {}) {
+  const expanded = isSectionExpanded(key, defaultExpanded);
+  const actionLabel = expanded ? "Hide details" : "View details";
+  return `
+    <section class="disclosure-section ${escapeHtml(className)} ${expanded ? "is-expanded" : "is-collapsed"}">
+      <button class="disclosure-toggle" type="button" data-section-toggle="${escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="disclosure-${escapeHtml(key)}" aria-label="${escapeHtml(translatedText(actionLabel))}">
+        <span>${escapeHtml(translatedText(title))}</span>
+        <span class="disclosure-toggle-meta">
+          ${badge ? `<span class="disclosure-badge">${escapeHtml(badge)}</span>` : ""}
+          <span class="disclosure-chevron" aria-hidden="true"></span>
+        </span>
+      </button>
+      <div id="disclosure-${escapeHtml(key)}" class="disclosure-body" ${expanded ? "" : "hidden"}>${body}</div>
+    </section>
+  `;
+}
+
+function renderPlanValues(label, values) {
+  const normalized = Array.isArray(values) ? values.filter(Boolean) : [];
+  if (!normalized.length) {
+    return "";
+  }
+  return `
+    <div class="intent-detail-group">
+      <strong>${escapeHtml(translatedText(label))}</strong>
+      ${chipList(normalized)}
+    </div>
+  `;
+}
+
+function renderQueryViews(views) {
+  if (!Array.isArray(views) || !views.length) {
+    return "";
+  }
+  return `
+    <div class="intent-detail-group">
+      <strong>${escapeHtml(translatedText("Query views"))}</strong>
+      <div class="query-view-list">
+        ${views.map((view) => `
+          <div class="query-view-row">
+            <span>${escapeHtml(view.view_id || view.view_type || "query view")}</span>
+            <small>${escapeHtml(view.view_type || "")}</small>
+            ${view.purpose ? `<p>${escapeHtml(view.purpose)}</p>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderQueryStage(item) {
-  const intentBlock = item.intent ? `
+  if (!item.intent && !item.searchPlan && !item.query) {
+    return item.status === "PROCESSING"
+      ? emptyState("Calling the LLM to generate a source-specific query.")
+      : emptyState("No query generated yet.");
+  }
+  const plan = item.searchPlan && typeof item.searchPlan === "object" ? item.searchPlan : {};
+  const summary = intentSummary(item);
+  const intentBlock = summary ? `
     <div class="intent-audit">
       <span>${escapeHtml(translatedRuntimeText("Interpreted intent"))}</span>
-      <p>${escapeHtml(item.intent)}</p>
+      <p>${escapeHtml(summary)}</p>
     </div>
   ` : "";
-  const queryItems = [
-    sourceLabels[item.source] || item.source || getValue("dataSource"),
-    item.query || "",
-  ].filter(Boolean);
-  const queryBlock = queryItems.length ? chipList(queryItems) : emptyState("Calling the LLM to generate a source-specific query.");
-  return `${intentBlock}${queryBlock}`;
+  const concepts = renderPlanValues("Core concepts", plan.core_concepts);
+  const detailBody = [
+    plan.question_type ? `<div class="intent-detail-line"><strong>${escapeHtml(translatedText("Question type"))}</strong><span>${escapeHtml(plan.question_type)}</span></div>` : "",
+    renderPlanValues("Likely synonyms", plan.likely_synonyms),
+    renderPlanValues("Adjacent concepts", plan.adjacent_concepts),
+    renderPlanValues("Boundaries", plan.boundaries),
+    renderPlanValues("Ambiguities", plan.ambiguities),
+    plan.adjustment_strategy ? `<div class="intent-detail-line"><strong>${escapeHtml(translatedText("Adjustment strategy"))}</strong><span>${escapeHtml(plan.adjustment_strategy)}</span></div>` : "",
+    renderQueryViews(plan.query_views),
+  ].filter(Boolean).join("");
+  const rawIntentFallback = !item.searchPlan && item.intent
+    ? `<pre class="intent-raw">${escapeHtml(item.intent)}</pre>`
+    : "";
+  const details = detailBody
+    ? renderDisclosureSection("intent-analysis", "Full intent analysis", detailBody)
+    : rawIntentFallback
+      ? renderDisclosureSection("intent-analysis", "Full intent analysis", rawIntentFallback)
+      : renderDisclosureSection("intent-analysis", "Full intent analysis", emptyState("No structured intent details available."));
+  const source = sourceLabels[item.source] || item.source || getValue("dataSource");
+  const queryBlock = item.query ? `
+    <div class="final-query query-output">
+      <span>${escapeHtml(translatedText("Current query"))}</span>
+      <small>${escapeHtml(translatedText(source))}</small>
+      <code>${escapeHtml(item.query)}</code>
+    </div>
+  ` : emptyState("Calling the LLM to generate a source-specific query.");
+  return `${intentBlock}${concepts}${details}${queryBlock}`;
 }
 
 function metricRow(items) {
-  return `<div class="metric-row">${items.map((item) => `
+  return `<div class="metric-row metric-count-${Math.min(4, items.length)}">${items.map((item) => `
     <div>
       <strong>${escapeHtml(item.value)}</strong>
       <span>${escapeHtml(translatedText(item.label))}</span>
@@ -1412,75 +1839,289 @@ function metricRow(items) {
   `).join("")}</div>`;
 }
 
+function renderRankingStepRow(step, index, { current = false } = {}) {
+  const total = Number(step.total || 0);
+  const completed = Number(step.current || 0);
+  const status = String(step.status || "processing").toLowerCase();
+  const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0;
+  const hasProgress = total > 0 && ["processing", "complete"].includes(status);
+  const title = translatedRuntimeText(step.title || step.id || "Ranking step");
+  const detail = translatedRuntimeText(step.detail || "");
+  const metaParts = [
+    total > 0 ? `${completed}/${total}` : "",
+    step.concurrency ? localizedText(`concurrency ${step.concurrency}`, `并发 ${step.concurrency}`) : "",
+    step.candidate_count ? localizedText(`${step.candidate_count} candidates`, `${step.candidate_count} 个候选`) : "",
+  ].filter(Boolean);
+  const key = `ranking-step-${String(step.id || index).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const expanded = isSectionExpanded(key, current || status === "error");
+  return `
+    <section class="ranking-step-row ${escapeHtml(status)} ${current ? "current" : ""} ${expanded ? "is-expanded" : "is-collapsed"}">
+      <button class="ranking-step-toggle" type="button" data-section-toggle="${escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="disclosure-${escapeHtml(key)}">
+        <span class="ranking-step-name">${escapeHtml(title)}</span>
+        <span class="ranking-step-summary">
+          ${metaParts.length ? `<small>${escapeHtml(metaParts.join(" · "))}</small>` : ""}
+          <span class="action-pill ${escapeHtml(status)}">${escapeHtml(translatedStatusText(status))}</span>
+          <span class="disclosure-chevron" aria-hidden="true"></span>
+        </span>
+      </button>
+      <div id="disclosure-${escapeHtml(key)}" class="ranking-step-body" ${expanded ? "" : "hidden"}>
+        ${detail ? `<p>${escapeHtml(detail)}</p>` : ""}
+        ${hasProgress ? `<div class="progress-bar" aria-label="${escapeHtml(`${title} ${translatedRuntimeText("progress")}`)}"><span style="width: ${percent}%"></span></div>` : ""}
+      </div>
+    </section>
+  `;
+}
+
 function renderRankingStage(item) {
-  const metrics = item.status === "COMPLETE" ? metricRow([
-    { value: item.totalRecords || 0, label: "TOTAL RECORDS" },
-    { value: item.rankedCount || 0, label: "RANKED RECORDS" },
-    { value: item.topScore || 0, label: "TOP SCORE" },
-  ]) : metricRow([
-    { value: item.candidateCount || item.rankedCount || item.totalRecords || 0, label: item.status === "PROCESSING" ? "CANDIDATES" : "RANKED RECORDS" },
-    { value: item.status || "WAITING", label: "RANKING STATUS" },
-    { value: getValue("dataSource").toUpperCase(), label: "SOURCE" },
+  if (item.status === "WAITING" && (!item.rankingSteps || !item.rankingSteps.length)) {
+    return emptyState("No ranking request has run.");
+  }
+  const lifecycle = rankingLedgerSummary(item);
+  const fusedStep = rankingStepById(item, ["citation_refusion", "rrf_fusion", "multi_lane_retrieval"]);
+  const llmStep = rankingStepById(item, ["llm_reranking", "llm_ranking", "result_ranking"]);
+  const fusedCandidates = Number((fusedStep || {}).candidate_count || 0) || Number(item.candidateCount || 0);
+  const selectedForLlm = Number(lifecycle.selected_for_llm || 0) || Number((llmStep || {}).candidate_count || 0);
+  const metrics = metricRow([
+    { value: item.totalRecords || 0, label: "SOURCE HITS" },
+    { value: fusedCandidates, label: "FUSED CANDIDATES" },
+    { value: selectedForLlm, label: "SELECTED FOR LLM" },
+    { value: item.rankedCount || 0, label: "FINAL OUTPUT" },
   ]);
   if (!item.rankingSteps || item.rankingSteps.length === 0) {
     return `${metrics}${emptyState("Waiting for ranking progress.")}`;
   }
-  const rows = item.rankingSteps.map((step) => {
-    const total = Number(step.total || 0);
-    const current = Number(step.current || 0);
-    const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
-    const hasProgress = total > 0 && ["processing", "complete"].includes(String(step.status || "").toLowerCase());
-    const stepTitle = translatedRuntimeText(step.title || step.id || "Ranking step");
-    const stepStatus = translatedStatusText(step.status || "processing");
-    const stepDetail = translatedRuntimeText(step.detail || "");
-    const meta = [
-      total > 0 ? `${current}/${total}` : "",
-      step.concurrency ? (activeLanguage === "zh" ? `并发 ${step.concurrency}` : `concurrency ${step.concurrency}`) : "",
-      step.candidate_count ? (activeLanguage === "zh" ? `${step.candidate_count} 个候选` : `${step.candidate_count} candidates`) : "",
-    ].filter(Boolean).join(" · ");
-    return `
-      <section class="ranking-step-row ${escapeHtml(String(step.status || "processing").toLowerCase())}">
-        <div class="ranking-step-topline">
-          <strong>${escapeHtml(stepTitle)}</strong>
-          <span class="action-pill ${escapeHtml(String(step.status || "processing").toLowerCase())}">${escapeHtml(stepStatus)}</span>
-        </div>
-        ${stepDetail ? `<p>${escapeHtml(stepDetail)}</p>` : ""}
-        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
-        ${hasProgress ? `<div class="progress-bar" aria-label="${escapeHtml(`${stepTitle} ${translatedRuntimeText("progress")}`)}"><span style="width: ${percent}%"></span></div>` : ""}
-      </section>
-    `;
-  }).join("");
-  return `${metrics}<div class="ranking-step-list">${rows}</div>`;
+  const currentStep = activeRankingStep(item);
+  const currentOperation = currentStep ? `
+    <div class="current-operation">
+      <span>${escapeHtml(translatedText("Current operation"))}</span>
+      ${renderRankingStepRow(currentStep, item.rankingSteps.indexOf(currentStep), { current: true })}
+    </div>
+  ` : "";
+  const rows = item.rankingSteps
+    .filter((step) => step !== currentStep)
+    .map((step, index) => renderRankingStepRow(step, index))
+    .join("");
+  const audit = item.auditData ? renderSearchLoopAudit(item.auditData, "ranking") : "";
+  return `${metrics}${currentOperation}${rows ? `<div class="ranking-step-list">${rows}</div>` : ""}${audit}`;
 }
 
-function renderHistory(history, finalQuery, preview) {
-  const rows = history && history.length ? `
+function compactActionSummary(items, fallback = "none") {
+  const actions = (items || [])
+    .map((item) => item && (item.action || item.status || item.error_type))
+    .filter(Boolean)
+    .map((action) => translatedActionText(action));
+  if (!actions.length) {
+    return translatedRuntimeText(fallback);
+  }
+  return [...new Set(actions)].slice(0, 8).join(" · ");
+}
+
+function recoveryIssueCount(state) {
+  const ignored = new Set(["", "none", "completed", "complete"]);
+  return [
+    ...(state.recovery_decisions || []),
+    ...(state.ranking_recovery_decisions || []),
+    ...(state.citation_recovery_decisions || []),
+  ].filter((item) => !ignored.has(String(item && (item.action || item.status || item.error_type) || "").toLowerCase())).length;
+}
+
+function renderSearchLoopAudit(data, mode = "search") {
+  const loop = data.search_loop || {};
+  const state = data.search_state || {};
+  const queue = state.candidate_queue || {};
+  const queueKeys = Array.isArray(queue.keys) ? queue.keys : [];
+  const ledger = queue.ledger && typeof queue.ledger === "object" ? queue.ledger : {};
+  const ledgerSummary = queue.ledger_summary && typeof queue.ledger_summary === "object" ? queue.ledger_summary : {};
+  const selectorCounts = ledgerSummary.selector_counts && typeof ledgerSummary.selector_counts === "object"
+    ? ledgerSummary.selector_counts
+    : {};
+  const lifecycleCounts = ledgerSummary.lifecycle_candidate_counts && typeof ledgerSummary.lifecycle_candidate_counts === "object"
+    ? ledgerSummary.lifecycle_candidate_counts
+    : {};
+  const rankingGateCounts = ledgerSummary.ranking_gate_counts && typeof ledgerSummary.ranking_gate_counts === "object"
+    ? ledgerSummary.ranking_gate_counts
+    : {};
+  const ledgerTotal = Number(ledgerSummary.total_candidates ?? Object.keys(ledger).length) || queueKeys.length;
+  const ledgerRetained = Number(ledgerSummary.serialized_candidates ?? Object.keys(ledger).length) || 0;
+  const uncertainCandidates = Number(selectorCounts.uncertain || 0);
+  const selectedForLlm = Number(lifecycleCounts.selected_for_llm || 0);
+  const finalOutputCandidates = Number(lifecycleCounts.final_output || 0);
+  const observations = Array.isArray(state.observations) ? state.observations : [];
+  const decisions = Array.isArray(state.decisions) ? state.decisions : [];
+  const originCounts = queue.origin_counts && typeof queue.origin_counts === "object" ? queue.origin_counts : {};
+  const originSummary = Object.entries(originCounts)
+    .map(([origin, count]) => `${translatedRuntimeText(origin)} ${count}`)
+    .join(" · ");
+  const recoveryRows = [
+    ["Source recovery", compactActionSummary(state.recovery_decisions)],
+    ["Ranking recovery", compactActionSummary(state.ranking_recovery_decisions)],
+    ["Citation recovery", compactActionSummary(state.citation_recovery_decisions)],
+  ];
+  const metrics = mode === "ranking"
+    ? metricRow([
+      { value: ledgerTotal, label: "LEDGER CANDIDATES" },
+      { value: selectedForLlm, label: "SELECTED FOR LLM" },
+      { value: finalOutputCandidates, label: "FINAL OUTPUT" },
+    ])
+    : metricRow([
+      { value: loop.backend_used || loop.backend_requested || "unknown", label: "LOOP BACKEND" },
+      { value: observations.length, label: "OBSERVATIONS" },
+      { value: decisions.length, label: "DECISIONS" },
+    ]);
+  const detailLines = mode === "ranking"
+    ? recoveryRows.map(([label, value]) => `${translatedRuntimeText(label)}: ${value}`)
+    : [
+      `${translatedRuntimeText("Loop decisions")}: ${compactActionSummary(decisions)}`,
+      `${translatedRuntimeText("Candidate queue")}: ${queueKeys.length}${originSummary ? ` (${originSummary})` : ""}`,
+      `${translatedRuntimeText("Duplicate candidates")}: ${queue.duplicate_count || 0}`,
+      `${translatedRuntimeText("Candidate ledger")}: ${ledgerTotal}`,
+      `${translatedRuntimeText("Ledger details retained")}: ${ledgerRetained}`,
+      `${translatedRuntimeText("Uncertain candidates")}: ${uncertainCandidates}`,
+    ];
+  if (mode === "ranking") {
+    detailLines.push(
+      `${translatedRuntimeText("Selected for LLM")}: ${selectedForLlm}`,
+      `${translatedRuntimeText("Final output candidates")}: ${finalOutputCandidates}`,
+      `${translatedRuntimeText("Truncated before LLM")}: ${Number(rankingGateCounts.truncated || lifecycleCounts.truncated_before_llm || 0)}`,
+      `${translatedRuntimeText("Ledger details retained")}: ${ledgerRetained}/${ledgerTotal}`,
+    );
+  }
+  const content = `
+    <div class="query-rationale loop-audit">
+      ${metrics}
+      <p>${escapeHtml(detailLines.join(" | "))}</p>
+    </div>
+  `;
+  const issueCount = recoveryIssueCount(state);
+  const title = mode === "ranking" ? "Recovery and candidate audit" : "Technical audit";
+  const badge = issueCount
+    ? localizedText(`${issueCount} recovered issue${issueCount === 1 ? "" : "s"}`, `${issueCount} 个已恢复问题`)
+    : "";
+  return renderDisclosureSection(`${mode}-audit`, title, content, { badge, className: "audit-disclosure" });
+}
+
+function renderIterationRows(history, stageStatus) {
+  const rows = mainHistoryRows(history);
+  if (!rows.length) {
+    return emptyState("Waiting for the first source response.");
+  }
+  const lastIndex = rows.length - 1;
+  return `
     <div class="iteration-list">
-      ${history.map((row) => `
-        <section class="iteration-row">
+      ${rows.map((row, index) => {
+        const key = `iteration-${index}-${String(row.action || "step").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        const normalizedStageStatus = String(stageStatus || "").toUpperCase();
+        const action = String(row.action || "").toLowerCase();
+        const isAccepted = action === "accept" || action === "accept_low" || action === "accept_high" || action === "accept_pool";
+        const defaultExpanded = index === lastIndex && (normalizedStageStatus === "PROCESSING" || (normalizedStageStatus === "COMPLETE" && isAccepted));
+        const expanded = isSectionExpanded(key, defaultExpanded);
+        const totalLabel = row.total === null || row.total === undefined
+          ? translatedRuntimeText("No count")
+          : localizedText(`${row.total} records`, `${row.total} 条记录`);
+        return `
+          <section class="iteration-row ${expanded ? "is-expanded" : "is-collapsed"}">
+            <button class="iteration-toggle" type="button" data-section-toggle="${escapeHtml(key)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="disclosure-${escapeHtml(key)}">
+              <span class="iteration-meta">
+                <strong>${activeLanguage === "zh" ? `第 ${escapeHtml(row.iteration)} 轮` : `Iteration ${escapeHtml(row.iteration)}`}</strong>
+                <span class="action-pill ${escapeHtml(row.action)}">${escapeHtml(translatedActionText(row.action))}</span>
+                <span>${escapeHtml(totalLabel)}</span>
+              </span>
+              <span class="disclosure-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="disclosure-${escapeHtml(key)}" class="iteration-body" ${expanded ? "" : "hidden"}>
+              <code>${escapeHtml(row.query)}</code>
+              ${row.message ? `<p>${escapeHtml(translatedRuntimeText(row.message))}</p>` : ""}
+              ${row.rationale ? `<div class="query-rationale"><span>${escapeHtml(translatedRuntimeText("Adjustment rationale"))}</span><p>${escapeHtml(row.rationale)}</p></div>` : ""}
+              ${row.next_query ? `<div class="next-query"><span>${escapeHtml(translatedRuntimeText("Next query"))}</span><code>${escapeHtml(row.next_query)}</code></div>` : ""}
+            </div>
+          </section>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderQueryPortfolio(history, executions = []) {
+  const structuredRows = Array.isArray(executions) ? executions : [];
+  const rows = structuredRows.length
+    ? structuredRows
+    : (Array.isArray(history) ? history : []).filter((row) => String(row.action || "") === "portfolio");
+  if (!rows.length) {
+    return "";
+  }
+  const body = `
+    <div class="portfolio-list">
+      ${rows.map((row) => `
+        <div class="portfolio-row">
           <div class="iteration-meta">
-            <strong>${activeLanguage === "zh" ? `第 ${escapeHtml(row.iteration)} 轮` : `Iteration ${escapeHtml(row.iteration)}`}</strong>
-            <span class="action-pill ${escapeHtml(row.action)}">${escapeHtml(translatedActionText(row.action))}</span>
-            <span>${row.total === null || row.total === undefined ? translatedRuntimeText("No count") : activeLanguage === "zh" ? `${escapeHtml(row.total)} 条记录` : `${escapeHtml(row.total)} records`}</span>
+            <strong>${escapeHtml(row.view_id || row.rationale || translatedText("Query portfolio"))}</strong>
+            <span class="action-pill ${escapeHtml(row.status || row.action || "complete")}">${escapeHtml(translatedActionText(row.status || row.action || "complete"))}</span>
+            ${row.hit_count === null || row.hit_count === undefined
+              ? `<span>${row.total === null || row.total === undefined ? escapeHtml(translatedRuntimeText("No count")) : escapeHtml(localizedText(`${row.total} records`, `${row.total} 条记录`))}</span>`
+              : `<span>${escapeHtml(localizedText(`${row.hit_count} returned`, `返回 ${row.hit_count} 条`))}</span>`}
+            ${row.added_unique === null || row.added_unique === undefined ? "" : `<span>${escapeHtml(localizedText(`${row.added_unique} unique added`, `新增 ${row.added_unique} 个唯一候选`))}</span>`}
           </div>
-          <code>${escapeHtml(row.query)}</code>
-          <p>${escapeHtml(translatedRuntimeText(row.message || ""))}</p>
-          ${row.rationale ? `<div class="query-rationale"><span>${escapeHtml(translatedRuntimeText("Adjustment rationale"))}</span><p>${escapeHtml(row.rationale)}</p></div>` : ""}
-          ${row.next_query ? `<div class="next-query"><span>${escapeHtml(translatedRuntimeText("Next query"))}</span><code>${escapeHtml(row.next_query)}</code></div>` : ""}
-        </section>
+          ${row.query ? `<code>${escapeHtml(row.query)}</code>` : ""}
+          ${row.message ? `<p>${escapeHtml(translatedRuntimeText(row.message))}</p>` : ""}
+        </div>
       `).join("")}
     </div>
-  ` : emptyState("Waiting for the first source response.");
+  `;
+  return renderDisclosureSection("query-portfolio", "Query portfolio", body);
+}
 
-  const candidates = renderCandidatePreview(preview);
+function renderHistory(history, finalQuery, preview, stageStatus = "PROCESSING", queryPortfolio = []) {
+  const rows = renderIterationRows(history, stageStatus);
+  const portfolio = renderQueryPortfolio(history, queryPortfolio);
+
+  const candidates = preview && preview.length
+    ? renderDisclosureSection("candidate-preview", "Candidate preview", renderCandidatePreview(preview))
+    : "";
   const queryBlock = finalQuery ? `
     <div class="final-query">
-      <span>Current query</span>
+      <span>${escapeHtml(translatedText("Current query"))}</span>
       <code>${escapeHtml(finalQuery)}</code>
     </div>
   ` : "";
 
-  return `${rows}${queryBlock}${candidates}`;
+  return `${queryBlock}${rows}${portfolio}${candidates}`;
+}
+
+function renderSearchStage(item) {
+  if (!item.history.length && !item.finalQuery) {
+    return item.status === "PROCESSING"
+      ? emptyState("Waiting for the first source response.")
+      : emptyState("No source request has run.");
+  }
+  const rounds = iterationCount(item.history);
+  const finalRow = finalHistoryRow(item.history);
+  const metrics = metricRow([
+    { value: rounds, label: "ITERATIONS" },
+    { value: item.totalRecords || 0, label: "FINAL HITS" },
+    { value: finalRow ? translatedActionText(finalRow.action || "") : "-", label: "FINAL ACTION" },
+  ]);
+  const history = renderHistory(item.history, item.finalQuery, item.preview, item.status, item.queryPortfolio);
+  const audit = item.auditData ? renderSearchLoopAudit(item.auditData, "search") : "";
+  return `${metrics}${history}${audit}`;
+}
+
+function renderResultsStage(item) {
+  if (item.status === "WAITING") {
+    return emptyState("Run a search to populate the result list.");
+  }
+  const metrics = metricRow([
+    { value: item.outputCount || 0, label: "RANKED RECORDS" },
+    { value: item.highScoreCount || 0, label: "SCORED >= 5" },
+    { value: item.topScore || 0, label: "TOP SCORE" },
+    { value: item.citationAdds || 0, label: "CITATION ADDS" },
+  ]);
+  return `
+    ${metrics}
+    <div class="result-jump-actions">
+      <button class="primary-inline-button" type="button" data-switch-view="results">${escapeHtml(translatedText("Review Results"))}</button>
+      <button class="secondary-button" type="button" data-switch-view="citations">${escapeHtml(translatedText("Open Citation Map"))}</button>
+    </div>
+  `;
 }
 
 function renderCandidatePreview(preview) {
@@ -1489,7 +2130,6 @@ function renderCandidatePreview(preview) {
   }
   return `
     <div class="candidate-preview">
-      <span>Candidate preview</span>
       ${preview.map((paper) => `
         <div class="candidate-row">
           <strong>${escapeHtml(paper.title || "(no title)")}</strong>
@@ -1593,6 +2233,7 @@ function renderResultsView() {
         </select>
         <button class="secondary-button" type="button" data-action="select-all-results">${escapeHtml(translatedText("Select all shown"))}</button>
         <button class="secondary-button" type="button" data-action="clear-result-selection">${escapeHtml(translatedText("Clear"))}</button>
+        <button id="exportCsvButton" class="result-export-button" type="button" data-action="export-results-csv"${getExportPapers().length ? "" : " disabled"}>${escapeHtml(translatedText("Export Results CSV"))}</button>
       </div>
       ${filtered.length ? renderResultRows(filtered) : emptyState("No papers match the current filters.")}
     </section>
@@ -1676,6 +2317,7 @@ function renderHistoryView() {
           run.status,
           run.source || "source pending",
           `${run.result_count || 0} papers`,
+          run.checkpoint_stage ? `${translatedRuntimeText("Checkpoint")}: ${run.checkpoint_stage}` : "",
           run.created_at,
         ].filter(Boolean).join(" | ");
         return `
@@ -1748,6 +2390,7 @@ function renderHistoryDetail() {
         <div class="result-jump-actions">
           <button class="primary-inline-button" type="button" data-history-action="open-results">Open Results</button>
           <button class="secondary-button" type="button" data-history-action="open-citations">Open Citation Map</button>
+          ${run.resumable ? `<button class="secondary-button" type="button" data-history-action="resume">${escapeHtml(translatedRuntimeText("Resume from checkpoint"))}</button>` : ""}
           <button class="secondary-button" type="button" data-history-action="delete" data-history-id="${escapeHtml(run.id)}">Delete</button>
         </div>
       </div>
@@ -1864,6 +2507,24 @@ function renderCitationView() {
   const edges = map.edges || [];
   const seeds = nodes.filter((node) => (node.roles || []).includes("seed"));
   const promoted = nodes.filter((node) => (node.roles || []).includes("result") && !((node.roles || []).includes("seed")));
+  const frontier = map.frontier && typeof map.frontier === "object" ? map.frontier : {};
+  const frontierDirections = frontier.direction_stats && typeof frontier.direction_stats === "object" ? frontier.direction_stats : {};
+  const backwardStats = frontierDirections.backward || {};
+  const forwardStats = frontierDirections.forward || {};
+  const frontierMetrics = frontier.planned_items ? `
+    <div class="citation-summary-grid">
+      ${metricRow([
+        { value: `${frontier.processed_items || 0}/${frontier.planned_items || 0}`, label: "FRONTIER ITEMS" },
+        { value: `${frontier.request_count || 0}/${frontier.request_budget || 0}`, label: "FRONTIER REQUESTS" },
+        { value: backwardStats.added || 0, label: "BACKWARD ADDS" },
+        { value: forwardStats.added || 0, label: "FORWARD ADDS" },
+      ])}
+      <div class="query-rationale loop-audit">
+        <span>${escapeHtml(translatedRuntimeText("Citation frontier"))}</span>
+        <p>${escapeHtml(`${translatedRuntimeText("Frontier stop reason")}: ${translatedActionText(frontier.stop_reason || "completed")}`)}</p>
+      </div>
+    </div>
+  ` : "";
   return `
     <section class="workspace-view citation-view">
       <div class="workspace-header">
@@ -1884,6 +2545,7 @@ function renderCitationView() {
           { value: promoted.length, label: "PROMOTED RESULTS" },
         ])}
       </div>
+      ${frontierMetrics}
       <div class="citation-layout">
         <div class="citation-map-panel">
           <div class="citation-toolbar">
@@ -2041,7 +2703,8 @@ function renderCitationGraph() {
     const selected = node.id === selectedCitationNodeId ? " selected" : "";
     return `
       <g class="citation-node ${escapeHtml(role)}${selected}" data-citation-node="${escapeHtml(node.id)}" transform="translate(${node.x.toFixed(1)} ${node.y.toFixed(1)})">
-        <circle r="${radius.toFixed(1)}"></circle>
+        <circle class="citation-hit-target" r="${(radius + 8).toFixed(1)}"></circle>
+        <circle class="citation-node-mark" r="${radius.toFixed(1)}"></circle>
         <text y="${(radius + 13).toFixed(1)}">${escapeHtml((node.title || node.id).slice(0, 28))}</text>
         <title>${escapeHtml(node.title || node.id)}</title>
       </g>
@@ -2216,48 +2879,59 @@ function applyStageEvent(event) {
   const data = event.data || {};
   const status = (event.status || "processing").toUpperCase();
   stage.status = status;
+  syncStageDisclosure(event.stage, status);
 
   if (event.stage === "query") {
+    stage.bodyOverride = "";
     if (data.intent) {
       stage.intent = data.intent;
     }
     if (data.source) {
       stage.source = data.source;
     }
+    if (data.search_plan && typeof data.search_plan === "object") {
+      stage.searchPlan = data.search_plan;
+    }
     if (data.query) {
       stage.query = data.query;
     }
-    if (status === "PROCESSING") {
-      stage.body = renderQueryStage(stage);
-    } else {
+    if (status !== "PROCESSING" && !data.query && !stage.query) {
       stage.query = data.query || "No query returned";
-      stage.body = renderQueryStage(stage);
     }
   }
 
   if (event.stage === "search") {
-    stage.body = renderHistory(data.history || [], data.final_query || data.query || "", data.preview || []);
+    stage.bodyOverride = "";
+    if (Array.isArray(data.history)) {
+      stage.history = data.history;
+    }
+    stage.finalQuery = data.final_query || data.query || stage.finalQuery || "";
+    if (Array.isArray(data.preview)) {
+      stage.preview = data.preview;
+    }
+    if (Array.isArray(data.query_portfolio)) {
+      stage.queryPortfolio = data.query_portfolio;
+    }
     if (data.total !== undefined && data.total !== null) {
+      stage.totalRecords = Number(data.total || 0);
       stage.description = `Latest source response returned ${data.total} records.`;
     }
   }
 
   if (event.stage === "ranking") {
+    stage.bodyOverride = "";
     stage.candidateCount = data.candidate_count ?? stage.candidateCount ?? 0;
     stage.rankedCount = data.ranked_count ?? stage.rankedCount ?? 0;
     stage.totalRecords = data.total ?? stage.totalRecords ?? 0;
     if (data.ranking_steps) {
       stage.rankingSteps = data.ranking_steps;
     }
-    stage.body = renderRankingStage(stage);
   }
 
   if (event.stage === "results") {
-    stage.body = metricRow([
-      { value: data.total ?? 0, label: "TOTAL RECORDS" },
-      { value: data.ranked_count ?? 0, label: "RANKED RECORDS" },
-      { value: getValue("dataSource").toUpperCase(), label: "SOURCE" },
-    ]);
+    stage.bodyOverride = "";
+    stage.totalRecords = Number(data.total || 0);
+    stage.outputCount = Number(data.ranked_count || 0);
   }
 
   renderWorkflow();
@@ -2273,19 +2947,17 @@ function applyFinalResult(data) {
   const hasResults = data.ranked && data.ranked.length > 0;
   workflowState.query.status = "COMPLETE";
   workflowState.query.intent = data.search_intent || workflowState.query.intent || "";
+  workflowState.query.searchPlan = data.search_plan || workflowState.query.searchPlan || null;
   workflowState.query.source = data.source || data.db || "source";
   workflowState.query.query = data.final_query || "";
-  workflowState.query.body = `
-    ${renderQueryStage(workflowState.query)}
-    ${chipList([
-      data.db || "",
-      data.field || "No field hint",
-      `${data.iterations} iteration(s)`,
-    ].filter(Boolean))}
-  `;
 
   workflowState.search.status = "COMPLETE";
-  workflowState.search.body = renderHistory(data.history, data.final_query, []);
+  workflowState.search.history = data.history || [];
+  workflowState.search.finalQuery = data.final_query || "";
+  workflowState.search.preview = [];
+  workflowState.search.queryPortfolio = data.query_portfolio || [];
+  workflowState.search.totalRecords = Number(data.total || 0);
+  workflowState.search.auditData = data;
   workflowState.search.description = `Accepted query returned ${data.total} total records.`;
 
   workflowState.ranking.status = "COMPLETE";
@@ -2294,31 +2966,28 @@ function applyFinalResult(data) {
   workflowState.ranking.totalRecords = data.total;
   workflowState.ranking.topScore = hasResults ? Math.max(...data.ranked.map((p) => Number(p.score || 0))) : 0;
   workflowState.ranking.rankingSteps = data.ranking_steps || workflowState.ranking.rankingSteps || [];
-  workflowState.ranking.body = renderRankingStage(workflowState.ranking);
+  workflowState.ranking.auditData = data;
 
   workflowState.results.status = hasResults ? "READY" : "EMPTY";
   const citationMap = data.citation_map || {};
-  workflowState.results.body = `
-    ${metricRow([
-      { value: data.total ?? 0, label: "TOTAL RECORDS" },
-      { value: data.ranked ? data.ranked.length : 0, label: "RANKED RECORDS" },
-      { value: citationMap.candidate_pool || data.ranked.length || 0, label: "CANDIDATES SCORED" },
-      { value: citationMap.added_candidates || 0, label: "CITATION ADDS" },
-    ])}
-    <div class="result-jump-actions">
-      <button class="primary-inline-button" type="button" data-switch-view="results">Review Results</button>
-      <button class="secondary-button" type="button" data-switch-view="citations">Open Citation Map</button>
-    </div>
-  `;
+  workflowState.results.totalRecords = Number(data.total || 0);
+  workflowState.results.outputCount = data.ranked ? data.ranked.length : 0;
+  workflowState.results.highScoreCount = (data.ranked || []).filter((entry) => Number(entry.score || 0) >= 5).length;
+  workflowState.results.topScore = workflowState.ranking.topScore;
+  workflowState.results.candidatePool = citationMap.candidate_pool || workflowState.results.outputCount;
+  workflowState.results.citationAdds = Number(citationMap.added_candidates || 0);
+  showFinalStage();
   renderWorkflow();
 }
 
 function showClientError(message, fieldId) {
   workflowState = createWorkflowState();
+  resetDisclosureState();
   workflowState.query.status = "ERROR";
   workflowState.query.title = "Input Required";
   workflowState.query.description = "Fill the required field and run the search again.";
-  workflowState.query.body = `<div class="error-box">${escapeHtml(message)}</div>`;
+  workflowState.query.bodyOverride = `<div class="error-box">${escapeHtml(message)}</div>`;
+  disclosureState.stages.query = true;
   renderWorkflow();
   log(`Input required: ${message}`);
   if (fieldId) {
@@ -2337,7 +3006,9 @@ function showRunError(message) {
   workflowState.results.status = "ERROR";
   workflowState.results.title = "Search Failed";
   workflowState.results.description = "The local backend or upstream service returned an error.";
-  workflowState.results.body = `<div class="error-box">${escapeHtml(message)}</div>`;
+  workflowState.results.bodyOverride = `<div class="error-box">${escapeHtml(message)}</div>`;
+  disclosureState.stages.results = true;
+  setLogPanelExpanded(true, { error: true });
   renderWorkflow();
   log(`Error: ${message}`);
 }
@@ -2371,6 +3042,7 @@ function showConfigAlert(title, message, checks = []) {
   });
   applyLanguage(configAlert);
   configAlert.classList.remove("is-hidden");
+  setLogPanelExpanded(true, { error: true });
   if (configAlertCloseButton) {
     configAlertCloseButton.focus();
   }
@@ -2383,9 +3055,28 @@ function showRunStopped() {
   workflowState.results.status = "EMPTY";
   workflowState.results.title = "Search Stopped";
   workflowState.results.description = "The request was stopped before completion.";
-  workflowState.results.body = emptyState("No final result was produced for this run.");
+  workflowState.results.bodyOverride = emptyState("No final result was produced for this run.");
+  showFinalStage();
   renderWorkflow();
   log("Search stopped by user.");
+}
+
+function requestBackendCancel(runIdValue) {
+  const id = String(runIdValue || "").trim();
+  if (!id) {
+    return;
+  }
+  fetch(`/api/search/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    keepalive: true,
+  }).then((response) => {
+    if (response.ok) {
+      log(`Backend cancellation requested for ${id}.`);
+    }
+  }).catch(() => {
+    // The client is stopping anyway; late cancellation failures should not
+    // block the local UI from returning to an idle state.
+  });
 }
 
 function validatePayload(payload) {
@@ -2415,9 +3106,6 @@ function validatePayload(payload) {
   if (payload.target_min > payload.target_max) {
     return { ok: false, message: "Min Results cannot exceed Max Results.", fieldId: "targetMin" };
   }
-  if (!Number.isFinite(payload.max_iterations) || payload.max_iterations < 1) {
-    return { ok: false, message: "Iterations must be at least 1.", fieldId: "maxIterations" };
-  }
   return { ok: true };
 }
 
@@ -2439,6 +3127,7 @@ function buildPayload() {
   return {
     question: getValue("question"),
     data_source: getValue("dataSource"),
+    search_budget: selectedSearchBudget(),
     wos_api_key: getValue("wosApiKey"),
     openalex_api_key: getValue("openAlexApiKey"),
     openalex_email: getValue("openAlexEmail"),
@@ -2468,9 +3157,9 @@ function buildPayload() {
     client_utc_offset_minutes: clientUtcOffsetMinutes(),
     target_min: getNumber("targetMin"),
     target_max: getNumber("targetMax"),
-    max_iterations: getNumber("maxIterations"),
     fetch_abstracts: document.getElementById("fetchAbstracts").checked,
     expand_citations: document.getElementById("expandCitations").checked,
+    resume_run_id: pendingResumeRunId,
   };
 }
 
@@ -2572,6 +3261,7 @@ function handleStreamEvent(event) {
     }
   } else if (event.type === "run") {
     if (event.run_id) {
+      activeBackendRunId = event.run_id;
       runId.textContent = event.run_id;
       log(`Local history run: ${event.run_id}.`);
     }
@@ -2579,6 +3269,8 @@ function handleStreamEvent(event) {
     applyStageEvent(event);
   } else if (event.type === "result") {
     applyFinalResult(event.data);
+  } else if (event.type === "cancelled") {
+    showRunStopped();
   } else if (event.type === "error") {
     showRunError(event.message || "Unknown error");
   }
@@ -2622,6 +3314,7 @@ if (stopButton) {
     const controller = activeSearchController;
     setTranslatedText(stateLabel, "Stopping");
     log("Stop requested.");
+    requestBackendCancel(activeBackendRunId);
     activeSearchToken += 1;
     activeSearchController = null;
     stopButton.disabled = true;
@@ -2629,6 +3322,13 @@ if (stopButton) {
     showRunStopped();
     setBusy(false);
     updateExportButtons();
+  });
+}
+
+if (logToggle) {
+  logToggle.addEventListener("click", () => {
+    logHasError = false;
+    setLogPanelExpanded(!logPanelExpanded);
   });
 }
 
@@ -2658,6 +3358,26 @@ viewTabs.forEach((tab) => {
 });
 
 workflow.addEventListener("click", (event) => {
+  const stageToggle = event.target.closest("[data-stage-toggle]");
+  if (stageToggle) {
+    const key = stageToggle.dataset.stageToggle;
+    if (stageOrder.includes(key)) {
+      disclosureState.stages[key] = !Boolean(disclosureState.stages[key]);
+      disclosureState.stageManual[key] = true;
+      renderWorkflow();
+    }
+    return;
+  }
+
+  const sectionToggle = event.target.closest("[data-section-toggle]");
+  if (sectionToggle) {
+    const key = sectionToggle.dataset.sectionToggle;
+    const expanded = sectionToggle.getAttribute("aria-expanded") === "true";
+    disclosureState.sections[key] = !expanded;
+    renderWorkflow();
+    return;
+  }
+
   const switchTarget = event.target.closest("[data-switch-view]");
   if (switchTarget) {
     switchView(switchTarget.dataset.switchView);
@@ -2685,6 +3405,22 @@ workflow.addEventListener("click", (event) => {
         updateExportButtons();
         switchView(action === "open-results" ? "results" : "citations");
       }
+    } else if (action === "resume" && historyDetail && historyDetail.resumable) {
+      const questionInput = document.getElementById("question");
+      if (questionInput) {
+        questionInput.value = historyDetail.question || "";
+      }
+      if (historyDetail.source && [...dataSourceSelect.options].some((option) => option.value === historyDetail.source)) {
+        dataSourceSelect.value = historyDetail.source;
+        updateSourceFields();
+        updateSourceFilterUi({ reset: true });
+      }
+      if (historyDetail.params && historyDetail.params.search_budget) {
+        setSearchBudget(historyDetail.params.search_budget);
+      }
+      pendingResumeRunId = historyDetail.id;
+      switchView("search");
+      form.requestSubmit();
     } else if (action === "delete") {
       const targetId = historyAction.dataset.historyId || (historyDetail && historyDetail.id);
       if (targetId && window.confirm(`Delete local history run ${targetId}?`)) {
@@ -2738,6 +3474,12 @@ workflow.addEventListener("click", (event) => {
     selectedPaperIds.clear();
     updateExportButtons();
     renderWorkflow();
+    return;
+  }
+
+  const exportResults = event.target.closest("[data-action='export-results-csv']");
+  if (exportResults) {
+    exportResultsCsv();
     return;
   }
 
@@ -2805,11 +3547,6 @@ exportLogButton.addEventListener("click", () => {
   downloadText(filename, currentLogText(), "text/plain;charset=utf-8");
 });
 
-exportCsvButton.addEventListener("click", () => {
-  const filename = `${filenamePart(exportQuestionTheme())}-${dateStamp()}-papers.csv`;
-  downloadText(filename, papersToCsv(getExportPapers()), "text/csv;charset=utf-8");
-});
-
 checkConfigButton.addEventListener("click", checkConfiguration);
 
 if (disciplineOptionsContainer) {
@@ -2822,10 +3559,15 @@ if (clearDisciplinesButton) {
   });
 }
 
+searchBudgetInputs.forEach((input) => {
+  input.addEventListener("change", updateSearchBudgetHelp);
+});
+
 dataSourceSelect.addEventListener("change", () => {
   updateSourceFields();
   updateSourceFilterUi({ reset: true });
   workflowState = createWorkflowState();
+  resetDisclosureState();
   renderWorkflow();
 });
 
@@ -2833,10 +3575,12 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearValidationState();
   logOutput.textContent = "";
+  resetLogPanel();
   const payload = buildPayload();
   latestPayload = null;
   latestResult = null;
   latestError = "";
+  activeBackendRunId = "";
   selectedPaperIds = new Set();
   selectedCitationNodeId = "";
   citationGraphState = createCitationGraphState();
@@ -2848,13 +3592,16 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   latestPayload = payload;
+  pendingResumeRunId = "";
   updateExportButtons();
 
   const id = `run_${Date.now().toString(36)}`;
   runId.textContent = id;
   workflowState = createWorkflowState();
+  resetDisclosureState();
   workflowState.query.status = "PROCESSING";
-  workflowState.query.body = emptyState("Submitting request to local backend.");
+  workflowState.query.bodyOverride = emptyState("Submitting request to local backend.");
+  disclosureState.stages.query = true;
   renderWorkflow();
   setBusy(true);
   latestStreamHeartbeatLogAt = 0;
@@ -2862,8 +3609,8 @@ form.addEventListener("submit", async (event) => {
   activeSearchController = controller;
   const searchToken = ++activeSearchToken;
   log(`Run ${id} started.`);
-  log(`Source: ${payload.data_source}; provider: ${payload.llm_provider}; api type: ${payload.llm_api_type}; model: ${payload.llm_model || "provider default"}.`);
-  log(`Target range: ${payload.target_min}-${payload.target_max}; max iterations: ${payload.max_iterations}.`);
+  log(`Source: ${payload.data_source}; search budget: ${payload.search_budget}; provider: ${payload.llm_provider}; api type: ${payload.llm_api_type}; model: ${payload.llm_model || "provider default"}.`);
+  log(`Initial query target: ${payload.target_min}-${payload.target_max}.`);
 
   try {
     const response = await fetch("/api/search/stream", {
@@ -2899,6 +3646,7 @@ form.addEventListener("submit", async (event) => {
 
 async function initializeApp() {
   initLanguageControls();
+  updateSearchBudgetHelp();
   if (advancedSettings) {
     advancedSettings.open = false;
   }
@@ -2911,6 +3659,7 @@ async function initializeApp() {
   updateSourceSummary();
   updateExportButtons();
   document.body.dataset.view = activeView;
+  renderLogPanelState();
   renderWorkflow();
   log("Ready. Keys and endpoint settings are held only in this browser session.");
   applyLanguage();

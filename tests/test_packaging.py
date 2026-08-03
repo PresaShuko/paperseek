@@ -1,3 +1,4 @@
+import ast
 import re
 import unittest
 
@@ -5,6 +6,12 @@ from tests.helpers import ROOT, assert_contains_all, read_text
 
 
 class PackagingTest(unittest.TestCase):
+    def test_runtime_package_parses_with_python310_grammar(self):
+        for package in ("paperseek", "paperseek_core"):
+            for path in (ROOT / package).rglob("*.py"):
+                with self.subTest(path=path.relative_to(ROOT)):
+                    ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path), feature_version=(3, 10))
+
     def test_project_metadata_is_release_ready(self):
         pyproject = read_text("pyproject.toml")
         assert_contains_all(
@@ -12,15 +19,38 @@ class PackagingTest(unittest.TestCase):
             pyproject,
             (
                 'name = "paperseek"',
-                'version = "0.2.1"',
+                'version = "0.3.0"',
                 'Homepage = "https://www.paperseek.xyz/"',
                 'Repository = "https://github.com/MingfengHong/paperseek"',
                 'Documentation = "https://docs.paperseek.xyz/"',
+                'license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]',
             ),
         )
         self.assertNotIn("modelscope.cn/studios", pyproject)
         self.assertNotRegex(pyproject, re.compile(r"^wos-search\s*=", re.MULTILINE))
         self.assertNotRegex(pyproject, re.compile(r"^wos-search-web\s*=", re.MULTILINE))
+
+    def test_python310_and_harness_dependencies_are_declared(self):
+        pyproject = read_text("pyproject.toml")
+        ci = read_text(".github/workflows/ci.yml")
+        assert_contains_all(
+            self,
+            pyproject,
+            (
+                'requires-python = ">=3.10"',
+                '"Programming Language :: Python :: 3.10"',
+                '"Programming Language :: Python :: 3.11"',
+                '"Programming Language :: Python :: 3.12"',
+                '"langchain-core>=1.5"',
+                '"langgraph>=1.2"',
+                '"pydantic-ai-slim>=2"',
+            ),
+        )
+        self.assertNotIn('"Programming Language :: Python :: 3.8"', pyproject)
+        self.assertNotIn('"Programming Language :: Python :: 3.9"', pyproject)
+        assert_contains_all(self, ci, ('python-version: ["3.10", "3.11", "3.12"]',))
+        self.assertNotIn('"3.8"', ci)
+        self.assertNotIn('"3.9"', ci)
 
     def test_readmes_cover_installation_and_primary_links(self):
         expected_install_paths = (
@@ -52,11 +82,43 @@ class PackagingTest(unittest.TestCase):
             "https://github.com/666ghj/MiroFish",
             "https://github.com/clarivate/wosstarter_python_client",
             "https://github.com/Lloyd-Jahn/openclaw-paper-search",
+            "https://github.com/bytedance/pasa",
+            "https://github.com/pydantic/pydantic-ai",
+            "https://github.com/langchain-ai/langgraph",
+            "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep",
+            "THIRD_PARTY_NOTICES.md",
         )
         for path in ("README.md", "README.en.md"):
             readme = read_text(path)
             with self.subTest(path=path):
                 assert_contains_all(self, readme, expected_links)
+
+    def test_third_party_notice_records_dependencies_and_acknowledgements(self):
+        notice = read_text("THIRD_PARTY_NOTICES.md")
+        manifest = read_text("MANIFEST.in")
+        assert_contains_all(
+            self,
+            notice,
+            (
+                "MiroFish",
+                "clarivate/wosstarter_python_client",
+                "bytedance/pasa",
+                "Apache License 2.0",
+                "PydanticAI",
+                "LangGraph",
+                "PaperHub",
+                "Acknowledged references",
+            ),
+        )
+        assert_contains_all(
+            self,
+            manifest,
+            (
+                "include THIRD_PARTY_NOTICES.md",
+                "prune benchmarks",
+                "exclude tests/test_benchmark_runner.py",
+            ),
+        )
 
     def test_user_manual_covers_main_workflows(self):
         manual = read_text("docs/user-manual.md")
@@ -98,7 +160,9 @@ class PackagingTest(unittest.TestCase):
             "docs/.vitepress/config.mts",
             "docs/public/README.md",
             "docs/deployment.md",
+            "docs/v0.3.0.md",
             "docs/assets/deploy-modelscope.svg",
+            "THIRD_PARTY_NOTICES.md",
         ):
             with self.subTest(path=path):
                 self.assertTrue((ROOT / path).is_file())

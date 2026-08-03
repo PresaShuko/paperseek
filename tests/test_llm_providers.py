@@ -8,7 +8,7 @@ from paperseek.config import (
     default_base_url,
     default_model,
 )
-from paperseek_core.llm import OpenAIChatClient, format_modelscope_quota
+from paperseek_core.llm import OpenAIChatClient, create_llm_client, format_modelscope_quota
 from tests.helpers import read_text, temporary_env
 
 
@@ -66,7 +66,7 @@ class LLMProviderTest(unittest.TestCase):
 
         self.assertEqual(config.ranking_concurrency, 16)
 
-    def test_kimi_coding_openai_chat_disables_thinking_and_forces_supported_temperature(self):
+    def test_kimi_coding_low_budget_disables_thinking_and_forces_supported_temperature(self):
         class FakeResponse:
             status_code = 200
             headers = {}
@@ -75,15 +75,43 @@ class LLMProviderTest(unittest.TestCase):
                 return None
 
             def json(self):
-                return {"choices": [{"message": {"content": "clean answer"}}]}
+                return {
+                    "choices": [{"message": {"content": "clean answer"}, "finish_reason": "stop"}],
+                    "usage": {"completion_tokens": 12},
+                }
 
         with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
-            client = OpenAIChatClient("sk-test", model="kimi-for-coding", base_url="https://api.kimi.com/coding/v1")
+            client = OpenAIChatClient(
+                "sk-test",
+                model="kimi-for-coding",
+                base_url="https://api.kimi.com/coding/v1",
+                thinking_enabled=False,
+            )
             self.assertEqual(client.chat([{"role": "user", "content": "ping"}], temperature=0), "clean answer")
 
         self.assertEqual(post.call_args.args[0], "https://api.kimi.com/coding/v1/chat/completions")
         self.assertEqual(post.call_args.kwargs["json"]["temperature"], 0.6)
         self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
+        self.assertEqual(client.last_response_info["finish_reason"], "stop")
+        self.assertEqual(client.last_response_info["completion_tokens"], 12)
+
+    def test_kimi_coding_non_low_budget_does_not_force_thinking_mode(self):
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return {"choices": [{"message": {"content": "clean answer"}}]}
+
+        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
+            client = OpenAIChatClient(
+                "sk-test",
+                model="kimi-for-coding",
+                base_url="https://api.kimi.com/coding/v1",
+            )
+            client.chat([{"role": "user", "content": "ping"}])
+
+        self.assertNotIn("thinking", post.call_args.kwargs["json"])
 
     def test_openai_chat_rotates_key_pool_on_retryable_status(self):
         class FakeResponse:
@@ -110,6 +138,128 @@ class LLMProviderTest(unittest.TestCase):
             self.assertEqual(client.chat([{"role": "user", "content": "ping"}]), "clean answer")
 
         self.assertEqual(calls, ["Bearer sk-rotate-a", "Bearer sk-rotate-b"])
+
+    def test_openai_chat_json_uses_json_mode_and_dedicated_output_budget(self):
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+            text = ""
+
+            def json(self):
+                return {
+                    "choices": [{"message": {"content": '{"intent":"test"}'}, "finish_reason": "stop"}],
+                    "usage": {"completion_tokens": 9},
+                }
+
+        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
+            client = OpenAIChatClient("sk-test", model="test-model", base_url="https://example.test/v1", max_tokens=2048)
+            output = client.chat_json([{"role": "user", "content": "Return JSON"}], max_tokens=4096)
+
+        self.assertEqual(output, '{"intent":"test"}')
+        self.assertEqual(post.call_args.kwargs["json"]["response_format"], {"type": "json_object"})
+        self.assertEqual(post.call_args.kwargs["json"]["max_tokens"], 4096)
+
+    def test_deepseek_json_mode_disables_thinking_for_low_budget(self):
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+            text = ""
+
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"intent":"test"}',
+                                "reasoning_content": "long private reasoning",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"completion_tokens": 9},
+                }
+
+        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
+            client = OpenAIChatClient(
+                "sk-test",
+                model="deepseek-v4-flash",
+                base_url="https://api.deepseek.com",
+                thinking_enabled=False,
+            )
+            output = client.chat_json([{"role": "user", "content": "Return JSON"}])
+
+        self.assertEqual(output, '{"intent":"test"}')
+        self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
+
+    def test_deepseek_plain_chat_also_disables_thinking_for_low_budget(self):
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+            text = ""
+
+            def json(self):
+                return {
+                    "choices": [{"message": {"content": "clean answer"}, "finish_reason": "stop"}],
+                    "usage": {"completion_tokens": 3},
+                }
+
+        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
+            client = OpenAIChatClient(
+                "sk-test",
+                model="deepseek-v4-flash",
+                base_url="https://api.deepseek.com",
+                thinking_enabled=False,
+            )
+            output = client.chat([{"role": "user", "content": "Answer briefly"}])
+
+        self.assertEqual(output, "clean answer")
+        self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
+
+    def test_create_llm_client_carries_budget_thinking_setting(self):
+        with temporary_env(
+            {
+                "SEARCH_BUDGET": "fast",
+                "LLM_PROVIDER": "deepseek",
+                "LLM_API_KEY": "sk-test",
+            }
+        ):
+            fast_client = create_llm_client(AgentConfig.from_env())
+        with temporary_env(
+            {
+                "SEARCH_BUDGET": "medium",
+                "LLM_PROVIDER": "deepseek",
+                "LLM_API_KEY": "sk-test",
+            }
+        ):
+            medium_client = create_llm_client(AgentConfig.from_env())
+
+        self.assertFalse(fast_client.thinking_enabled)
+        self.assertTrue(medium_client.thinking_enabled)
+
+    def test_json_mode_does_not_treat_reasoning_as_final_content(self):
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+            text = ""
+
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "message": {"content": None, "reasoning_content": "not the JSON answer"},
+                            "finish_reason": "length",
+                        }
+                    ]
+                }
+
+        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()):
+            client = OpenAIChatClient(
+                "sk-test",
+                model="deepseek-v4-flash",
+                base_url="https://api.deepseek.com",
+            )
+            with self.assertRaisesRegex(Exception, "did not contain message content"):
+                client.chat_json([{"role": "user", "content": "Return JSON"}])
 
     def test_blank_or_invalid_llm_max_tokens_falls_back_safely(self):
         import importlib

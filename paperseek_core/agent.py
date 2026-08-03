@@ -1,12 +1,12 @@
-from __future__ import annotations
 
 import re
 import json
+import hashlib
 import inspect
 import math
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from itertools import count
 from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -59,9 +59,49 @@ from paperseek_core.disciplines import (
 from paperseek_core.retrieval import (
     ProviderRetrievalCapabilities,
     RetrievalLane,
+    document_alias_keys,
     document_key,
     document_text,
     fuse_candidates_rrf,
+)
+from paperseek_core.harness import (
+    ACTION_BROADEN,
+    ACTION_NARROW,
+    CITATION_RETRY_REDUCED,
+    RECOVERY_BROADEN_QUERY,
+    RECOVERY_REPAIR_QUERY,
+    RECOVERY_SIMPLIFY_QUERY,
+    RANKING_RETRY_LOWER_CONCURRENCY,
+    RANKING_RETRY_SAME_TIER,
+    CandidateCitationPath,
+    CandidateEvidence,
+    CandidateLifecycleEvent,
+    FrontierBudget,
+    FrontierOutcome,
+    QueryLoopDecision,
+    QueryLoopSnapshot,
+    QueryPortfolioExecution,
+    SearchCheckpoint,
+    SearchRunState,
+    SearchLoopController,
+    SelectorBatch,
+    SelectorDecision,
+    RankingScoreEntry,
+    dedupe_repeated_top_level_conjunctions,
+    extract_json_object_text as _harness_extract_json_object_text,
+    looks_truncated_or_malformed_query as _harness_looks_truncated_or_malformed_query,
+    query_response_from_json as _harness_query_response_from_json,
+    strip_llm_fence as _harness_strip_llm_fence,
+    validate_source_query,
+)
+from paperseek_core.candidate_selector import CandidateSelector
+from paperseek_core.crawler import CrawlerController
+from paperseek_core.frontier import FrontierScheduler
+from paperseek_core.tool_executor import ToolExecution, ToolExecutor
+from paperseek_core.harness.pydantic_ai_adapter import (
+    PydanticAIAdapterUnavailable,
+    pydantic_ai_query_retry_enabled,
+    run_query_proposal_agent,
 )
 from paperseek_core.sources.providers import (
     ArxivProvider,
@@ -84,10 +124,30 @@ from paperseek_core.sources.providers import (
     SearchMetadata,
     SemanticScholarProvider,
 )
+from paperseek_core.sources.metadata import supported_source_ids
+from paperseek_core.planning import SearchPlan, fallback_search_plan, parse_search_plan
+from paperseek_core.query_compiler import supports_query_portfolio
+from paperseek_core.query_view_selector import select_query_views
+from paperseek_core.checkpoints import (
+    CHECKPOINT_SCHEMA_VERSION,
+    CheckpointError,
+    paper_records_from_checkpoint,
+    paper_records_to_checkpoint,
+    scrub_checkpoint_value,
+)
 
 
 _EXTERNAL_API_KEY_COUNTER_LOCK = Lock()
 _EXTERNAL_API_KEY_COUNTERS = {}
+_SERIALIZED_CANDIDATE_LEDGER_LIMIT = 512
+
+
+class EmptyRankingBatchError(RuntimeError):
+    """Raised when an LLM ranking batch returns no usable scores."""
+
+
+class SearchCancelled(RuntimeError):
+    """Raised when a caller requests cooperative cancellation of a search run."""
 
 
 def _split_external_api_keys(api_key: str) -> List[str]:
@@ -120,69 +180,11 @@ def _retryable_external_status(status_code: int) -> bool:
 
 
 def _extract_json_object_text(text: str) -> str:
-    raw = _strip_llm_fence(text)
-    if not raw:
-        return ""
-    if raw.startswith("{") and raw.endswith("}"):
-        return raw
-    start = raw.find("{")
-    if start < 0:
-        return ""
-    depth = 0
-    in_string = False
-    escape = False
-    for index, char in enumerate(raw[start:], start):
-        if escape:
-            escape = False
-            continue
-        if char == "\\":
-            escape = True
-            continue
-        if char == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return raw[start:index + 1]
-    return ""
+    return _harness_extract_json_object_text(text)
 
 
 def _query_response_from_json(text: str) -> Tuple[str, str]:
-    obj_text = _extract_json_object_text(text)
-    if not obj_text:
-        return "", ""
-    try:
-        parsed = json.loads(obj_text)
-    except json.JSONDecodeError:
-        return "", ""
-    if not isinstance(parsed, dict):
-        return "", ""
-    query_value = ""
-    for key in ("query", "search_query", "query_string", "source_query", "term", "wos_query"):
-        value = parsed.get(key)
-        if isinstance(value, str) and value.strip():
-            query_value = value
-            break
-        if isinstance(value, dict):
-            nested = value.get("value") or value.get("query")
-            if isinstance(nested, str) and nested.strip():
-                query_value = nested
-                break
-    query = query_value.strip()
-    rationale_parts = []
-    for key in ("rationale", "adjustment", "adjustment_direction", "reason", "diagnostic_note"):
-        value = parsed.get(key)
-        if isinstance(value, list):
-            value = "; ".join(str(item).strip() for item in value if str(item).strip())
-        value = str(value or "").strip()
-        if value:
-            rationale_parts.append(value)
-    return query, "\n".join(rationale_parts).strip()
+    return _harness_query_response_from_json(text)
 
 
 def _trim_boolean_edges(query: str) -> str:
@@ -193,31 +195,8 @@ def _trim_boolean_edges(query: str) -> str:
     return query.strip()
 
 
-def _parentheses_are_balanced(query: str) -> bool:
-    depth = 0
-    for char in query or "":
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth < 0:
-                return False
-    return depth == 0
-
-
 def _looks_truncated_or_malformed_query(query: str) -> bool:
-    value = (query or "").strip()
-    if not value:
-        return True
-    if value.count('"') % 2:
-        return True
-    if not _parentheses_are_balanced(value):
-        return True
-    if re.search(r"\b(?:AND|OR|NOT)\s*$", value, flags=re.IGNORECASE):
-        return True
-    if re.search(r"\(\s*$", value):
-        return True
-    return False
+    return _harness_looks_truncated_or_malformed_query(query)
 
 
 def _sanitize_openalex_query(query: str) -> str:
@@ -240,7 +219,16 @@ def _sanitize_openalex_query(query: str) -> str:
     cleaned = re.sub(r"\s+([)])", r"\1", cleaned)
     cleaned = re.sub(r"([(])\s+", r"\1", cleaned)
     cleaned = _trim_boolean_edges(cleaned)
+    cleaned = dedupe_repeated_top_level_conjunctions(cleaned)
     return cleaned or original
+
+
+def _sanitize_semantic_scholar_query(query: str) -> str:
+    """Normalize terms for /paper/search, which does not match hyphenated queries reliably."""
+
+    cleaned = str(query or "").strip()
+    cleaned = re.sub(r"(?<=\w)[\-\u2010-\u2015](?=\w)", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _provider_error_text(exc: ProviderError) -> str:
@@ -257,15 +245,7 @@ def _queries_equivalent(left: str, right: str) -> bool:
 
 
 def _strip_llm_fence(text: str) -> str:
-    raw = (text or "").strip()
-    if raw.startswith("```"):
-        lines = raw.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        raw = "\n".join(lines).strip()
-    return raw
+    return _harness_strip_llm_fence(text)
 
 
 def _extract_intent_summary(text: str, max_chars: int = 1600) -> str:
@@ -278,7 +258,16 @@ def _extract_intent_summary(text: str, max_chars: int = 1600) -> str:
         parsed = None
     if isinstance(parsed, dict):
         parts = []
-        for key in ("intent", "core_concepts", "likely_synonyms", "boundaries", "adjustment_strategy"):
+        for key in (
+            "intent",
+            "core_concepts",
+            "must_have_facets",
+            "optional_facets",
+            "required_relation",
+            "likely_synonyms",
+            "boundaries",
+            "adjustment_strategy",
+        ):
             value = parsed.get(key)
             if isinstance(value, list):
                 value = "; ".join(str(item).strip() for item in value if str(item).strip())
@@ -291,6 +280,111 @@ def _extract_intent_summary(text: str, max_chars: int = 1600) -> str:
     if len(raw) > max_chars:
         raw = raw[:max_chars].rstrip() + "..."
     return raw
+
+
+_LOOP_INTENT_STOPWORDS = {
+    "about",
+    "across",
+    "after",
+    "against",
+    "analysis",
+    "and",
+    "are",
+    "based",
+    "between",
+    "boundaries",
+    "concept",
+    "concepts",
+    "core",
+    "data",
+    "effect",
+    "effects",
+    "find",
+    "from",
+    "how",
+    "intent",
+    "into",
+    "keep",
+    "likely",
+    "literature",
+    "method",
+    "methods",
+    "model",
+    "models",
+    "not",
+    "only",
+    "paper",
+    "papers",
+    "query",
+    "research",
+    "result",
+    "results",
+    "search",
+    "study",
+    "studies",
+    "synonyms",
+    "that",
+    "the",
+    "their",
+    "this",
+    "through",
+    "using",
+    "what",
+    "when",
+    "where",
+    "with",
+}
+_LOOP_INTENT_TERM_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]{1,}|[\u4e00-\u9fff]{2,}")
+
+
+def _extract_loop_intent_terms(*texts: str, limit: int = 20) -> list[str]:
+    seen: set[str] = set()
+    terms: list[str] = []
+    for text in texts:
+        for match in _LOOP_INTENT_TERM_RE.findall(str(text or "")):
+            clean = match.strip("-").lower()
+            if len(clean) < 3 and not match.isupper():
+                continue
+            if clean in _LOOP_INTENT_STOPWORDS or clean in seen:
+                continue
+            seen.add(clean)
+            terms.append(clean)
+            if len(terms) >= limit:
+                return terms
+    return terms
+
+
+def _positive_intent_summary_text(text: str) -> str:
+    lines: list[str] = []
+    for line in str(text or "").splitlines():
+        prefix = line.split(":", 1)[0].strip().lower()
+        if prefix in {"boundaries", "exclusions", "exclude", "negative_constraints"}:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _is_source_availability_error(value: object) -> bool:
+    text = str(value or "").casefold()
+    return any(
+        marker in text
+        for marker in (
+            "http 401",
+            "http 403",
+            "http 408",
+            "http 425",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "network error",
+            "timed out",
+            "timeout",
+            "unavailable",
+            "connectionerror",
+        )
+    )
 
 
 def _repair_server_error_query(query: str) -> str:
@@ -363,9 +457,9 @@ def _server_error_query_variants(query: str) -> list:
     return variants
 
 
-def _describe_document(doc, idx: int) -> str:
+def _describe_document(doc, idx: int, abstract_limit: int = 1200) -> str:
     """Produce a compact text description of a document for the LLM ranking prompt."""
-    parts = [f"{idx}. UID: {doc.uid}"]
+    parts = [f"{idx}. UID: {doc.uid or document_key(doc)}"]
     provider = getattr(doc, "provider", "")
     if provider:
         parts.append(f"   Provider: {provider}")
@@ -396,7 +490,7 @@ def _describe_document(doc, idx: int) -> str:
         parts.append(f"   Keywords: {'; '.join(doc.keywords.author_keywords[:8])}")
     abstract = getattr(doc, "abstract", "")
     if abstract:
-        parts.append(f"   Abstract: {abstract[:1200]}")
+        parts.append(f"   Abstract: {abstract[:max(200, int(abstract_limit or 1200))]}")
     return "\n".join(parts)
 
 
@@ -526,10 +620,32 @@ class PaperSeekAgent:
         self.event_handler: Optional[Callable[[dict], None]] = None
         self.citation_map: dict = self._empty_citation_map(enabled=getattr(config, "expand_citations", True))
         self.search_intent: str = ""
+        self.search_plan: Optional[SearchPlan] = None
+        self.search_plan_diagnostics: list[dict] = []
+        self.query_view_selection: list[dict] = []
+        self.query_portfolio: list[dict] = []
+        self.query_portfolio_lane_results: Dict[str, list] = {}
+        self.query_iteration_results: list[dict] = []
+        self._retrieval_primary_hits: list = []
         self.last_query_audit: str = ""
         self.retrieval_metadata_by_key: Dict[str, Dict[str, Any]] = {}
         self.ranking_steps: Dict[str, Dict[str, Any]] = {}
         self.ranking_context: Dict[str, Any] = {}
+        self.search_loop = SearchLoopController.from_config(config)
+        self.search_loop_metadata = self.search_loop.summary()
+        self.search_run_state: Optional[SearchRunState] = None
+        self._candidate_selector_instance: Optional[CandidateSelector] = None
+        self.last_query_selector_feedback: dict[str, Any] = {}
+        self.last_query_selector_batch = SelectorBatch()
+        self.cancel_check: Optional[Callable[[], bool]] = None
+        self.checkpoint_handler: Optional[Callable[[dict], None]] = None
+        self.resume_checkpoint: Optional[SearchCheckpoint] = None
+        self.checkpoint_sequence = 0
+        self.run_question = ""
+        self.iteration_history: list = []
+        self.current_query = ""
+        self.last_total = 0
+        self.last_iteration = 0
 
         self.documents_api = None
         self.provider = None
@@ -557,29 +673,242 @@ class PaperSeekAgent:
         else:
             wos_cfg = Configuration(api_key={"ClarivateApiKeyAuth": config.wos_api_key})
             self.documents_api = DocumentsApi(ApiClient(configuration=wos_cfg))
+        self._source_providers: Dict[str, Any] = {}
+        if self.provider is not None:
+            self._source_providers[self.data_source] = self.provider
 
-    def search(self, question: str, verbose: bool = False, event_handler: Optional[Callable[[dict], None]] = None) -> dict:
+    def search(
+        self,
+        question: str,
+        verbose: bool = False,
+        event_handler: Optional[Callable[[dict], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        checkpoint_handler: Optional[Callable[[dict], None]] = None,
+        resume_checkpoint: Optional[dict] = None,
+    ) -> dict:
         """Main entry: natural language question -> dict with results and metadata."""
         self.event_handler = event_handler
+        self.cancel_check = cancel_check
+        self.checkpoint_handler = checkpoint_handler
+        self.resume_checkpoint = self._validate_resume_checkpoint(question, resume_checkpoint)
+        self.checkpoint_sequence = int(self.resume_checkpoint.sequence if self.resume_checkpoint else 0)
         try:
             return self._search(question, verbose=verbose)
         finally:
             self.event_handler = None
+            self.cancel_check = None
+            self.checkpoint_handler = None
+            self.resume_checkpoint = None
+
+    def _validate_resume_checkpoint(self, question: str, payload: Optional[dict]) -> Optional[SearchCheckpoint]:
+        if not payload:
+            return None
+        try:
+            checkpoint = SearchCheckpoint.model_validate(payload)
+        except Exception as exc:
+            raise CheckpointError(f"checkpoint_corrupt: {exc}") from exc
+        if checkpoint.schema_version != CHECKPOINT_SCHEMA_VERSION:
+            raise CheckpointError(
+                f"checkpoint_corrupt: unsupported schema version {checkpoint.schema_version}"
+            )
+        if checkpoint.question.strip() != question.strip():
+            raise CheckpointError("checkpoint_corrupt: research question does not match the resumed request")
+        if checkpoint.source != self.data_source:
+            raise CheckpointError("checkpoint_corrupt: data source does not match the resumed request")
+        return checkpoint
+
+    def _restore_checkpoint_state(self, checkpoint: SearchCheckpoint) -> None:
+        self._candidate_selector_instance = None
+        self.last_query_selector_feedback = {}
+        self.last_query_selector_batch = SelectorBatch()
+        self.search_intent = checkpoint.search_intent
+        self.search_plan = SearchPlan.model_validate(checkpoint.search_plan) if checkpoint.search_plan else None
+        self.query_view_selection = list(checkpoint.query_view_selection)
+        self.query_portfolio = list(checkpoint.query_portfolio)
+        self.query_iteration_results = []
+        for item in checkpoint.query_iteration_results:
+            if not isinstance(item, dict):
+                continue
+            try:
+                records = paper_records_from_checkpoint(item.get("records") or [])
+            except Exception:
+                continue
+            self.query_iteration_results.append(
+                {
+                    "iteration": int(item.get("iteration") or 0),
+                    "query": str(item.get("query") or ""),
+                    "total": int(item.get("total") or 0),
+                    "records": records,
+                }
+            )
+        self.search_run_state = (
+            SearchRunState.model_validate(checkpoint.search_state)
+            if checkpoint.search_state
+            else SearchRunState(
+                question=checkpoint.question,
+                source=checkpoint.source,
+                current_query=checkpoint.current_query,
+                search_plan=checkpoint.search_plan,
+            )
+        )
+        self.current_query = checkpoint.current_query
+        self.last_total = int(checkpoint.total or 0)
+        self.last_iteration = int(checkpoint.iteration or 0)
+        self.iteration_history = list(checkpoint.history)
+        self.citation_map = dict(checkpoint.citation_map or self._empty_citation_map())
+        self.ranking_steps = {
+            str(step.get("id") or step.get("step_id") or index): dict(step)
+            for index, step in enumerate(checkpoint.ranking_steps)
+            if isinstance(step, dict)
+        }
+
+    def _save_checkpoint(
+        self,
+        stage: str,
+        *,
+        records: Optional[list] = None,
+        ranking_scores: Optional[list] = None,
+        completed_batch_ids: Optional[list[str]] = None,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        if not self.checkpoint_handler:
+            return
+        self.checkpoint_sequence += 1
+        checkpoint = SearchCheckpoint(
+            schema_version=CHECKPOINT_SCHEMA_VERSION,
+            sequence=self.checkpoint_sequence,
+            stage=stage,
+            question=self.run_question,
+            source=self.data_source,
+            current_query=self.current_query,
+            total=int(self.last_total or 0),
+            iteration=int(self.last_iteration or 0),
+            search_intent=self.search_intent,
+            search_plan=self.search_plan.model_dump() if self.search_plan else {},
+            query_view_selection=list(self.query_view_selection),
+            query_portfolio=list(self.query_portfolio),
+            history=list(self.iteration_history or []),
+            search_state=self._search_state_payload(),
+            records=paper_records_to_checkpoint(records or []),
+            query_iteration_results=[
+                {
+                    "iteration": int(item.get("iteration") or 0),
+                    "query": str(item.get("query") or ""),
+                    "total": int(item.get("total") or 0),
+                    "records": paper_records_to_checkpoint(item.get("records") or []),
+                }
+                for item in self.query_iteration_results
+                if isinstance(item, dict) and item.get("records")
+            ],
+            citation_map=dict(self.citation_map or {}),
+            ranking_steps=list(self.ranking_steps.values()),
+            ranking_scores=list(ranking_scores or []),
+            completed_batch_ids=list(completed_batch_ids or []),
+            metadata=dict(metadata or {}),
+        )
+        try:
+            self.checkpoint_handler(scrub_checkpoint_value(checkpoint.model_dump()))
+        except SearchCancelled:
+            raise
+        except Exception as exc:
+            self._emit_log(f"Checkpoint persistence failed; search will continue without this snapshot: {exc}")
+        self._check_cancelled()
 
     def _search(self, question: str, verbose: bool = False) -> dict:
-        self.search_intent = self._analyze_intent(question)
-        if self.search_intent:
-            self._emit_stage("query", "processing", source=self.data_source, intent=self.search_intent)
-        query = self._source_safe_query(self._apply_discipline_filter(self._generate_query(question)))
-        history = []
-        iteration = 0
-        total = 0
-        hits = []
+        self.run_question = question
+        self.query_portfolio_lane_results = {}
+        self.query_iteration_results = []
+        checkpoint = self.resume_checkpoint
+        if checkpoint:
+            self._restore_checkpoint_state(checkpoint)
+            history = list(checkpoint.history)
+            self.iteration_history = history
+            query = checkpoint.current_query
+            iteration = int(checkpoint.iteration or 0)
+            total = int(checkpoint.total or 0)
+            restored_records = paper_records_from_checkpoint(checkpoint.records)
+            phase = str((checkpoint.metadata or {}).get("phase") or "")
+
+            if checkpoint.stage in {"candidate_merge", "citation_layer", "pre_rank", "ranking_batch", "ranking_complete"}:
+                return self._complete_search_pipeline(
+                    question,
+                    query,
+                    total,
+                    restored_records,
+                    history,
+                    iteration,
+                    checkpoint=checkpoint,
+                )
+            if checkpoint.stage == "query_execution" and phase in {"query_primary_complete", "query_portfolio"}:
+                hits = restored_records
+                if phase == "query_portfolio":
+                    self.query_portfolio_lane_results["checkpoint"] = list(hits)
+                hits = self._execute_query_portfolio(question, query, hits, history)
+                self._save_checkpoint(
+                    "query_execution",
+                    records=hits,
+                    metadata={"phase": "query_complete", "resume_from_stage": "query_execution"},
+                )
+                return self._complete_search_pipeline(question, query, total, hits, history, iteration)
+            if checkpoint.stage == "query_execution" and phase == "query_complete":
+                return self._complete_search_pipeline(
+                    question,
+                    query,
+                    total,
+                    restored_records,
+                    history,
+                    iteration,
+                )
+
+            hits = []
+            fallback_query = str((checkpoint.metadata or {}).get("fallback_query") or "")
+            fallback_total = int((checkpoint.metadata or {}).get("fallback_total") or 0)
+            fallback_hits = restored_records
+            self._emit_log(
+                f"Resuming query loop from durable checkpoint: stage={checkpoint.stage}; "
+                f"phase={phase or 'query_ready'}; next_iteration={iteration + 1}."
+            )
+        else:
+            self._candidate_selector_instance = None
+            self.last_query_selector_feedback = {}
+            self.last_query_selector_batch = SelectorBatch()
+            self.iteration_history = []
+            self.current_query = ""
+            self.last_total = 0
+            self.last_iteration = 0
+            self.search_plan = None
+            self.query_view_selection = []
+            self.query_portfolio = []
+            self.search_intent = self._analyze_intent(question)
+            if self.search_intent:
+                self._emit_stage("query", "processing", source=self.data_source, intent=self.search_intent)
+            query = self._source_safe_query(self._apply_discipline_filter(self._generate_query(question)))
+            self.search_run_state = SearchRunState(
+                question=question,
+                source=self.data_source,
+                current_query=query,
+                search_plan=self.search_plan.model_dump() if self.search_plan else {},
+            )
+            self.current_query = query
+            history = []
+            self.iteration_history = history
+            iteration = 0
+            total = 0
+            hits = []
+            fallback_query = ""
+            fallback_total = 0
+            fallback_hits: list = []
+            self._save_checkpoint(
+                "search_plan",
+                metadata={"phase": "query_ready", "resume_from_stage": "search_plan"},
+            )
 
         configured_iterations = max(1, int(getattr(self.config, "max_iterations", 5) or 5))
         adaptive_max_iterations = self._adaptive_max_iterations(configured_iterations)
         while iteration < adaptive_max_iterations:
+            self._check_cancelled()
             iteration += 1
+            self.last_iteration = iteration
             if self.data_source == "wos":
                 safe_query = _make_starter_safe_query(query)
                 sanitize_message = "Converted the generated query to the stable WoS Starter subset before calling the API."
@@ -598,15 +927,49 @@ class PaperSeekAgent:
                 history.append(row)
                 self._emit_stage("search", "processing", history=history, final_query=safe_query)
                 query = safe_query
+                self._set_search_state_query(query)
 
             if verbose:
                 print(f"[Iteration {iteration}] Query: {query}", file=sys.stderr)
 
             server_error_variants = _server_error_query_variants(query)
             provider_repair_attempts = set()
+            preflight_repair_attempts = 0
             try:
                 while True:
+                    validation = self._preflight_query(query)
+                    if not validation.ok:
+                        if preflight_repair_attempts < 2:
+                            preflight_repair_attempts += 1
+                            repaired_query = self._retry_malformed_source_query(
+                                question,
+                                query,
+                                feedback="",
+                                system_prompt=self._syntax_repair_prompt(),
+                                log_name=f"{self.data_source}_query_preflight",
+                                output_label=f"{self._source_label()} query string",
+                                operation="preflight validation",
+                                issue=validation.issue,
+                            )
+                            if repaired_query and not _queries_equivalent(query, repaired_query):
+                                row = {
+                                    "iteration": iteration,
+                                    "query": query,
+                                    "total": None,
+                                    "action": "repair",
+                                    "next_query": repaired_query,
+                                    "message": f"{self._source_label()} query failed harness preflight; repaired before calling the source API.",
+                                    "rationale": self._consume_query_audit(),
+                                }
+                                history.append(row)
+                                self._emit_stage("search", "processing", history=history, final_query=repaired_query)
+                                self._emit_log(f"{self._source_label()} query repaired by harness preflight; retrying validation.")
+                                query = repaired_query
+                                self._set_search_state_query(query)
+                                continue
+                        raise LLMError(f"{self._source_label()} query failed harness preflight: {validation.issue}")
                     try:
+                        self._check_cancelled()
                         self._emit_stage(
                             "search",
                             "processing",
@@ -616,12 +979,24 @@ class PaperSeekAgent:
                             final_query=query,
                         )
                         self._emit_log(f"{self._source_label()} request started: {self._source_request_label(query)}")
-                        result = self._provider_search(query)
+                        result, search_error = self._harness_source_search(query)
+                        self._check_cancelled()
+                        if search_error is not None:
+                            raise search_error
                         self._emit_log(self._source_response_log(result))
                         break
                     except ProviderError as e:
                         repair_key = (query, e.status, str(e)[:200])
-                        if repair_key not in provider_repair_attempts and len(provider_repair_attempts) < 2:
+                        repair_attempts = len(provider_repair_attempts)
+                        if repair_key in provider_repair_attempts:
+                            repair_attempts = 2
+                        recovery = self._recover_source_error(
+                            e,
+                            query=query,
+                            repair_attempts=repair_attempts,
+                            max_repair_attempts=2,
+                        )
+                        if recovery.action == RECOVERY_REPAIR_QUERY and repair_key not in provider_repair_attempts:
                             provider_repair_attempts.add(repair_key)
                             repaired_query = self._repair_query_after_provider_error(question, query, e)
                             if repaired_query and not _queries_equivalent(query, repaired_query):
@@ -637,10 +1012,18 @@ class PaperSeekAgent:
                                 self._emit_stage("search", "processing", history=history, final_query=repaired_query)
                                 self._emit_log(f"{self._source_label()} query repaired after API error; retrying request.")
                                 query = repaired_query
+                                self._set_search_state_query(query)
                                 continue
                         raise
                     except ApiException as e:
-                        if e.status == 512 and server_error_variants:
+                        recovery = self._recover_source_error(
+                            e,
+                            query=query,
+                            repair_attempts=0,
+                            max_repair_attempts=1,
+                            has_server_error_variant=bool(server_error_variants),
+                        )
+                        if recovery.action == RECOVERY_SIMPLIFY_QUERY and server_error_variants:
                             repaired_query = server_error_variants.pop(0)
                             if repaired_query != query:
                                 action = "repair" if "NEAR/" in repaired_query.upper() else "simplify"
@@ -655,12 +1038,24 @@ class PaperSeekAgent:
                                 history.append(row)
                                 self._emit_stage("search", "processing", history=history, final_query=repaired_query)
                                 query = repaired_query
+                                self._set_search_state_query(query)
                                 if verbose:
                                     print(f"[Iteration {iteration}] Rewrote query after 512: {query}", file=sys.stderr)
                                 continue
                         raise
             except ApiException as e:
                 if e.status == 400 and "query" in str(e.body).lower():
+                    recovery = self._recover_source_error(
+                        e,
+                        query=query,
+                        repair_attempts=0,
+                        max_repair_attempts=1,
+                        allow_broaden_query=True,
+                    )
+                    if recovery.action != RECOVERY_BROADEN_QUERY:
+                        e.query = query
+                        e.iteration = iteration
+                        raise
                     current_query = query
                     feedback = self._result_feedback(query, [], None, "syntax rejected")
                     revised_query = self._apply_discipline_filter(self._broaden_query(question, query, feedback))
@@ -681,6 +1076,7 @@ class PaperSeekAgent:
                     }
                     history.append(row)
                     self._emit_stage("search", "processing", history=history, final_query=query)
+                    self._set_search_state_query(query)
                     continue
                 e.query = query
                 e.iteration = iteration
@@ -688,17 +1084,41 @@ class PaperSeekAgent:
 
             total = result.metadata.total if result.metadata and result.metadata.total is not None else 0
             hits = result.hits or []
+            self._record_query_iteration(iteration, query, total, hits)
+            self.last_total = int(total or 0)
+            if total and hits:
+                pool_max = self._retrieval_pool_max()
+                if not fallback_hits or int(total or 0) <= pool_max or int(fallback_total or 0) > pool_max:
+                    fallback_query = query
+                    fallback_total = int(total or 0)
+                    fallback_hits = list(hits or [])
 
             if verbose:
                 print(f"[Iteration {iteration}] Total results: {total}", file=sys.stderr)
 
-            if total == 0 and self._should_broaden_after_result(total, iteration, configured_iterations, adaptive_max_iterations):
+            selector_batch = self._query_iteration_selector_feedback(question, query, hits, iteration)
+            decision = self._query_loop_decision(
+                query,
+                hits,
+                total,
+                iteration,
+                configured_iterations,
+                adaptive_max_iterations,
+                history,
+            )
+
+            if decision.action == ACTION_BROADEN:
                 current_query = query
-                feedback = self._result_feedback(query, hits, total, "too few or zero records")
+                feedback = self._result_feedback(query, hits, total, decision.adjustment or "too few or zero records")
                 revised_query = self._apply_discipline_filter(self._broaden_query(question, query, feedback))
                 query_audit = self._consume_query_audit()
                 if _queries_equivalent(current_query, revised_query):
                     self._complete_after_unchanged_revision(history, iteration, current_query, total, hits, "broader")
+                    self._save_checkpoint(
+                        "query_execution",
+                        records=hits,
+                        metadata={"phase": "query_primary_complete"},
+                    )
                     break
                 query = revised_query
                 row = {
@@ -707,38 +1127,26 @@ class PaperSeekAgent:
                     "total": total,
                     "action": "broaden",
                     "next_query": query,
-                    "message": "No records found; generated a broader query.",
+                    "message": decision.message,
                     "rationale": query_audit,
+                    "controller_reason": decision.reason,
                 }
                 history.append(row)
+                self._set_search_state_query(query)
                 self._emit_stage("search", "processing", total=total, history=history, final_query=query, preview=self._preview_hits(hits))
+                self._save_checkpoint(
+                    "query_execution",
+                    records=fallback_hits,
+                    metadata={
+                        "phase": "next_query",
+                        "fallback_query": fallback_query,
+                        "fallback_total": fallback_total,
+                    },
+                )
                 continue
-            elif self._should_broaden_after_result(total, iteration, configured_iterations, adaptive_max_iterations):
+            elif decision.action == ACTION_NARROW:
                 current_query = query
-                feedback = self._result_feedback(query, hits, total, f"below target minimum {self.config.target_min}")
-                revised_query = self._apply_discipline_filter(self._broaden_query(question, query, feedback))
-                query_audit = self._consume_query_audit()
-                if _queries_equivalent(current_query, revised_query):
-                    self._complete_after_unchanged_revision(history, iteration, current_query, total, hits, "broader")
-                    break
-                query = revised_query
-                row = {
-                    "iteration": iteration,
-                    "query": current_query,
-                    "total": total,
-                    "action": "broaden",
-                    "next_query": query,
-                    "message": f"Only {total} records found, below the target minimum of {self.config.target_min}; generated a broader query.",
-                    "rationale": query_audit,
-                }
-                history.append(row)
-                self._emit_stage("search", "processing", total=total, history=history, final_query=query, preview=self._preview_hits(hits))
-                continue
-            elif self._should_narrow_after_result(total, iteration, configured_iterations, adaptive_max_iterations):
-                current_query = query
-                adjustment = f"above LLM pre-ranking safety pool {self._retrieval_pool_max()}"
-                message = f"{total} records found, above the LLM pre-ranking safety pool of {self._retrieval_pool_max()}; generated a narrower query."
-                feedback = self._result_feedback(query, hits, total, adjustment)
+                feedback = self._result_feedback(query, hits, total, decision.adjustment)
                 revised_query = self._apply_discipline_filter(self._narrow_query(question, query, feedback))
                 query_audit = self._consume_query_audit()
                 if _queries_equivalent(current_query, revised_query):
@@ -753,6 +1161,11 @@ class PaperSeekAgent:
                         query_audit = self._consume_query_audit()
                     if _queries_equivalent(current_query, revised_query):
                         self._complete_after_unchanged_revision(history, iteration, current_query, total, hits, "narrower")
+                        self._save_checkpoint(
+                            "query_execution",
+                            records=hits,
+                            metadata={"phase": "query_primary_complete"},
+                        )
                         break
                 query = revised_query
                 row = {
@@ -761,37 +1174,39 @@ class PaperSeekAgent:
                     "total": total,
                     "action": "narrow",
                     "next_query": query,
-                    "message": message,
+                    "message": decision.message,
                     "rationale": query_audit,
+                    "controller_reason": decision.reason,
                 }
                 history.append(row)
+                self._set_search_state_query(query)
                 self._emit_stage("search", "processing", total=total, history=history, final_query=query, preview=self._preview_hits(hits))
+                self._save_checkpoint(
+                    "query_execution",
+                    records=fallback_hits,
+                    metadata={
+                        "phase": "next_query",
+                        "fallback_query": fallback_query,
+                        "fallback_total": fallback_total,
+                    },
+                )
                 continue
             else:
-                if total == 0:
-                    action = "empty"
-                    message = "No records found before the iteration limit was reached."
-                elif total < self.config.target_min:
-                    action = "accept_low"
-                    message = f"Accepted {total} records at the iteration limit, below the target minimum of {self.config.target_min}."
-                elif total > self._retrieval_pool_max():
-                    action = "accept_high"
-                    message = f"Accepted {total} records at the iteration limit, above the LLM pre-ranking safety pool of {self._retrieval_pool_max()}; the fused candidate pool will be truncated before LLM ranking."
-                elif total > self.config.target_max:
-                    action = "accept_pool"
-                    message = f"Accepted {total} records for downstream pre-ranking; final displayed results are selected after retrieval fusion and LLM ranking."
-                else:
-                    action = "accept"
-                    message = f"Accepted {total} records within the target range."
                 row = {
                     "iteration": iteration,
                     "query": query,
                     "total": total,
-                    "action": action,
+                    "action": decision.action,
                     "next_query": None,
-                    "message": message,
+                    "message": decision.message,
+                    "controller_reason": decision.reason,
                 }
                 history.append(row)
+                self._save_checkpoint(
+                    "query_execution",
+                    records=hits,
+                    metadata={"phase": "query_primary_complete"},
+                )
                 self._emit_stage(
                     "search",
                     "complete",
@@ -806,7 +1221,71 @@ class PaperSeekAgent:
             if verbose:
                 print(f"[Done] {total} total results after {iteration} iterations.", file=sys.stderr)
 
-        self.ranking_steps = {}
+        if total == 0 and not hits and fallback_hits:
+            zero_query = query
+            query = fallback_query
+            total = fallback_total
+            hits = fallback_hits
+            self.last_total = int(total or 0)
+            self._set_search_state_query(query)
+            row = {
+                "iteration": iteration,
+                "query": zero_query,
+                "total": 0,
+                "action": "fallback",
+                "next_query": query,
+                "message": (
+                    "The latest query returned 0 records; fell back to the most recent non-empty "
+                    "candidate pool for downstream retrieval and ranking."
+                ),
+            }
+            history.append(row)
+            self._emit_stage(
+                "search",
+                "complete",
+                total=total,
+                history=history,
+                final_query=query,
+                preview=self._preview_hits(hits),
+            )
+
+        hits = self._execute_query_portfolio(question, query, hits, history)
+        if total == 0 and hits:
+            total = len(hits)
+            self.last_total = total
+        self._set_search_state_query(query)
+        self._save_checkpoint(
+            "query_execution",
+            records=hits,
+            metadata={"phase": "query_complete", "resume_from_stage": "query_execution"},
+        )
+
+        return self._complete_search_pipeline(question, query, total, hits, history, iteration)
+
+    def _complete_search_pipeline(
+        self,
+        question: str,
+        query: str,
+        total: int,
+        hits: list,
+        history: list,
+        iteration: int,
+        checkpoint: Optional[SearchCheckpoint] = None,
+    ) -> dict:
+        checkpoint_records = paper_records_from_checkpoint(checkpoint.records) if checkpoint else []
+        checkpoint_stage = checkpoint.stage if checkpoint else ""
+        resume_stage = str((checkpoint.metadata or {}).get("resume_from_stage") or checkpoint_stage) if checkpoint else ""
+        checkpoint_step = str((checkpoint.metadata or {}).get("step_id") or "") if checkpoint else ""
+        if checkpoint_stage == "ranking_batch" and checkpoint_step == "llm_reranking":
+            resume_stage = "ranking_batch"
+
+        if checkpoint:
+            self._emit_log(
+                f"Resuming search from durable checkpoint: stage={checkpoint_stage}; "
+                f"resume_stage={resume_stage}; sequence={checkpoint.sequence}."
+            )
+
+        self.ranking_steps = dict(self.ranking_steps or {})
         ranking_context = {
             "source": self.data_source,
             "total": total,
@@ -815,43 +1294,101 @@ class PaperSeekAgent:
             "preview": self._preview_hits(hits),
         }
         self.ranking_context = dict(ranking_context)
+        self._check_cancelled()
         self._emit_stage("ranking", "processing", candidate_count=len(hits or []), **ranking_context)
-        if total == 0 and not hits:
+        if resume_stage in {"candidate_merge", "candidate_feedback", "citation_layer", "pre_rank", "ranking_batch", "ranking_complete"}:
+            retrieved = checkpoint_records
+        elif total == 0 and not hits:
             retrieved = []
         else:
             retrieved = self._retrieve_candidates(question, query, hits)
-        self._emit_ranking_step(
-            "candidate_preparation",
-            "processing",
-            "Preparing LLM candidate list",
-            current=0,
-            total=max(1, len(retrieved or [])),
-            detail=f"{len(retrieved or [])} fused candidates before citation expansion.",
-        )
-        candidates = self._prepare_candidates(question, retrieved)
-        self._emit_ranking_step(
-            "candidate_preparation",
-            "complete",
-            "Preparing LLM candidate list",
-            current=len(candidates),
-            total=max(1, len(candidates)),
-            detail=f"{len(candidates)} candidates ready before LLM ranking.",
-            candidate_count=len(candidates),
-        )
-        ranking_candidate_limit = self._llm_ranking_candidate_limit()
-        if len(candidates) > ranking_candidate_limit:
-            self._emit_log(
-                f"LLM ranking candidate list truncated: candidates={len(candidates)}; "
-                f"ranking_candidate_limit={ranking_candidate_limit}."
+            self._save_checkpoint(
+                "candidate_merge",
+                records=retrieved,
+                metadata={"resume_from_stage": "candidate_merge"},
             )
-            candidates = candidates[:ranking_candidate_limit]
+        self._check_cancelled()
+        if resume_stage in {"citation_layer", "pre_rank", "ranking_batch", "ranking_complete"}:
+            candidates = checkpoint_records
+        elif resume_stage == "candidate_feedback":
+            self._emit_log("Resuming the candidate feedback frontier from its durable action state.")
+            candidates = self._prepare_candidates(question, retrieved)
+            self._save_checkpoint(
+                "citation_layer",
+                records=candidates,
+                metadata={"resume_from_stage": "citation_layer"},
+            )
+        else:
+            self._emit_ranking_step(
+                "candidate_preparation",
+                "processing",
+                "Preparing LLM candidate list",
+                current=0,
+                total=max(1, len(retrieved or [])),
+                detail=f"{len(retrieved or [])} fused candidates before citation expansion.",
+            )
+            candidates = self._prepare_candidates(question, retrieved)
+            self._emit_ranking_step(
+                "candidate_preparation",
+                "complete",
+                "Preparing LLM candidate list",
+                current=len(candidates),
+                total=max(1, len(candidates)),
+                detail=f"{len(candidates)} candidates ready before LLM ranking.",
+                candidate_count=len(candidates),
+            )
+            self._save_checkpoint(
+                "citation_layer",
+                records=candidates,
+                metadata={"resume_from_stage": "citation_layer"},
+            )
+
+        ranking_candidate_limit = self._llm_ranking_candidate_limit()
+        if resume_stage in {"pre_rank", "ranking_batch", "ranking_complete"}:
+            all_candidates = list(candidates)
+        else:
+            candidates = self._prioritize_selector_includes(candidates)
+            all_candidates = list(candidates)
+            if len(candidates) > ranking_candidate_limit:
+                self._emit_log(
+                    f"LLM ranking candidate list truncated: candidates={len(candidates)}; "
+                    f"ranking_candidate_limit={ranking_candidate_limit}."
+                )
+                candidates = candidates[:ranking_candidate_limit]
+            self._record_candidate_gate(all_candidates, candidates, ranking_candidate_limit)
+            self._save_checkpoint(
+                "pre_rank",
+                records=candidates,
+                metadata={"resume_from_stage": "pre_rank", "all_candidate_count": len(all_candidates)},
+            )
         if len(candidates) != len(hits or []):
             self._emit_stage("ranking", "processing", candidate_count=len(candidates), **ranking_context)
-        ranked_all = self._rank_results(question, candidates, ranking_context=ranking_context)
+        self._check_cancelled()
+        if resume_stage == "ranking_complete":
+            ranked_all = self._rank_from_scores(candidates, checkpoint.ranking_scores)
+        else:
+            ranked_all = self._rank_results(
+                question,
+                candidates,
+                ranking_context=ranking_context,
+                resume_scores=(checkpoint.ranking_scores if resume_stage == "ranking_batch" else None),
+                completed_batch_ids=(checkpoint.completed_batch_ids if resume_stage == "ranking_batch" else None),
+                checkpoint_records=candidates,
+                checkpoint_resume_stage="pre_rank",
+            )
+            self._save_checkpoint(
+                "ranking_complete",
+                records=candidates,
+                ranking_scores=self._ranking_scores_from_ranked(ranked_all),
+                metadata={"resume_from_stage": "ranking_complete"},
+            )
+        self._record_candidate_scores(ranked_all, "llm_scored")
         ranked = self._select_ranked_output(ranked_all)
+        self._record_final_candidates(ranked)
         self._finalize_citation_map(ranked)
 
         if self.config.fetch_abstracts:
+            self._check_cancelled()
             self._emit_log("External abstract enrichment started.")
             self._emit_ranking_step(
                 "abstract_enrichment",
@@ -885,6 +1422,10 @@ class PaperSeekAgent:
         return {
             "question": question,
             "search_intent": self.search_intent,
+            "search_plan": self.search_plan.model_dump() if self.search_plan else {},
+            "query_view_selection": list(self.query_view_selection),
+            "query_portfolio": list(self.query_portfolio),
+            "query_iteration_memory": self._query_iteration_memory_payload(),
             "final_query": query,
             "db": self.config.wos_db if self.data_source == "wos" else self.data_source.upper(),
             "source": self.data_source,
@@ -892,10 +1433,1587 @@ class PaperSeekAgent:
             "total": total,
             "iterations": iteration,
             "history": history,
+            "search_loop": self.search_loop_metadata,
+            "search_state": self._search_state_payload(),
             "citation_map": self.citation_map,
             "ranking_steps": list(self.ranking_steps.values()),
             "ranked": ranked,
         }
+
+    @staticmethod
+    def _ranking_scores_from_ranked(ranked: list) -> list[dict[str, Any]]:
+        output = []
+        for entry in ranked or []:
+            document = entry.get("document") if isinstance(entry, dict) else None
+            uid = str(getattr(document, "uid", "") or "")
+            if not uid:
+                continue
+            output.append(
+                {
+                    "uid": uid,
+                    "score": entry.get("score", 0),
+                    "reasoning": str(entry.get("reasoning") or ""),
+                }
+            )
+        return output
+
+    def partial_result_payload(self, question: str = "") -> dict:
+        """Return the latest safe run snapshot for failed or cancelled searches."""
+        query = self.current_query or (self.search_run_state.current_query if self.search_run_state else "")
+        return {
+            "question": question or self.run_question,
+            "search_intent": self.search_intent,
+            "search_plan": self.search_plan.model_dump() if self.search_plan else {},
+            "query_view_selection": list(self.query_view_selection),
+            "query_portfolio": list(self.query_portfolio),
+            "query_iteration_memory": self._query_iteration_memory_payload(),
+            "final_query": query,
+            "db": self.config.wos_db if self.data_source == "wos" else self.data_source.upper(),
+            "source": self.data_source,
+            "field": self._field_summary(),
+            "total": self.last_total,
+            "iterations": self.last_iteration,
+            "history": list(self.iteration_history or []),
+            "search_loop": dict(self.search_loop_metadata or {}),
+            "search_state": self._search_state_payload(),
+            "citation_map": dict(self.citation_map or {}),
+            "ranking_steps": list(self.ranking_steps.values()),
+            "ranked": [],
+        }
+
+    def _search_state_payload(self) -> dict:
+        if self.search_run_state is None:
+            return {}
+
+        payload = self.search_run_state.model_dump()
+        queue_payload = payload.get("candidate_queue") or {}
+        ledger = self.search_run_state.candidate_queue.ledger
+        selector_counts: Dict[str, int] = {}
+        ranking_gate_counts: Dict[str, int] = {}
+        lifecycle_candidate_counts: Dict[str, int] = {}
+        citation_candidate_count = 0
+        ranked_ledger_keys = []
+
+        for insertion_order, (key, evidence) in enumerate(ledger.items()):
+            label = str(evidence.selector_label or "unseen")
+            selector_counts[label] = selector_counts.get(label, 0) + 1
+            gate_label = str(evidence.ranking_gate_label or "unseen")
+            ranking_gate_counts[gate_label] = ranking_gate_counts.get(gate_label, 0) + 1
+            actions = {str(event.action or "") for event in evidence.lifecycle if event.action}
+            for action in actions:
+                lifecycle_candidate_counts[action] = lifecycle_candidate_counts.get(action, 0) + 1
+            if evidence.citation_paths:
+                citation_candidate_count += 1
+
+            priority = 4
+            if "final_output" in actions:
+                priority = 0
+            elif "llm_scored" in actions:
+                priority = 1
+            elif "selected_for_llm" in actions or label == "include":
+                priority = 2
+            elif evidence.citation_paths:
+                priority = 3
+            ranked_ledger_keys.append((priority, insertion_order, key))
+
+        retained_keys = {
+            key
+            for _, _, key in sorted(ranked_ledger_keys)[:_SERIALIZED_CANDIDATE_LEDGER_LIMIT]
+        }
+        serialized_ledger = {
+            key: value
+            for key, value in dict(queue_payload.get("ledger") or {}).items()
+            if key in retained_keys
+        }
+        queue_payload["ledger"] = serialized_ledger
+        queue_payload["ledger_summary"] = {
+            "total_candidates": len(ledger),
+            "serialized_candidates": len(serialized_ledger),
+            "omitted_candidates": max(0, len(ledger) - len(serialized_ledger)),
+            "selector_counts": selector_counts,
+            "ranking_gate_counts": ranking_gate_counts,
+            "lifecycle_candidate_counts": lifecycle_candidate_counts,
+            "citation_candidate_count": citation_candidate_count,
+        }
+        payload["candidate_queue"] = queue_payload
+        return payload
+
+    def _query_loop_decision(
+        self,
+        query: str,
+        hits: list,
+        total: int,
+        iteration: int,
+        configured_iterations: int,
+        adaptive_max_iterations: int,
+        history: list,
+        selector_batch: Optional[SelectorBatch] = None,
+    ) -> QueryLoopDecision:
+        self._set_search_state_query(query)
+        preview = self._preview_hits(hits)
+        selector_batch = selector_batch or self.last_query_selector_batch
+        selector_counts = selector_batch.label_counts()
+        missing_concepts = self._merge_unique(
+            [],
+            [
+                concept
+                for decision in selector_batch.decisions
+                if decision.label != "exclude"
+                for concept in decision.missing_concepts
+            ],
+        )
+        snapshot = QueryLoopSnapshot(
+            iteration=iteration,
+            configured_iterations=configured_iterations,
+            adaptive_max_iterations=adaptive_max_iterations,
+            total=total,
+            target_min=int(getattr(self.config, "target_min", 5) or 5),
+            target_max=int(getattr(self.config, "target_max", 50) or 50),
+            retrieval_pool_min=self._retrieval_pool_min(),
+            retrieval_pool_max=self._retrieval_pool_max(),
+            history=history,
+            query=query,
+            hit_count=len(hits or []),
+            top_titles=[str(item.get("title") or "") for item in preview if item.get("title")],
+            intent_terms=_extract_loop_intent_terms(self.run_question, query, _positive_intent_summary_text(self.search_intent)),
+            selector_observed_count=len(selector_batch.decisions),
+            selector_include_count=selector_counts.get("include", 0),
+            selector_uncertain_count=selector_counts.get("uncertain", 0),
+            selector_exclude_count=selector_counts.get("exclude", 0),
+            selector_missing_concepts=missing_concepts,
+        )
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query=query)
+        self.search_run_state, decision = self.search_loop.evaluate(self.search_run_state, snapshot)
+        return decision
+
+    def _query_iteration_selector_feedback(
+        self,
+        question: str,
+        query: str,
+        hits: list,
+        iteration: int,
+    ) -> SelectorBatch:
+        self.last_query_selector_feedback = {}
+        self.last_query_selector_batch = SelectorBatch()
+        if not (
+            bool(getattr(self.config, "crawler_enabled", False))
+            and self._intermediate_selector_feedback_active()
+            and hits
+        ):
+            return SelectorBatch()
+        sample = self._crawler_selector_sample(hits)
+        before_selected = {
+            key
+            for key, evidence in self.search_run_state.candidate_queue.ledger.items()
+            if evidence.selector_label in {"include", "exclude", "uncertain"}
+        }
+        batch = self._select_candidate_batch(
+            question,
+            sample,
+            f"query_iteration:{iteration}",
+        )
+        new_decisions = [
+            decision
+            for decision in batch.decisions
+            if decision.candidate_id not in before_selected
+        ]
+        if new_decisions:
+            scheduler = FrontierScheduler(
+                self.search_run_state.action_frontier,
+                low_yield_round_limit=max(1, int(getattr(self.config, "crawler_low_yield_round_limit", 2) or 2)),
+            )
+            controller = CrawlerController(
+                self.search_plan,
+                self.data_source,
+                scheduler,
+                state=self.search_run_state.crawler_state,
+                supported_actions=(),
+            )
+            controller.observe_selector(
+                batch.model_copy(update={"decisions": new_decisions}),
+                allow_follow_up_actions=False,
+            )
+            self.search_run_state = self.search_run_state.with_action_frontier(
+                controller.scheduler.snapshot()
+            ).with_crawler_state(controller.state)
+
+        counts = batch.label_counts()
+        missing = self._merge_unique(
+            [],
+            [
+                concept
+                for decision in batch.decisions
+                if decision.label != "exclude"
+                for concept in decision.missing_concepts
+            ],
+        )
+        self.last_query_selector_feedback = {
+            "query": query,
+            "iteration": iteration,
+            "observed": len(batch.decisions),
+            "include": counts.get("include", 0),
+            "uncertain": counts.get("uncertain", 0),
+            "exclude": counts.get("exclude", 0),
+            "missing_concepts": missing[:8],
+        }
+        self.last_query_selector_batch = batch
+        self._emit_log(
+            "Query-loop Candidate Selector feedback: "
+            f"iteration={iteration}; inspected={len(batch.decisions)}; "
+            f"include={counts.get('include', 0)}; uncertain={counts.get('uncertain', 0)}; "
+            f"exclude={counts.get('exclude', 0)}; missing={','.join(missing[:5]) or 'none'}."
+        )
+        return batch
+
+    def _set_search_state_query(self, query: str) -> None:
+        self.current_query = query or ""
+        if self.search_run_state is not None:
+            self.search_run_state = self.search_run_state.with_current_query(query)
+
+    def _preflight_query(self, query: str):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query=query)
+        self.search_run_state, validation = self.search_loop.preflight(self.search_run_state, query)
+        return validation
+
+    def _harness_source_search(self, query: str):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query=query)
+        self.search_run_state, result, error = self.search_loop.source_search(
+            self.search_run_state,
+            query,
+            self._provider_search,
+        )
+        return result, error
+
+    def _recover_source_error(
+        self,
+        error: Exception,
+        *,
+        query: str = "",
+        repair_attempts: int = 0,
+        max_repair_attempts: int = 2,
+        has_server_error_variant: bool = False,
+        allow_broaden_query: bool = False,
+    ):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query=query)
+        self.search_run_state, decision = self.search_loop.recover_source_error(
+            self.search_run_state,
+            error,
+            query=query,
+            repair_attempts=repair_attempts,
+            max_repair_attempts=max_repair_attempts,
+            has_server_error_variant=has_server_error_variant,
+            allow_broaden_query=allow_broaden_query,
+        )
+        return decision
+
+    def _observe_ranking_batch_error(
+        self,
+        error: Exception,
+        *,
+        step_id: str,
+        batch_index: int,
+        batch_count: int,
+        concurrency: int,
+        candidate_count: int,
+        rate_limited: bool,
+    ):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query="")
+        self.search_run_state, observation = self.search_loop.observe_ranking_batch_error(
+            self.search_run_state,
+            error,
+            step_id=step_id,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            concurrency=concurrency,
+            candidate_count=candidate_count,
+            rate_limited=rate_limited,
+        )
+        return observation
+
+    def _recover_ranking_failures(
+        self,
+        *,
+        step_id: str,
+        concurrency: int,
+        next_concurrency: int,
+        failed_batches: int,
+        failed_candidates: int,
+        rate_limited: bool,
+    ):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query="")
+        self.search_run_state, decision = self.search_loop.recover_ranking_failures(
+            self.search_run_state,
+            step_id=step_id,
+            concurrency=concurrency,
+            next_concurrency=next_concurrency,
+            failed_batches=failed_batches,
+            failed_candidates=failed_candidates,
+            rate_limited=rate_limited,
+        )
+        return decision
+
+    def _plan_citation_expansion(self, *, candidate_count: int, seed_ranking_count: int, seed_count: int, depth: int):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query="")
+        self.search_run_state, decision = self.search_loop.plan_citation_expansion(
+            self.search_run_state,
+            candidate_count=candidate_count,
+            seed_ranking_count=seed_ranking_count,
+            configured_seed_count=seed_count,
+            configured_depth=depth,
+        )
+        return decision
+
+    def _observe_citation_traversal(
+        self,
+        *,
+        status: str,
+        seed_count: int,
+        depth: int,
+        per_seed: int,
+        max_records: int,
+        added_candidates: int = 0,
+        candidate_pool: int = 0,
+        frontier: Optional[Dict[str, Any]] = None,
+        error: Exception | None = None,
+    ):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query="")
+        self.search_run_state, observation = self.search_loop.observe_citation_traversal(
+            self.search_run_state,
+            status=status,
+            seed_count=seed_count,
+            depth=depth,
+            per_seed=per_seed,
+            max_records=max_records,
+            added_candidates=added_candidates,
+            candidate_pool=candidate_pool,
+            frontier=frontier,
+            error=error,
+        )
+        return observation
+
+    def _recover_citation_error(
+        self,
+        error: Exception,
+        *,
+        seed_count: int,
+        depth: int,
+        per_seed: int,
+        max_records: int,
+        retry_attempts: int,
+        max_retries: int = 1,
+    ):
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query="")
+        self.search_run_state, decision = self.search_loop.recover_citation_error(
+            self.search_run_state,
+            error,
+            seed_count=seed_count,
+            depth=depth,
+            per_seed=per_seed,
+            max_records=max_records,
+            retry_attempts=retry_attempts,
+            max_retries=max_retries,
+        )
+        return decision
+
+    def _enqueue_candidate_queue(
+        self,
+        documents: list,
+        origin: str,
+        evidence_by_key: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> list:
+        docs = list(documents or [])
+        keys = [document_key(document) for document in docs]
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(question="", source=self.data_source, current_query="")
+        before = set(self.search_run_state.candidate_queue.keys)
+        self.search_run_state, _ = self.search_loop.update_candidate_queue(
+            self.search_run_state,
+            candidate_keys=keys,
+            origin=origin,
+        )
+        queue = self.search_run_state.candidate_queue
+        records = list(queue.records)
+        ledger = dict(queue.ledger)
+        recorded_keys = {str(record.get("key") or "") for record in records}
+        for document, key in zip(docs, keys):
+            if not key:
+                continue
+            identifiers = getattr(document, "identifiers", None)
+            if key not in recorded_keys:
+                records.append(
+                    {
+                        "key": key,
+                        "id": key,
+                        "title": str(getattr(document, "title", "") or ""),
+                        "doi": str(getattr(identifiers, "doi", "") or ""),
+                        "arxiv": str(getattr(identifiers, "arxiv", "") or ""),
+                        "pmid": str(getattr(identifiers, "pmid", "") or ""),
+                    }
+                )
+                recorded_keys.add(key)
+
+            metadata = dict(self.retrieval_metadata_by_key.get(key, {}) or {})
+            extra = dict((evidence_by_key or {}).get(key, {}) or {})
+            existing = ledger.get(key)
+            source = getattr(document, "source", None)
+            provider = str(getattr(document, "provider", "") or self.data_source or "")
+            retrieval_lanes = [str(value) for value in metadata.get("retrieval_lanes", []) if value]
+            query_views = [
+                lane.split(":", 1)[1]
+                for lane in retrieval_lanes
+                if lane.startswith("query_view:") and ":" in lane
+            ]
+            source_ranks = {
+                str(lane): int(rank)
+                for lane, rank in dict(metadata.get("retrieval_source_ranks", {}) or {}).items()
+                if rank is not None
+            }
+            event = CandidateLifecycleEvent(
+                stage=origin,
+                action="duplicate" if key in before else "added",
+                origin=origin,
+                detail=str(extra.get("detail") or ""),
+            )
+            citation_paths = [
+                item if isinstance(item, CandidateCitationPath) else CandidateCitationPath.model_validate(item)
+                for item in (extra.get("citation_paths") or [])
+            ]
+            if existing is None:
+                evidence = CandidateEvidence(
+                    candidate_id=key,
+                    title=str(getattr(document, "title", "") or ""),
+                    doi=str(getattr(identifiers, "doi", "") or ""),
+                    arxiv=str(getattr(identifiers, "arxiv", "") or ""),
+                    pmid=str(getattr(identifiers, "pmid", "") or ""),
+                    openalex=str(getattr(identifiers, "openalex", "") or ""),
+                    semanticscholar=str(getattr(identifiers, "semanticscholar", "") or ""),
+                    year=getattr(source, "publish_year", None) if source else None,
+                    citations=_citation_count(document),
+                    sources=[provider] if provider else [],
+                    origins=[origin] if origin else [],
+                    query_views=query_views,
+                    retrieval_lanes=retrieval_lanes,
+                    source_ranks=source_ranks,
+                    citation_paths=citation_paths,
+                    concept_coverage={
+                        name: float(metadata.get(field, 0.0) or 0.0)
+                        for name, field in (
+                            ("embedding", "retrieval_embedding_score"),
+                            ("bm25", "retrieval_bm25_score"),
+                            ("term", "retrieval_term_coverage"),
+                            ("rrf", "retrieval_rrf_score"),
+                            ("rrf_normalized", "retrieval_rrf_normalized"),
+                            ("primary_prior", "retrieval_primary_prior"),
+                        )
+                    },
+                    retrieval_score=self._optional_float(metadata.get("retrieval_score")),
+                    rerank_score=self._optional_float(metadata.get("rerank_score")),
+                    lifecycle=[event],
+                )
+            else:
+                evidence = existing.model_copy(
+                    update={
+                        "sources": self._merge_unique(existing.sources, [provider]),
+                        "origins": self._merge_unique(existing.origins, [origin]),
+                        "query_views": self._merge_unique(existing.query_views, query_views),
+                        "retrieval_lanes": self._merge_unique(existing.retrieval_lanes, retrieval_lanes),
+                        "source_ranks": {**existing.source_ranks, **source_ranks},
+                        "citation_paths": self._merge_citation_paths(existing.citation_paths, citation_paths),
+                        "concept_coverage": {
+                            **existing.concept_coverage,
+                            **{
+                                name: float(metadata.get(field, 0.0) or 0.0)
+                                for name, field in (
+                                    ("embedding", "retrieval_embedding_score"),
+                                    ("bm25", "retrieval_bm25_score"),
+                                    ("term", "retrieval_term_coverage"),
+                                    ("rrf", "retrieval_rrf_score"),
+                                    ("rrf_normalized", "retrieval_rrf_normalized"),
+                                    ("primary_prior", "retrieval_primary_prior"),
+                                )
+                                if field in metadata
+                            },
+                        },
+                        "retrieval_score": self._optional_float(metadata.get("retrieval_score"))
+                        if "retrieval_score" in metadata
+                        else existing.retrieval_score,
+                        "rerank_score": self._optional_float(metadata.get("rerank_score"))
+                        if "rerank_score" in metadata
+                        else existing.rerank_score,
+                        "lifecycle": [*existing.lifecycle, event],
+                    }
+                )
+            ledger[key] = evidence
+
+        if len(records) != len(queue.records) or ledger != queue.ledger:
+            self.search_run_state = self.search_run_state.with_candidate_queue(
+                queue.model_copy(update={"records": records, "ledger": ledger})
+            )
+        added = []
+        added_keys = set()
+        for document, key in zip(docs, keys):
+            if not key or key in before or key in added_keys:
+                continue
+            added_keys.add(key)
+            added.append(document)
+        return added
+
+    @staticmethod
+    def _merge_unique(existing: list, incoming: list) -> list:
+        output = list(existing or [])
+        seen = {str(value) for value in output}
+        for value in incoming or []:
+            text = str(value or "").strip()
+            if text and text not in seen:
+                output.append(text)
+                seen.add(text)
+        return output
+
+    def _candidate_selector_active(self) -> bool:
+        return bool(getattr(self.config, "candidate_selector_enabled", False)) and self.search_plan is not None
+
+    def _intermediate_selector_feedback_active(self) -> bool:
+        return self._candidate_selector_active() and bool(
+            getattr(self.config, "crawler_intermediate_selector_enabled", False)
+        )
+
+    def _candidate_selector_for_run(self) -> CandidateSelector:
+        if self._candidate_selector_instance is not None:
+            return self._candidate_selector_instance
+        cache: dict[str, SelectorDecision] = {}
+        if self.search_run_state is not None:
+            for evidence in self.search_run_state.candidate_queue.ledger.values():
+                if not evidence.selector_input_hash or evidence.selector_label not in {"include", "exclude", "uncertain"}:
+                    continue
+                cache[evidence.selector_input_hash] = SelectorDecision(
+                    candidate_id=evidence.candidate_id,
+                    label=evidence.selector_label,
+                    relevance_score=evidence.selector_relevance_score
+                    if evidence.selector_relevance_score is not None
+                    else 0.5,
+                    concept_coverage=dict(evidence.selector_concept_coverage),
+                    missing_concepts=list(evidence.selector_missing_concepts),
+                    evidence=list(evidence.selector_evidence),
+                    recommended_actions=list(evidence.selector_recommended_actions) or ["none"],
+                    reason_codes=list(evidence.selector_reason_codes),
+                )
+        self._candidate_selector_instance = CandidateSelector(
+            self.llm,
+            batch_size=max(1, int(getattr(self.config, "candidate_selector_batch_size", 12) or 12)),
+            concurrency=max(1, int(getattr(self.config, "candidate_selector_concurrency", 2) or 2)),
+            max_llm_calls=max(0, int(getattr(self.config, "candidate_selector_max_llm_calls", 24) or 0)),
+            max_attempts=max(1, int(getattr(self.config, "candidate_selector_max_attempts", 2) or 2)),
+            exclude_score_max=float(getattr(self.config, "candidate_selector_exclude_score_max", 0.25) or 0.25),
+            cache=cache,
+        )
+        return self._candidate_selector_instance
+
+    def _crawler_selector_sample(self, documents: list) -> list:
+        try:
+            sample_size = max(
+                1,
+                min(int(getattr(self.config, "crawler_selector_sample_size", 24) or 24), 100),
+            )
+        except (TypeError, ValueError):
+            sample_size = 24
+        return self._dedupe_documents(documents or [])[:sample_size]
+
+    def _select_candidate_batch(self, question: str, documents: list, origin: str) -> SelectorBatch:
+        unique_documents = self._dedupe_documents(documents or [])
+        if not unique_documents:
+            return SelectorBatch()
+        self._enqueue_candidate_queue(unique_documents, origin)
+        if self._candidate_selector_active():
+            selector = self._candidate_selector_for_run()
+            try:
+                batch = selector.select(question, self.search_plan, unique_documents)
+            except Exception as exc:
+                self._emit_log(
+                    f"Candidate Selector failed unexpectedly; preserving {len(unique_documents)} candidates as uncertain: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+                batch = SelectorBatch(
+                    decisions=[
+                        SelectorDecision(
+                            candidate_id=document_key(document),
+                            label="uncertain",
+                            relevance_score=0.5,
+                            recommended_actions=["enrich"]
+                            if not str(getattr(document, "abstract", "") or "").strip()
+                            else ["none"],
+                            reason_codes=["selector_unexpected_failure"],
+                        )
+                        for document in unique_documents
+                        if document_key(document)
+                    ],
+                    fallback_count=len(unique_documents),
+                    errors=[f"{exc.__class__.__name__}: {exc}"],
+                )
+        else:
+            batch = SelectorBatch(
+                decisions=[
+                    SelectorDecision(
+                        candidate_id=document_key(document),
+                        label="uncertain",
+                        relevance_score=0.5,
+                        recommended_actions=["none"],
+                        reason_codes=["candidate_selector_disabled"],
+                    )
+                    for document in unique_documents
+                    if document_key(document)
+                ]
+            )
+        self._record_selector_batch(question, unique_documents, batch, origin)
+        counts = batch.label_counts()
+        self._emit_log(
+            "Candidate Selector completed: "
+            f"origin={origin}; include={counts.get('include', 0)}; uncertain={counts.get('uncertain', 0)}; "
+            f"exclude={counts.get('exclude', 0)}; llm_calls={batch.llm_calls}; cache_hits={batch.cache_hits}; "
+            f"fallbacks={batch.fallback_count}."
+        )
+        return batch
+
+    def _record_selector_batch(
+        self,
+        question: str,
+        documents: list,
+        batch: SelectorBatch,
+        origin: str,
+    ) -> None:
+        if self.search_run_state is None:
+            return
+        queue = self.search_run_state.candidate_queue
+        ledger = dict(queue.ledger)
+        documents_by_key = {
+            document_key(document): document
+            for document in documents or []
+            if document_key(document)
+        }
+        selector = self._candidate_selector_instance
+        for decision in batch.decisions:
+            document = documents_by_key.get(decision.candidate_id)
+            evidence = ledger.get(decision.candidate_id)
+            if document is None or evidence is None:
+                continue
+            input_hash = (
+                selector.cache_key(question, self.search_plan, document)
+                if selector is not None and self.search_plan is not None
+                else ""
+            )
+            ledger[decision.candidate_id] = evidence.model_copy(
+                update={
+                    "selector_label": decision.label,
+                    "selector_relevance_score": decision.relevance_score,
+                    "selector_concept_coverage": dict(decision.concept_coverage),
+                    "selector_missing_concepts": list(decision.missing_concepts),
+                    "selector_evidence": list(decision.evidence),
+                    "selector_recommended_actions": list(decision.recommended_actions),
+                    "selector_reason_codes": self._merge_unique(
+                        evidence.selector_reason_codes,
+                        decision.reason_codes,
+                    ),
+                    "selector_input_hash": input_hash,
+                    "lifecycle": [
+                        *evidence.lifecycle,
+                        CandidateLifecycleEvent(
+                            stage="candidate_selector",
+                            action=decision.label,
+                            origin=origin,
+                            detail=(
+                                f"relevance={decision.relevance_score:.3f}; "
+                                f"missing={','.join(decision.missing_concepts[:5])}"
+                            ),
+                        ),
+                    ],
+                }
+            )
+        self.search_run_state = self.search_run_state.with_candidate_queue(
+            queue.model_copy(update={"ledger": ledger})
+        )
+
+    def _selector_filtered_candidates(self, documents: list) -> list:
+        if self.search_run_state is None or not self._candidate_selector_active():
+            return list(documents or [])
+        ledger = self.search_run_state.candidate_queue.ledger
+        keep_uncertain = bool(getattr(self.config, "candidate_selector_keep_uncertain", True))
+
+        def should_keep(document) -> bool:
+            evidence = ledger.get(document_key(document))
+            if evidence is None:
+                return True
+            if evidence.selector_label == "exclude":
+                return False
+            if evidence.selector_label == "uncertain":
+                return keep_uncertain
+            # An unsampled candidate remains unseen in the ledger. Selection is
+            # a prioritization signal, so lack of a decision must not reduce recall.
+            return True
+
+        return [document for document in documents or [] if should_keep(document)]
+
+    def _prioritize_selector_includes(self, documents: list) -> list:
+        values = list(documents or [])
+        if self.search_run_state is None or not self._candidate_selector_active():
+            return values
+        ledger = self.search_run_state.candidate_queue.ledger
+        included = []
+        remaining = []
+        for index, document in enumerate(values):
+            evidence = ledger.get(document_key(document))
+            if evidence is not None and evidence.selector_label == "include":
+                score = evidence.selector_relevance_score
+                included.append((-(float(score) if score is not None else 0.0), index, document))
+            else:
+                remaining.append(document)
+        included.sort(key=lambda item: (item[0], item[1]))
+        return [document for _, _, document in included] + remaining
+
+    @staticmethod
+    def _merge_citation_paths(existing: list, incoming: list) -> list:
+        output = list(existing or [])
+        seen = {
+            (item.seed_id, item.parent_id, item.direction, item.depth)
+            for item in output
+        }
+        for item in incoming or []:
+            key = (item.seed_id, item.parent_id, item.direction, item.depth)
+            if key not in seen:
+                output.append(item)
+                seen.add(key)
+        return output
+
+    @staticmethod
+    def _optional_float(value: Any) -> Optional[float]:
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _record_candidate_gate(self, all_candidates: list, selected_candidates: list, limit: int) -> None:
+        if self.search_run_state is None:
+            return
+        selected_keys = {
+            document_key(document)
+            for document in selected_candidates or []
+            if document_key(document)
+        }
+        queue = self.search_run_state.candidate_queue
+        ledger = dict(queue.ledger)
+        for document in all_candidates or []:
+            key = document_key(document)
+            evidence = ledger.get(key)
+            if not key or evidence is None:
+                continue
+            selected = key in selected_keys
+            action = "selected_for_llm" if selected else "truncated_before_llm"
+            reason = "within_ranking_candidate_limit" if selected else "ranking_candidate_limit"
+            reason_codes = [reason]
+            origin = "local_fused_rank"
+            if selected and evidence.selector_label == "include":
+                reason_codes.append("selector_include_priority")
+                origin = "candidate_selector"
+            ledger[key] = evidence.model_copy(
+                update={
+                    "ranking_gate_label": "selected" if selected else "truncated",
+                    "ranking_gate_reason_codes": self._merge_unique(evidence.ranking_gate_reason_codes, reason_codes),
+                    "lifecycle": [
+                        *evidence.lifecycle,
+                        CandidateLifecycleEvent(
+                            stage="ranking_gate",
+                            action=action,
+                            origin=origin,
+                            detail=f"ranking_candidate_limit={limit}",
+                        ),
+                    ],
+                }
+            )
+        self.search_run_state = self.search_run_state.with_candidate_queue(
+            queue.model_copy(update={"ledger": ledger})
+        )
+
+    def _record_candidate_scores(self, ranked: list, action: str) -> None:
+        if self.search_run_state is None:
+            return
+        queue = self.search_run_state.candidate_queue
+        ledger = dict(queue.ledger)
+        for entry in ranked or []:
+            document = (entry or {}).get("document") if isinstance(entry, dict) else None
+            key = document_key(document) if document is not None else ""
+            evidence = ledger.get(key)
+            if not key or evidence is None:
+                continue
+            ledger[key] = evidence.model_copy(
+                update={
+                    "llm_score": self._optional_float((entry or {}).get("score")),
+                    "lifecycle": [
+                        *evidence.lifecycle,
+                        CandidateLifecycleEvent(stage="ranking", action=action, origin="llm_ranking"),
+                    ],
+                }
+            )
+        self.search_run_state = self.search_run_state.with_candidate_queue(
+            queue.model_copy(update={"ledger": ledger})
+        )
+
+    def _record_final_candidates(self, ranked: list) -> None:
+        if self.search_run_state is None:
+            return
+        queue = self.search_run_state.candidate_queue
+        ledger = dict(queue.ledger)
+        for entry in ranked or []:
+            document = (entry or {}).get("document") if isinstance(entry, dict) else None
+            key = document_key(document) if document is not None else ""
+            evidence = ledger.get(key)
+            if not key or evidence is None:
+                continue
+            ledger[key] = evidence.model_copy(
+                update={
+                    "lifecycle": [
+                        *evidence.lifecycle,
+                        CandidateLifecycleEvent(stage="results", action="final_output", origin="ranked_output"),
+                    ]
+                }
+            )
+        self.search_run_state = self.search_run_state.with_candidate_queue(
+            queue.model_copy(update={"ledger": ledger})
+        )
+
+    def _execute_query_portfolio(self, question: str, final_query: str, primary_hits: list, history: list) -> list:
+        if not bool(getattr(self.config, "crawler_enabled", False)):
+            return self._execute_query_portfolio_legacy(question, final_query, primary_hits, history)
+        return self._execute_query_portfolio_frontier(question, final_query, primary_hits, history)
+
+    def _execute_query_portfolio_frontier(
+        self,
+        question: str,
+        final_query: str,
+        primary_hits: list,
+        history: list,
+    ) -> list:
+        if not supports_query_portfolio(self.data_source):
+            return list(primary_hits or [])
+        if not bool(getattr(self.config, "query_portfolio_enabled", True)):
+            return list(primary_hits or [])
+        if not self.search_plan or not self.search_plan.query_views:
+            return list(primary_hits or [])
+
+        try:
+            max_views = max(1, min(int(getattr(self.config, "query_portfolio_max", 3) or 3), 6))
+        except (TypeError, ValueError):
+            max_views = 3
+        try:
+            per_view_limit = max(1, min(int(getattr(self.config, "query_portfolio_limit", 100) or 100), 100))
+        except (TypeError, ValueError):
+            per_view_limit = 100
+
+        crawler_sources = self._crawler_source_order()
+        selections_by_source = {
+            source: select_query_views(
+                self.search_plan,
+                source,
+                final_query if source == self.data_source else "",
+                max_views,
+            )
+            for source in crawler_sources
+        }
+        selections = [
+            selection
+            for source in crawler_sources
+            for selection in selections_by_source[source]
+        ]
+        self.query_view_selection = [item.audit_payload() for item in selections]
+        selection_by_key = {
+            (item.source, item.view.view_id): item
+            for item in selections
+        }
+        combined = self._dedupe_documents(list(primary_hits or []))
+        seen_keys = {document_key(document) for document in combined if document_key(document)}
+        seen_queries = {
+            (
+                self.data_source,
+                re.sub(r"\s+", " ", str(value or "")).strip().casefold(),
+            )
+            for value in [final_query, *[row.get("query") for row in history], *[row.get("next_query") for row in history]]
+            if value
+        }
+        if self.search_run_state is None:
+            self.search_run_state = SearchRunState(
+                question=question,
+                source=self.data_source,
+                current_query=final_query,
+                search_plan=self.search_plan.model_dump(),
+            )
+
+        frontier_state = self.search_run_state.action_frontier
+        if not frontier_state.actions:
+            max_reader_requests = max(0, int(getattr(self.config, "crawler_max_reader_requests", 8) or 0))
+            max_citation_requests = max(0, int(getattr(self.config, "crawler_max_citation_requests", 8) or 0))
+            frontier_state = frontier_state.model_copy(
+                update={
+                    "budget": FrontierBudget(
+                        max_source_requests=max_views,
+                        max_reader_requests=max_reader_requests,
+                        max_citation_requests=max_citation_requests,
+                        max_tool_requests=max_views + max_reader_requests + max_citation_requests,
+                        max_candidates=max(1, int(getattr(self.config, "retrieval_pool_max", 3000) or 3000)),
+                        max_wall_seconds=max(1.0, float(getattr(self.config, "crawler_max_wall_seconds", 300.0) or 300.0)),
+                        candidate_count=len(seen_keys),
+                    )
+                }
+            )
+        scheduler = FrontierScheduler(
+            frontier_state,
+            low_yield_round_limit=max(1, int(getattr(self.config, "crawler_low_yield_round_limit", 2) or 2)),
+        )
+        controller = CrawlerController(
+            self.search_plan,
+            self.data_source,
+            scheduler,
+            state=self.search_run_state.crawler_state,
+        )
+        for source in crawler_sources:
+            controller.seed_query_views(selections_by_source[source], source=source)
+
+        completed_execution_ids = {
+            (
+                str(item.get("source") or self.data_source).strip().lower(),
+                str(item.get("view_id") or ""),
+            )
+            for item in self.query_portfolio
+            if isinstance(item, dict) and item.get("view_id")
+        }
+
+        def sync_controller_state() -> None:
+            self.search_run_state = self.search_run_state.with_action_frontier(
+                controller.scheduler.snapshot()
+            ).with_crawler_state(controller.state)
+
+        def record_execution(execution: QueryPortfolioExecution) -> None:
+            execution_id = (execution.source or self.data_source, execution.view_id)
+            if execution_id in completed_execution_ids:
+                return
+            payload = execution.model_dump()
+            self.query_portfolio.append(payload)
+            self.search_run_state = self.search_run_state.with_query_portfolio_execution(execution)
+            history.append(
+                {
+                    "iteration": self.last_iteration,
+                    "query": execution.query,
+                    "total": execution.total if execution.status == "completed" else None,
+                    "action": "portfolio",
+                    "next_query": None,
+                    "message": (
+                        f"Query view {execution.source}:{execution.view_id} {execution.status}; "
+                        f"returned {execution.hit_count} and added {execution.added_unique} unique candidates."
+                    ),
+                    "view_id": execution.view_id,
+                    "source": execution.source,
+                    "view_type": execution.view_type,
+                    "purpose": execution.purpose,
+                    "status": execution.status,
+                    "selector_score": execution.selector_score,
+                    "selector_overlap": execution.selector_overlap,
+                    "selector_reasons": execution.selector_reasons,
+                }
+            )
+            completed_execution_ids.add(execution_id)
+            self._emit_stage(
+                "search",
+                "processing",
+                total=self.last_total,
+                history=history,
+                final_query=final_query,
+                query_view_selection=list(self.query_view_selection),
+                query_portfolio=list(self.query_portfolio),
+                preview=self._preview_hits(combined),
+            )
+            self._save_checkpoint(
+                "query_execution",
+                records=combined,
+                metadata={
+                    "phase": "query_portfolio",
+                    "completed_execution_ids": [
+                        f"{source}:{view_id}"
+                        for source, view_id in sorted(completed_execution_ids)
+                    ],
+                },
+            )
+
+        for selection in selections:
+            view = selection.view
+            if (selection.source, view.view_id) in completed_execution_ids:
+                continue
+            if selection.compile_error:
+                record_execution(
+                    QueryPortfolioExecution(
+                        view_id=view.view_id,
+                        source=selection.source,
+                        view_type=view.view_type,
+                        purpose=view.purpose,
+                        query=selection.compiled_query,
+                        status="failed",
+                        error=selection.compile_error,
+                        selector_score=selection.score,
+                        selector_overlap=selection.lexical_overlap,
+                        selector_reasons=selection.reason_codes,
+                    )
+                )
+            elif "exact_primary_duplicate" in selection.reason_codes:
+                record_execution(
+                    QueryPortfolioExecution(
+                        view_id=view.view_id,
+                        source=selection.source,
+                        view_type=view.view_type,
+                        purpose=view.purpose,
+                        query=selection.compiled_query,
+                        status="skipped_duplicate",
+                        selector_score=selection.score,
+                        selector_overlap=selection.lexical_overlap,
+                        selector_reasons=selection.reason_codes,
+                    )
+                )
+
+        intermediate_feedback = self._intermediate_selector_feedback_active()
+        if intermediate_feedback and not controller.scheduler.state.outcomes and combined:
+            primary_batch = self.last_query_selector_batch
+            if not primary_batch.decisions:
+                primary_batch = self._select_candidate_batch(
+                    question,
+                    self._crawler_selector_sample(combined),
+                    "primary_query",
+                )
+            controller.observe_selector(primary_batch, allow_follow_up_actions=False)
+            sync_controller_state()
+
+        def search_handler(action) -> ProviderSearchResult:
+            source = controller.query_source(action)
+            portfolio_query = self._apply_discipline_filter(action.query) if source == self.data_source else action.query
+            normalized_query = re.sub(r"\s+", " ", portfolio_query).strip().casefold()
+            query_identity = (source, normalized_query)
+            if not normalized_query or query_identity in seen_queries:
+                raise ValueError("duplicate or empty frontier query")
+            seen_queries.add(query_identity)
+            source_state = self.search_run_state.model_copy(
+                update={"source": source, "current_query": portfolio_query}
+            )
+            source_state, validation = self.search_loop.preflight(source_state, portfolio_query)
+            self.search_run_state = self.search_run_state.model_copy(
+                update={"validations": source_state.validations}
+            )
+            if not validation.ok:
+                raise ValueError(validation.issue)
+            self._emit_log(
+                f"Crawler search action started: action={action.action_id}; source={source}; query={portfolio_query}"
+            )
+            source_state, result, search_error = self.search_loop.source_search(
+                source_state,
+                portfolio_query,
+                lambda query: self._provider_search_lane_for_source(
+                    source,
+                    query,
+                    RetrievalLane.RELEVANCE,
+                    per_view_limit,
+                    page=1,
+                ),
+            )
+            self.search_run_state = self.search_run_state.model_copy(
+                update={
+                    "validations": source_state.validations,
+                    "errors": source_state.errors,
+                }
+            )
+            if search_error is not None:
+                raise search_error
+            return result
+
+        executor = ToolExecutor({"search": search_handler}, passthrough_exceptions=(SearchCancelled,))
+        self._emit_log(
+            f"Crawler frontier started: sources={','.join(crawler_sources)}; actions={len(controller.scheduler.state.actions)}; "
+            f"source_request_budget={max_views}; per_view_limit={per_view_limit}."
+        )
+        cycle_executions: Dict[str, QueryPortfolioExecution] = {}
+
+        def execute_query_action(action):
+            source = controller.query_source(action)
+            view_id = controller.query_view_id(action)
+            selection = selection_by_key.get((source, view_id))
+            if selection is None:
+                return ToolExecution(
+                    action=action,
+                    status="failed",
+                    error=f"unknown_query_view:{view_id or action.action_id}",
+                )
+            return executor.execute(action)
+
+        def select_query_action(action, execution_result) -> FrontierOutcome:
+            source = controller.query_source(action)
+            view_id = controller.query_view_id(action)
+            selection = selection_by_key.get((source, view_id))
+            if execution_result.status == "done":
+                view_hits = list(execution_result.records)
+                added_documents = []
+                for document in view_hits:
+                    key = document_key(document)
+                    if key and key in seen_keys:
+                        continue
+                    if key:
+                        seen_keys.add(key)
+                    combined.append(document)
+                    added_documents.append(document)
+                lane_key = f"{source}:{view_id}"
+                self.query_portfolio_lane_results[lane_key] = view_hits
+                if intermediate_feedback:
+                    gaps_before = set(controller.concept_gaps())
+                    selector_batch = self._select_candidate_batch(
+                        question,
+                        self._crawler_selector_sample(added_documents),
+                        f"query_view:{source}:{view_id}",
+                    )
+                    controller.observe_selector(selector_batch, allow_follow_up_actions=False)
+                    gaps_after = set(controller.concept_gaps())
+                    counts = selector_batch.label_counts()
+                else:
+                    gaps_before = set()
+                    gaps_after = set()
+                    counts = {"include": 0, "uncertain": 0, "exclude": 0}
+                outcome = FrontierOutcome(
+                    action_id=action.action_id,
+                    status="done",
+                    candidates_seen=len(view_hits),
+                    added_unique=len(added_documents),
+                    include_count=counts.get("include", 0),
+                    uncertain_count=counts.get("uncertain", 0),
+                    exclude_count=counts.get("exclude", 0),
+                    newly_relevant_count=counts.get("include", 0),
+                    concept_gap_reduction=len(gaps_before - gaps_after),
+                    elapsed_ms=execution_result.elapsed_ms,
+                )
+                execution = QueryPortfolioExecution(
+                    view_id=view_id,
+                    source=source,
+                    view_type=selection.view.view_type,
+                    purpose=selection.view.purpose,
+                    query=action.query,
+                    total=execution_result.total,
+                    hit_count=len(view_hits),
+                    added_unique=len(added_documents),
+                    selector_score=selection.score,
+                    selector_overlap=selection.lexical_overlap,
+                    selector_reasons=[*selection.reason_codes, "frontier_scheduled"],
+                )
+            else:
+                outcome = FrontierOutcome(
+                    action_id=action.action_id,
+                    status="failed" if execution_result.status == "failed" else "skipped",
+                    elapsed_ms=execution_result.elapsed_ms,
+                    error=execution_result.error,
+                )
+                execution = QueryPortfolioExecution(
+                    view_id=view_id or action.action_id,
+                    source=source,
+                    view_type=selection.view.view_type if selection else "",
+                    purpose=selection.view.purpose if selection else "",
+                    query=action.query,
+                    status="failed" if execution_result.status == "failed" else "skipped_selector",
+                    error=execution_result.error,
+                    selector_score=selection.score if selection else 0.0,
+                    selector_overlap=selection.lexical_overlap if selection else 0.0,
+                    selector_reasons=[*(selection.reason_codes if selection else []), "frontier_scheduled"],
+                )
+            cycle_executions[action.action_id] = execution
+            return outcome
+
+        while True:
+            self._check_cancelled()
+            cycle = self.search_loop.run_frontier_cycle(
+                controller,
+                execute_query_action,
+                select_query_action,
+                passthrough_exceptions=(SearchCancelled,),
+            )
+            if not cycle.scheduled or cycle.action is None:
+                break
+            sync_controller_state()
+            execution = cycle_executions.pop(cycle.action.action_id, None)
+            if execution is None:
+                source = controller.query_source(cycle.action)
+                view_id = controller.query_view_id(cycle.action)
+                selection = selection_by_key.get((source, view_id))
+                execution = QueryPortfolioExecution(
+                    view_id=view_id or cycle.action.action_id,
+                    source=source,
+                    view_type=selection.view.view_type if selection else "",
+                    purpose=selection.view.purpose if selection else "",
+                    query=cycle.action.query,
+                    status="failed",
+                    error=cycle.outcome.error if cycle.outcome else "frontier_cycle_failed",
+                    selector_score=selection.score if selection else 0.0,
+                    selector_overlap=selection.lexical_overlap if selection else 0.0,
+                    selector_reasons=[*(selection.reason_codes if selection else []), cycle.backend_used],
+                )
+            record_execution(execution)
+            failed_source = controller.query_source(cycle.action)
+            if (
+                execution.status == "failed"
+                and failed_source != self.data_source
+                and _is_source_availability_error(execution.error)
+            ):
+                source_pending = [
+                    action
+                    for action in controller.scheduler.state.actions
+                    if action.status == "pending"
+                    and controller.query_source(action) == failed_source
+                ]
+                if source_pending:
+                    controller.scheduler.replace_pending(
+                        [
+                            action.model_copy(
+                                update={
+                                    "status": "skipped",
+                                    "reason_codes": self._merge_unique(
+                                        action.reason_codes,
+                                        ["source_circuit_open"],
+                                    ),
+                                }
+                            )
+                            for action in source_pending
+                        ]
+                    )
+                    sync_controller_state()
+                    self._emit_log(
+                        f"Crawler source circuit opened after an availability error: source={failed_source}; "
+                        f"skipped_actions={len(source_pending)}; preserving remaining source budget for fallback."
+                    )
+                    for pending_action in source_pending:
+                        pending_view_id = controller.query_view_id(pending_action)
+                        pending_selection = selection_by_key.get((failed_source, pending_view_id))
+                        if pending_selection is None:
+                            continue
+                        record_execution(
+                            QueryPortfolioExecution(
+                                view_id=pending_view_id,
+                                source=failed_source,
+                                view_type=pending_selection.view.view_type,
+                                purpose=pending_selection.view.purpose,
+                                query=pending_action.query,
+                                status="skipped_source_unavailable",
+                                error=execution.error,
+                                selector_score=pending_selection.score,
+                                selector_overlap=pending_selection.lexical_overlap,
+                                selector_reasons=self._merge_unique(
+                                    pending_selection.reason_codes,
+                                    ["source_circuit_open"],
+                                ),
+                            )
+                        )
+
+        pending = [
+            action
+            for action in controller.scheduler.state.actions
+            if action.status == "pending"
+            and (
+                controller.query_source(action),
+                controller.query_view_id(action),
+            ) not in completed_execution_ids
+        ]
+        if pending:
+            stop_reason = controller.scheduler.state.stop_reason or "frontier_not_selected"
+            controller.scheduler.replace_pending(
+                [
+                    action.model_copy(
+                        update={
+                            "status": "skipped",
+                            "reason_codes": self._merge_unique(action.reason_codes, [stop_reason]),
+                        }
+                    )
+                    for action in pending
+                ]
+            )
+            sync_controller_state()
+            for action in pending:
+                source = controller.query_source(action)
+                view_id = controller.query_view_id(action)
+                selection = selection_by_key.get((source, view_id))
+                if selection is None:
+                    continue
+                record_execution(
+                    QueryPortfolioExecution(
+                        view_id=view_id,
+                        source=source,
+                        view_type=selection.view.view_type,
+                        purpose=selection.view.purpose,
+                        query=action.query,
+                        status="skipped_selector",
+                        selector_score=selection.score,
+                        selector_overlap=selection.lexical_overlap,
+                        selector_reasons=self._merge_unique(selection.reason_codes, [stop_reason]),
+                    )
+                )
+
+        self._emit_log(
+            f"Crawler frontier completed: actions={controller.state.completed_actions}; "
+            f"stop={controller.scheduler.state.stop_reason or 'frontier_empty'}; "
+            f"unique_loaded_candidates={len(combined)}."
+        )
+        self._emit_stage(
+            "search",
+            "complete",
+            total=self.last_total,
+            history=history,
+            final_query=final_query,
+            query_view_selection=list(self.query_view_selection),
+            query_portfolio=list(self.query_portfolio),
+            preview=self._preview_hits(combined),
+        )
+        return self._dedupe_documents(combined)
+
+    def _execute_query_portfolio_legacy(self, question: str, final_query: str, primary_hits: list, history: list) -> list:
+        if not supports_query_portfolio(self.data_source):
+            return list(primary_hits or [])
+        if not bool(getattr(self.config, "query_portfolio_enabled", True)):
+            return list(primary_hits or [])
+        if not self.search_plan or not self.search_plan.query_views:
+            return list(primary_hits or [])
+
+        try:
+            max_views = max(1, min(int(getattr(self.config, "query_portfolio_max", 3) or 3), 6))
+        except (TypeError, ValueError):
+            max_views = 3
+        try:
+            per_view_limit = max(1, min(int(getattr(self.config, "query_portfolio_limit", 100) or 100), 100))
+        except (TypeError, ValueError):
+            per_view_limit = 100
+
+        selections = select_query_views(
+            self.search_plan,
+            self.data_source,
+            final_query,
+            max_views,
+        )
+        self.query_view_selection = [item.audit_payload() for item in selections]
+        ranked_selections = sorted(
+            selections,
+            key=lambda item: (-item.score, item.original_index),
+        )
+        self._emit_log(
+            "Query view selector completed: "
+            + "; ".join(
+                f"{item.view.view_id}={'selected' if item.selected else 'reserve'}"
+                f" score={item.score:.3f} overlap={item.lexical_overlap:.3f}"
+                for item in ranked_selections
+            )
+        )
+
+        combined = list(primary_hits or [])
+        seen_keys = {document_key(document) for document in combined if document_key(document)}
+        seen_queries = {
+            re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+            for value in [final_query, *[row.get("query") for row in history], *[row.get("next_query") for row in history]]
+            if value
+        }
+        self._emit_log(
+            f"Query portfolio started: source={self.data_source}; candidate_views={len(self.search_plan.query_views)}; "
+            f"request_budget={max_views}; per_view_limit={per_view_limit}."
+        )
+
+        completed_view_ids = {
+            str(item.get("view_id") or "")
+            for item in self.query_portfolio
+            if isinstance(item, dict) and item.get("view_id")
+        }
+        requests_started = sum(
+            1
+            for item in self.query_portfolio
+            if isinstance(item, dict) and item.get("status") == "completed"
+        )
+        for selection in ranked_selections:
+            view = selection.view
+            if view.view_id in completed_view_ids:
+                continue
+            self._check_cancelled()
+            execution = None
+            compiled_query = selection.compiled_query
+            if selection.compile_error:
+                execution = QueryPortfolioExecution(
+                    view_id=view.view_id,
+                    view_type=view.view_type,
+                    purpose=view.purpose,
+                    query=compiled_query,
+                    status="failed",
+                    error=selection.compile_error,
+                    selector_score=selection.score,
+                    selector_overlap=selection.lexical_overlap,
+                    selector_reasons=selection.reason_codes,
+                )
+            elif "exact_primary_duplicate" in selection.reason_codes:
+                execution = QueryPortfolioExecution(
+                    view_id=view.view_id,
+                    view_type=view.view_type,
+                    purpose=view.purpose,
+                    query=compiled_query,
+                    status="skipped_duplicate",
+                    selector_score=selection.score,
+                    selector_overlap=selection.lexical_overlap,
+                    selector_reasons=selection.reason_codes,
+                )
+            elif requests_started >= max_views:
+                execution = QueryPortfolioExecution(
+                    view_id=view.view_id,
+                    view_type=view.view_type,
+                    purpose=view.purpose,
+                    query=compiled_query,
+                    status="skipped_budget",
+                    selector_score=selection.score,
+                    selector_overlap=selection.lexical_overlap,
+                    selector_reasons=self._merge_unique(selection.reason_codes, ["query_view_request_budget"]),
+                )
+            else:
+                try:
+                    portfolio_query = self._apply_discipline_filter(compiled_query)
+                    normalized_query = re.sub(r"\s+", " ", portfolio_query).strip().casefold()
+                    if not normalized_query or normalized_query in seen_queries:
+                        execution = QueryPortfolioExecution(
+                            view_id=view.view_id,
+                            view_type=view.view_type,
+                            purpose=view.purpose,
+                            query=portfolio_query,
+                            status="skipped_duplicate",
+                            selector_score=selection.score,
+                            selector_overlap=selection.lexical_overlap,
+                            selector_reasons=selection.reason_codes,
+                        )
+                    else:
+                        seen_queries.add(normalized_query)
+                        if self.search_run_state is None:
+                            self.search_run_state = SearchRunState(question=question, source=self.data_source, current_query=final_query)
+                        self.search_run_state, validation = self.search_loop.preflight(self.search_run_state, portfolio_query)
+                        if not validation.ok:
+                            raise ValueError(validation.issue)
+                        self._emit_log(
+                            f"Query portfolio request started: view={view.view_id}; purpose={view.purpose or 'complementary recall'}; "
+                            f"query={portfolio_query}"
+                        )
+                        requests_started += 1
+                        self.search_run_state, result, search_error = self.search_loop.source_search(
+                            self.search_run_state,
+                            portfolio_query,
+                            lambda query: self._provider_search_lane(
+                                query,
+                                RetrievalLane.RELEVANCE,
+                                per_view_limit,
+                                page=1,
+                            ),
+                        )
+                        if search_error is not None:
+                            raise search_error
+                        view_hits = list(getattr(result, "hits", []) or [])
+                        total = int(getattr(getattr(result, "metadata", None), "total", 0) or 0)
+                        added = 0
+                        for document in view_hits:
+                            key = document_key(document)
+                            if key and key in seen_keys:
+                                continue
+                            if key:
+                                seen_keys.add(key)
+                            combined.append(document)
+                            added += 1
+                        self.query_portfolio_lane_results[view.view_id] = view_hits
+                        execution = QueryPortfolioExecution(
+                            view_id=view.view_id,
+                            view_type=view.view_type,
+                            purpose=view.purpose,
+                            query=portfolio_query,
+                            total=total,
+                            hit_count=len(view_hits),
+                            added_unique=added,
+                            selector_score=selection.score,
+                            selector_overlap=selection.lexical_overlap,
+                            selector_reasons=selection.reason_codes,
+                        )
+                        self._emit_log(
+                            f"Query portfolio view completed: view={view.view_id}; total={total}; "
+                            f"returned={len(view_hits)}; added_unique={added}."
+                        )
+                except Exception as exc:
+                    execution = QueryPortfolioExecution(
+                        view_id=view.view_id,
+                        view_type=view.view_type,
+                        purpose=view.purpose,
+                        query=compiled_query,
+                        status="failed",
+                        error=f"{exc.__class__.__name__}: {exc}",
+                        selector_score=selection.score,
+                        selector_overlap=selection.lexical_overlap,
+                        selector_reasons=selection.reason_codes,
+                    )
+                    self._emit_log(
+                        f"Query portfolio view skipped after error: view={view.view_id}; {exc.__class__.__name__}: {exc}"
+                    )
+
+            execution_payload = execution.model_dump()
+            self.query_portfolio.append(execution_payload)
+            if self.search_run_state is not None:
+                self.search_run_state = self.search_run_state.with_query_portfolio_execution(execution)
+            history.append(
+                {
+                    "iteration": self.last_iteration,
+                    "query": execution.query,
+                    "total": execution.total if execution.status == "completed" else None,
+                    "action": "portfolio",
+                    "next_query": None,
+                    "message": (
+                        f"Query view {execution.view_id} {execution.status}; "
+                        f"returned {execution.hit_count} and added {execution.added_unique} unique candidates."
+                    ),
+                    "view_id": execution.view_id,
+                    "view_type": execution.view_type,
+                    "purpose": execution.purpose,
+                    "status": execution.status,
+                    "selector_score": execution.selector_score,
+                    "selector_overlap": execution.selector_overlap,
+                    "selector_reasons": execution.selector_reasons,
+                }
+            )
+            self._emit_stage(
+                "search",
+                "processing",
+                total=self.last_total,
+                history=history,
+                final_query=final_query,
+                query_view_selection=list(self.query_view_selection),
+                query_portfolio=list(self.query_portfolio),
+                preview=self._preview_hits(combined),
+            )
+            self._save_checkpoint(
+                "query_execution",
+                records=combined,
+                metadata={"phase": "query_portfolio", "completed_view_ids": sorted(completed_view_ids | {view.view_id})},
+            )
+            completed_view_ids.add(view.view_id)
+
+        self._emit_log(
+            f"Query portfolio completed: views={len(self.query_portfolio)}; unique_loaded_candidates={len(combined)}."
+        )
+        self._emit_stage(
+            "search",
+            "complete",
+            total=self.last_total,
+            history=history,
+            final_query=final_query,
+            query_view_selection=list(self.query_view_selection),
+            query_portfolio=list(self.query_portfolio),
+            preview=self._preview_hits(combined),
+        )
+        return self._dedupe_documents(combined)
 
     def _provider_search(self, query: str):
         return self._provider_search_lane(query, RetrievalLane.RELEVANCE, self._candidate_limit(), page=1)
@@ -903,14 +3021,13 @@ class PaperSeekAgent:
     def _source_safe_query(self, query: str) -> str:
         if self.data_source == "openalex":
             return _sanitize_openalex_query(query)
+        if self.data_source == "semanticscholar":
+            return _sanitize_semantic_scholar_query(query)
         return (query or "").strip()
 
     def _source_query_format_issue(self, query: str) -> str:
-        if not (query or "").strip():
-            return "missing query field in JSON response"
-        if self.data_source in {"openalex", "arxiv", "pubmed", "wos"} and _looks_truncated_or_malformed_query(query):
-            return "unbalanced quotation marks, parentheses, or trailing Boolean operator"
-        return ""
+        validation = validate_source_query(self.data_source, query)
+        return "" if validation.ok else validation.issue
 
     def _consume_query_audit(self) -> str:
         audit = self.last_query_audit
@@ -990,12 +3107,28 @@ class PaperSeekAgent:
         ]
         self._llm_request_log(retry_log)
         try:
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            proposal = None
+            if pydantic_ai_query_retry_enabled():
+                try:
+                    proposal = run_query_proposal_agent(
+                        self.llm,
+                        messages,
+                        temperature=self._query_temperature(),
+                        retries=1,
+                        model_name=f"paperseek-{self.data_source}-query-retry",
+                    )
+                except PydanticAIAdapterUnavailable as exc:
+                    self._emit_log(f"PydanticAI query retry unavailable; using native JSON retry: {exc}")
+            if proposal is not None:
+                raw = ""
+                query, rationale = proposal.query, proposal.rationale
+            else:
+                raw = self._chat_query_json(messages)
+                query, rationale = _query_response_from_json(raw)
             self._llm_response_log(retry_log)
         except Exception as exc:
             self._emit_log(f"{self._source_label()} query format retry skipped after LLM error: {exc}")
             return ""
-        query, rationale = _query_response_from_json(raw)
         query = self._source_safe_query(self._apply_discipline_filter(query))
         self.last_query_audit = rationale
         if query and not self._source_query_format_issue(query):
@@ -1055,7 +3188,7 @@ class PaperSeekAgent:
         ]
         self._llm_request_log(f"{self.data_source}_query_syntax_repair")
         try:
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log(f"{self.data_source}_query_syntax_repair")
         except Exception as exc:
             self._emit_log(f"{source_label} query syntax repair skipped after LLM error: {exc}")
@@ -1093,6 +3226,76 @@ class PaperSeekAgent:
             return SYSTEM_PAPERHUB_QUERY_GENERATION + "\nRepair task: return valid plain PaperHub search text only."
         return SYSTEM_QUERY_GENERATION + "\nRepair task: return a valid Web of Science Starter API q value only."
 
+    def _crawler_source_order(self) -> tuple[str, ...]:
+        configured = getattr(self.config, "crawler_sources", ()) or ()
+        if isinstance(configured, str):
+            configured = re.split(r"[,;\s]+", configured)
+        supported = set(supported_source_ids())
+        ordered: list[str] = []
+        for value in (self.data_source, *configured):
+            source = str(value or "").strip().lower()
+            if not source or source in ordered or source not in supported:
+                continue
+            if not supports_query_portfolio(source):
+                continue
+            if source == "wos" and source != self.data_source:
+                continue
+            ordered.append(source)
+        return tuple(ordered or [self.data_source])
+
+    def _provider_for_source(self, source: str):
+        source = str(source or "").strip().lower()
+        if source == self.data_source:
+            return self.provider
+        if source in self._source_providers:
+            return self._source_providers[source]
+        provider = None
+        if source == "openalex":
+            provider = OpenAlexProvider(
+                api_key=getattr(self.config, "openalex_api_key", ""),
+                email=getattr(self.config, "openalex_email", ""),
+            )
+        elif source == "crossref":
+            provider = CrossrefProvider(email=getattr(self.config, "crossref_email", ""))
+        elif source == "arxiv":
+            provider = ArxivProvider()
+        elif source == "semanticscholar":
+            provider = SemanticScholarProvider(
+                api_key=getattr(self.config, "semantic_scholar_api_key", "")
+            )
+        elif source == "pubmed":
+            provider = PubMedProvider(
+                api_key=getattr(self.config, "pubmed_api_key", ""),
+                email=getattr(self.config, "pubmed_email", ""),
+                tool=getattr(self.config, "pubmed_tool", "paperseek"),
+            )
+        elif source == "googlescholar":
+            provider = GoogleScholarSerperProvider(
+                api_key=getattr(self.config, "serper_api_key", "")
+            )
+        elif source == "paperhub":
+            provider = PaperHubProvider()
+        if provider is not None:
+            self._source_providers[source] = provider
+        return provider
+
+    def _provider_search_lane_for_source(
+        self,
+        source: str,
+        query: str,
+        lane: str,
+        limit: int,
+        page: int = 1,
+    ):
+        source = str(source or "").strip().lower()
+        if source == self.data_source:
+            return self._provider_search_lane(query, lane, limit, page=page)
+        provider = self._provider_for_source(source)
+        if provider is None:
+            raise ProviderError(source, f"No crawler provider is available for source={source}.", query=query)
+        kwargs = {"query": query, "limit": limit, "page": page, "lane": lane}
+        return self._call_provider_search_with(provider, **kwargs)
+
     def _provider_search_lane(self, query: str, lane: str, limit: int, page: int = 1):
         if self.data_source == "openalex":
             return self._call_provider_search(query=query, limit=limit, page=page, field_ids=openalex_field_ids(self.discipline_fields), lane=lane)
@@ -1120,11 +3323,17 @@ class PaperSeekAgent:
                 )
             raise
         except Exception as exc:
-            self._emit_log(f"WoS generated client parsing failed; retrying with raw JSON parser: {exc.__class__.__name__}.")
+            self._emit_log(f"WoS client parsing failed; retrying with the fallback JSON parser: {exc.__class__.__name__}.")
             return self._wos_raw_search(query, limit=limit, sort_field=sort_field)
 
     def _call_provider_search(self, **kwargs):
-        search = self.provider.search
+        return self._call_provider_search_with(self.provider, **kwargs)
+
+    @staticmethod
+    def _call_provider_search_with(provider, **kwargs):
+        if provider is None:
+            raise ProviderError("unknown", "No source provider is configured.", query=str(kwargs.get("query") or ""))
+        search = provider.search
         signature = inspect.signature(search)
         accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
         if accepts_kwargs:
@@ -1229,7 +3438,7 @@ class PaperSeekAgent:
             target_max = 50
         return min(max(configured, target_max), self._retrieval_pool_max())
 
-    def _citation_seed_ranking_limit(self) -> int:
+    def _citation_seed_selection_limit(self) -> int:
         try:
             seed_count = max(1, int(getattr(self.config, "citation_seed_count", 30) or 30))
         except (TypeError, ValueError):
@@ -1252,18 +3461,6 @@ class PaperSeekAgent:
             return float((entry or {}).get("score", 0) or 0)
         except (TypeError, ValueError):
             return 0.0
-
-    def _should_broaden_after_result(self, total: int, iteration: int, configured_iterations: int, adaptive_max_iterations: int) -> bool:
-        if self.config.target_min <= total <= self.config.target_max:
-            return False
-        if iteration < configured_iterations:
-            return total < self.config.target_min
-        if total == 0:
-            return False
-        return total < self._retrieval_pool_min() and iteration < adaptive_max_iterations
-
-    def _should_narrow_after_result(self, total: int, iteration: int, configured_iterations: int, adaptive_max_iterations: int) -> bool:
-        return total > self._retrieval_pool_max() and iteration < adaptive_max_iterations
 
     def _complete_after_unchanged_revision(self, history: list, iteration: int, query: str, total: int, hits: list, attempted_action: str) -> None:
         if total == 0:
@@ -1305,6 +3502,55 @@ class PaperSeekAgent:
             return output_limit
         return min(max(output_limit * 2, output_limit), 100)
 
+    def _record_query_iteration(self, iteration: int, query: str, total: int, hits: list) -> None:
+        records = self._dedupe_documents(list(hits or []))[:100]
+        normalized_query = re.sub(r"\s+", " ", str(query or "")).strip().casefold()
+        if not records or not normalized_query:
+            return
+        entry = {
+            "iteration": int(iteration or 0),
+            "query": str(query or ""),
+            "total": int(total or 0),
+            "records": records,
+        }
+        for index, existing in enumerate(self.query_iteration_results):
+            existing_query = re.sub(
+                r"\s+", " ", str((existing or {}).get("query") or "")
+            ).strip().casefold()
+            if existing_query == normalized_query:
+                self.query_iteration_results[index] = entry
+                break
+        else:
+            self.query_iteration_results.append(entry)
+        self.query_iteration_results = self.query_iteration_results[-12:]
+
+    def _query_iteration_memory_payload(self) -> list[dict]:
+        return [
+            {
+                "iteration": int(item.get("iteration") or 0),
+                "query": str(item.get("query") or ""),
+                "total": int(item.get("total") or 0),
+                "candidate_count": len(item.get("records") or []),
+            }
+            for item in self.query_iteration_results
+            if isinstance(item, dict)
+        ]
+
+    def _query_iteration_lanes(self, final_query: str) -> Dict[str, list]:
+        final_normalized = re.sub(r"\s+", " ", str(final_query or "")).strip().casefold()
+        lanes: Dict[str, list] = {}
+        for item in self.query_iteration_results:
+            if not isinstance(item, dict):
+                continue
+            query = str(item.get("query") or "")
+            normalized = re.sub(r"\s+", " ", query).strip().casefold()
+            records = self._dedupe_documents(list(item.get("records") or []))
+            if not records or not normalized or normalized == final_normalized:
+                continue
+            iteration = max(1, int(item.get("iteration") or len(lanes) + 1))
+            lanes[f"query_iteration:{iteration}"] = records
+        return lanes
+
     def _retrieval_capabilities(self) -> ProviderRetrievalCapabilities:
         if self.provider and hasattr(self.provider, "retrieval_capabilities"):
             return self.provider.retrieval_capabilities()
@@ -1318,28 +3564,52 @@ class PaperSeekAgent:
 
     def _retrieve_candidates(self, question: str, query: str, primary_hits: list) -> list:
         capabilities = self._retrieval_capabilities()
-        lane_limit = self._effective_lane_limit(capabilities)
+        lane_limits = {
+            lane: self._effective_lane_limit(capabilities, lane)
+            for lane in capabilities.lanes
+        }
         lane_results: Dict[str, list] = {}
         lane_total = max(1, len(capabilities.lanes))
+        try:
+            lane_concurrency = max(
+                1,
+                min(
+                    len(capabilities.lanes),
+                    int(getattr(capabilities, "lane_concurrency", 1) or 1),
+                ),
+            )
+        except (TypeError, ValueError):
+            lane_concurrency = 1
         self._emit_ranking_step(
             "multi_lane_retrieval",
             "processing",
             "Multi-lane retrieval",
             current=0,
             total=lane_total,
-            detail=f"Starting {', '.join(capabilities.lanes)} lanes; lane limit {lane_limit}.",
+            detail=(
+                f"Starting {', '.join(capabilities.lanes)} lanes; lane limits {lane_limits}; "
+                f"concurrency {lane_concurrency}."
+            ),
         )
         self._emit_log(
             "Lightweight multi-lane retrieval started: "
-            f"source={self.data_source}; lanes={','.join(capabilities.lanes)}; lane_limit={lane_limit}; pool_max={self._retrieval_pool_max()}."
+            f"source={self.data_source}; lanes={','.join(capabilities.lanes)}; lane_limits={lane_limits}; "
+            f"lane_concurrency={lane_concurrency}; pool_max={self._retrieval_pool_max()}."
         )
         completed_lanes = 0
-        for lane in capabilities.lanes:
-            try:
-                lane_results[lane] = self._collect_retrieval_lane(query, lane, lane_limit)
+        self._retrieval_primary_hits = list(primary_hits or [])
+
+        def collect_lane(lane: str) -> list:
+            lane_query = question if lane == RetrievalLane.SEMANTIC else query
+            return self._collect_retrieval_lane(lane_query, lane, lane_limits[lane])
+
+        def record_lane_result(lane: str, documents: Optional[list] = None, error: Optional[Exception] = None) -> None:
+            nonlocal completed_lanes
+            if error is None:
+                lane_results[lane] = list(documents or [])
                 self._emit_log(f"Retrieval lane completed: {lane}; candidates={len(lane_results[lane])}.")
-            except Exception as exc:
-                self._emit_log(f"Retrieval lane skipped after error: {lane}; {exc.__class__.__name__}: {exc}")
+            else:
+                self._emit_log(f"Retrieval lane skipped after error: {lane}; {error.__class__.__name__}: {error}")
             completed_lanes += 1
             self._emit_ranking_step(
                 "multi_lane_retrieval",
@@ -1349,6 +3619,63 @@ class PaperSeekAgent:
                 total=lane_total,
                 detail=f"{lane} lane finished; collected {sum(len(values) for values in lane_results.values())} lane candidates.",
                 lane_counts={key: len(value) for key, value in lane_results.items()},
+            )
+
+        try:
+            if lane_concurrency == 1:
+                for lane in capabilities.lanes:
+                    try:
+                        record_lane_result(lane, collect_lane(lane))
+                    except SearchCancelled:
+                        raise
+                    except Exception as exc:
+                        record_lane_result(lane, error=exc)
+            else:
+                executor = ThreadPoolExecutor(max_workers=lane_concurrency)
+                try:
+                    future_to_lane = {
+                        executor.submit(collect_lane, lane): lane
+                        for lane in capabilities.lanes
+                    }
+                    pending = set(future_to_lane)
+                    while pending:
+                        done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+                        self._check_cancelled()
+                        for future in done:
+                            lane = future_to_lane[future]
+                            try:
+                                record_lane_result(lane, future.result())
+                            except SearchCancelled:
+                                raise
+                            except Exception as exc:
+                                record_lane_result(lane, error=exc)
+                except SearchCancelled:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    executor = None
+                    raise
+                finally:
+                    if executor is not None:
+                        executor.shutdown(wait=True)
+        finally:
+            self._retrieval_primary_hits = []
+
+        # Preserve capability order so equal-score fusion ties are stable even
+        # when network requests complete in a different order.
+        lane_results = {
+            lane: lane_results[lane]
+            for lane in capabilities.lanes
+            if lane in lane_results
+        }
+        for view_id, documents in self.query_portfolio_lane_results.items():
+            if documents:
+                lane_results[f"query_view:{view_id}"] = self._dedupe_documents(documents)
+        iteration_lanes = self._query_iteration_lanes(query)
+        lane_results.update(iteration_lanes)
+        if iteration_lanes:
+            self._emit_log(
+                "Query iteration memory added to candidate fusion: "
+                f"lanes={len(iteration_lanes)}; candidates="
+                f"{sum(len(documents) for documents in iteration_lanes.values())}."
             )
         if not lane_results and primary_hits:
             lane_results[RetrievalLane.RELEVANCE] = list(primary_hits or [])
@@ -1429,6 +3756,161 @@ class PaperSeekAgent:
         )
         return fused_documents
 
+    def _refuse_candidates_after_citation(self, question: str, candidates: list) -> list:
+        """Re-run local fusion so citation neighbors compete in the final ranking gate."""
+
+        unique_candidates = self._dedupe_documents(list(candidates or []))
+        if not unique_candidates or self.search_run_state is None:
+            return unique_candidates
+
+        ledger = self.search_run_state.candidate_queue.ledger
+        citation_keys = {
+            key
+            for key, evidence in ledger.items()
+            if any(self._is_citation_candidate_origin(origin) for origin in evidence.origins)
+        }
+        citation_documents = [
+            document
+            for document in unique_candidates
+            if document_key(document) in citation_keys
+        ]
+        if not citation_documents:
+            return unique_candidates
+
+        documents_by_key = {
+            document_key(document): document
+            for document in unique_candidates
+            if document_key(document)
+        }
+        ranked_lanes: Dict[str, list] = {}
+        for key, document in documents_by_key.items():
+            metadata = dict(self.retrieval_metadata_by_key.get(key, {}) or {})
+            for lane, rank in dict(metadata.get("retrieval_source_ranks", {}) or {}).items():
+                try:
+                    lane_rank = int(rank)
+                except (TypeError, ValueError):
+                    continue
+                ranked_lanes.setdefault(str(lane), []).append((lane_rank, key, document))
+
+        lane_results: Dict[str, list] = {
+            lane: [document for _, _, document in sorted(values, key=lambda item: (item[0], item[1]))]
+            for lane, values in ranked_lanes.items()
+            if values
+        }
+        pre_citation_documents = []
+        for document in unique_candidates:
+            key = document_key(document)
+            evidence = ledger.get(key)
+            origins = list(evidence.origins) if evidence is not None else []
+            if not origins or any(not self._is_citation_candidate_origin(origin) for origin in origins):
+                pre_citation_documents.append(document)
+        if pre_citation_documents:
+            lane_results[RetrievalLane.LOCAL_QUALITY] = pre_citation_documents
+        lane_results[RetrievalLane.CITATION] = citation_documents
+
+        self._emit_ranking_step(
+            "citation_refusion",
+            "processing",
+            "Citation-aware candidate fusion",
+            current=0,
+            total=max(1, len(unique_candidates)),
+            detail=(
+                "Re-ranking the complete candidate pool after citation expansion with local BM25, "
+                "sparse hashing similarity, and RRF."
+            ),
+            candidate_count=len(unique_candidates),
+        )
+        fused = fuse_candidates_rrf(
+            question,
+            lane_results,
+            pool_max=self._retrieval_pool_max(),
+            rrf_k=self._retrieval_rrf_k(),
+        )
+        prior_metadata = self.retrieval_metadata_by_key
+        merged_metadata: Dict[str, Dict[str, Any]] = {}
+        for key, metadata in fused.metadata_by_key.items():
+            merged = {**dict(prior_metadata.get(key, {}) or {}), **dict(metadata or {})}
+            if "rerank_score" in prior_metadata.get(key, {}):
+                merged["rerank_score"] = prior_metadata[key]["rerank_score"]
+            merged_metadata[key] = merged
+        self.retrieval_metadata_by_key = merged_metadata
+        self._refresh_candidate_retrieval_evidence(fused.documents)
+        self._emit_log(
+            "Citation-aware local fusion completed: "
+            f"candidates={fused.total_candidates}; citation_candidates={len(citation_documents)}; "
+            f"fused_candidates={len(fused.documents)}."
+        )
+        self._emit_ranking_step(
+            "citation_refusion",
+            "complete",
+            "Citation-aware candidate fusion",
+            current=len(fused.documents),
+            total=max(1, fused.total_candidates),
+            detail=(
+                f"Re-fused {fused.total_candidates} candidates after citation expansion; "
+                f"citation candidates={len(citation_documents)}."
+            ),
+            candidate_count=len(fused.documents),
+            lane_counts=fused.lane_counts,
+        )
+        return fused.documents
+
+    @staticmethod
+    def _is_citation_candidate_origin(origin: str) -> bool:
+        value = str(origin or "")
+        return value == "citation_expansion" or value.startswith("citation_frontier:")
+
+    def _refresh_candidate_retrieval_evidence(self, documents: list) -> None:
+        if self.search_run_state is None:
+            return
+        queue = self.search_run_state.candidate_queue
+        ledger = dict(queue.ledger)
+        for document in documents or []:
+            key = document_key(document)
+            evidence = ledger.get(key)
+            metadata = dict(self.retrieval_metadata_by_key.get(key, {}) or {})
+            if not key or evidence is None or not metadata:
+                continue
+            retrieval_lanes = [str(value) for value in metadata.get("retrieval_lanes", []) if value]
+            query_views = [
+                lane.split(":", 1)[1]
+                for lane in retrieval_lanes
+                if lane.startswith("query_view:") and ":" in lane
+            ]
+            source_ranks = {
+                str(lane): int(rank)
+                for lane, rank in dict(metadata.get("retrieval_source_ranks", {}) or {}).items()
+                if rank is not None
+            }
+            concept_coverage = {
+                name: float(metadata.get(field, 0.0) or 0.0)
+                for name, field in (
+                    ("embedding", "retrieval_embedding_score"),
+                    ("bm25", "retrieval_bm25_score"),
+                    ("term", "retrieval_term_coverage"),
+                    ("rrf", "retrieval_rrf_score"),
+                    ("rrf_normalized", "retrieval_rrf_normalized"),
+                    ("primary_prior", "retrieval_primary_prior"),
+                )
+            }
+            ledger[key] = evidence.model_copy(
+                update={
+                    "query_views": self._merge_unique(evidence.query_views, query_views),
+                    "retrieval_lanes": retrieval_lanes,
+                    "source_ranks": source_ranks,
+                    "concept_coverage": {**evidence.concept_coverage, **concept_coverage},
+                    "retrieval_score": self._optional_float(metadata.get("retrieval_score")),
+                    "rerank_score": (
+                        self._optional_float(metadata.get("rerank_score"))
+                        if "rerank_score" in metadata
+                        else evidence.rerank_score
+                    ),
+                }
+            )
+        self.search_run_state = self.search_run_state.with_candidate_queue(
+            queue.model_copy(update={"ledger": ledger})
+        )
+
     def _maybe_crossref_enrich_candidates(self, documents: list) -> list:
         if not getattr(self.config, "retrieval_crossref_enrichment", False):
             return documents
@@ -1468,12 +3950,24 @@ class PaperSeekAgent:
                     continue
         return None
 
-    def _effective_lane_limit(self, capabilities: ProviderRetrievalCapabilities) -> int:
+    def _effective_lane_limit(
+        self,
+        capabilities: ProviderRetrievalCapabilities,
+        lane: str = RetrievalLane.RELEVANCE,
+    ) -> int:
         try:
-            configured = max(1, int(getattr(self.config, "retrieval_lane_limit", 1000) or 1000))
+            configured = max(1, int(getattr(self.config, "retrieval_lane_limit", 500) or 500))
         except (TypeError, ValueError):
-            configured = 1000
-        return max(1, min(configured, capabilities.max_lane_limit, self._retrieval_pool_max()))
+            configured = 500
+        # A single lane cannot contribute more papers to LLM scoring than the
+        # final ranking gate can accept. Keeping that bound here avoids paging
+        # far past useful depth while still allowing all lanes to add diversity.
+        ranking_limit = self._llm_ranking_candidate_limit()
+        useful_depth = max(100, ranking_limit)
+        if lane != RetrievalLane.RELEVANCE:
+            # Diversification lanes only need a strong top slice before fusion.
+            useful_depth = max(100, int(math.ceil(ranking_limit / 4.0)))
+        return max(1, min(configured, capabilities.max_lane_limit, self._retrieval_pool_max(), useful_depth))
 
     def _retrieval_rrf_k(self) -> int:
         try:
@@ -1481,14 +3975,38 @@ class PaperSeekAgent:
         except (TypeError, ValueError):
             return 60
 
-    def _collect_retrieval_lane(self, query: str, lane: str, limit: int) -> list:
-        collected = []
-        page = 1
+    def _collect_retrieval_lane(
+        self,
+        query: str,
+        lane: str,
+        limit: int,
+        initial_hits: Optional[list] = None,
+    ) -> list:
+        if initial_hits is None and lane == RetrievalLane.RELEVANCE:
+            initial_hits = self._retrieval_primary_hits
+        collected = self._dedupe_documents(list(initial_hits or []))[:limit]
+        if len(collected) >= limit:
+            return collected
+
+        default_page_size = min(100, limit)
+        if collected and len(collected) < default_page_size:
+            return collected
+        page = 2 if collected else 1
         while len(collected) < limit:
+            self._check_cancelled()
             request_limit = min(1000 if self.data_source == "semanticscholar" and lane != RetrievalLane.RELEVANCE else 100, limit - len(collected))
             if self.data_source == "wos":
                 request_limit = min(request_limit, limit)
-            result = self._provider_search_lane(query, lane, request_limit, page=page)
+            try:
+                result = self._provider_search_lane(query, lane, request_limit, page=page)
+            except Exception as exc:
+                if not collected:
+                    raise
+                self._emit_log(
+                    f"Retrieval lane retained {len(collected)} candidates after page {page} failed: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+                break
             hits = list(getattr(result, "hits", []) or [])
             if not hits:
                 break
@@ -1718,6 +4236,10 @@ class PaperSeekAgent:
                     raise RuntimeError("reranker response contained no indexed scores")
                 ranked.sort(reverse=True)
                 used = {index for _, index in ranked}
+                for score, index in ranked:
+                    key = document_key(documents[index])
+                    if key:
+                        self.retrieval_metadata_by_key.setdefault(key, {})["rerank_score"] = float(score)
                 reranked_docs = [documents[index] for _, index in ranked]
                 reranked_docs.extend(documents[index] for index in range(rerank_count) if index not in used)
                 reranked_docs.extend(documents[rerank_count:])
@@ -1846,12 +4368,12 @@ class PaperSeekAgent:
                 return normalized
         return ""
 
-    def _build_citation_seed_plans(self, seed_ranked: list, candidates: list, seed_limit: int, depth: int) -> list:
-        seed_limit = max(1, int(seed_limit or 1))
-        depth = max(1, min(int(depth or 1), 3))
-        relevance_quota = max(1, seed_limit // 2)
-        impact_quota = max(1, seed_limit // 4) if seed_limit > 1 else 0
-        recent_quota = max(0, seed_limit - relevance_quota - impact_quota)
+    def _build_citation_seed_plans(self, seed_ranked: list, candidates: list, plan) -> list:
+        seed_limit = max(1, int(getattr(plan, "seed_limit", 1) or 1))
+        depth = max(1, min(int(getattr(plan, "depth", 1) or 1), 3))
+        relevance_quota = max(1, int(getattr(plan, "relevance_quota", seed_limit // 2) or 1))
+        impact_quota = max(0, int(getattr(plan, "impact_quota", 0) or 0))
+        recent_quota = max(0, int(getattr(plan, "recent_quota", max(0, seed_limit - relevance_quota - impact_quota)) or 0))
         plans: List[CitationSeedPlan] = []
         index_by_key: Dict[str, CitationSeedPlan] = {}
 
@@ -1914,7 +4436,18 @@ class PaperSeekAgent:
                 add_plan(entry.get("document"), "relevance", ("backward", "forward"))
                 if len(plans) >= seed_limit:
                     break
-        return plans
+
+        buckets: Dict[str, List[CitationSeedPlan]] = {"relevance": [], "impact": [], "recent": []}
+        for seed_plan in plans:
+            roles = set(str(seed_plan.role or "relevance").split("+"))
+            bucket = "recent" if "recent" in roles else "impact" if "impact" in roles else "relevance"
+            buckets[bucket].append(seed_plan)
+        interleaved: List[CitationSeedPlan] = []
+        while any(buckets.values()):
+            for role in ("relevance", "impact", "recent"):
+                if buckets[role]:
+                    interleaved.append(buckets[role].pop(0))
+        return interleaved
 
     @staticmethod
     def _citation_seed_plan_counts(seed_plans: list) -> dict:
@@ -1926,7 +4459,387 @@ class PaperSeekAgent:
         return counts
 
     def _prepare_candidates(self, question: str, hits: list) -> list:
-        candidates = list(hits or [])
+        dynamic_citations = (
+            bool(getattr(self.config, "crawler_enabled", False))
+            and self._candidate_selector_active()
+            and bool(getattr(self.config, "citation_feedback_enabled", False))
+        )
+        if dynamic_citations:
+            return self._prepare_candidates_frontier(question, hits)
+        candidates = self._prepare_candidates_legacy(question, hits)
+        if not self._candidate_selector_active():
+            return candidates
+        self._select_candidate_batch(
+            question,
+            self._crawler_selector_sample(candidates),
+            "candidate_preparation",
+        )
+        selected = self._selector_filtered_candidates(candidates)
+        excluded = len(candidates) - len(selected)
+        if excluded:
+            self._emit_log(
+                f"Candidate Selector excluded {excluded} candidates before final LLM ranking; "
+                f"retained={len(selected)}."
+            )
+        return selected
+
+    def _prepare_candidates_frontier(self, question: str, hits: list) -> list:
+        candidates = self._dedupe_documents(hits or [])
+        if not self.search_run_state.action_frontier.outcomes:
+            self.citation_map = self._empty_citation_map(
+                enabled=getattr(self.config, "expand_citations", True),
+                initial_candidates=len(candidates),
+                candidate_pool=len(candidates),
+            )
+        self._enqueue_candidate_queue(candidates, "candidate_retrieval")
+        initial_batch = self._select_candidate_batch(
+            question,
+            self._crawler_selector_sample(candidates),
+            "candidate_retrieval",
+        )
+        documents_by_key = {
+            document_key(document): document
+            for document in candidates
+            if document_key(document)
+        }
+        candidate_depths = {key: 0 for key in documents_by_key}
+
+        supported_actions = {"read", "enrich"}
+        if self.data_source == "openalex" and getattr(self.config, "expand_citations", True):
+            supported_actions.update({"expand_backward", "expand_forward"})
+        frontier_state = self.search_run_state.action_frontier
+        scheduler = FrontierScheduler(
+            frontier_state,
+            low_yield_round_limit=max(1, int(getattr(self.config, "crawler_low_yield_round_limit", 2) or 2)),
+        )
+        controller = CrawlerController(
+            self.search_plan,
+            self.data_source,
+            scheduler,
+            state=self.search_run_state.crawler_state,
+            supported_actions=supported_actions,
+            max_citation_depth=max(0, min(int(getattr(self.config, "citation_depth", 2) or 2), 3)),
+        )
+        controller.observe_selector(
+            initial_batch,
+            allow_follow_up_actions=True,
+            candidate_depths=candidate_depths,
+        )
+
+        if "expand_backward" in supported_actions:
+            roles = self._frontier_citation_seed_roles(candidates, initial_batch)
+            controller.seed_citation_actions(
+                initial_batch,
+                roles_by_candidate=roles,
+                candidate_depths=candidate_depths,
+                max_actions=max(1, int(getattr(self.config, "crawler_max_citation_requests", 8) or 8)),
+            )
+
+        citation_nodes: dict[str, dict] = {}
+        citation_edges: list[dict] = []
+        citation_edge_keys: set[tuple] = set()
+
+        def sync_controller_state() -> None:
+            self.search_run_state = self.search_run_state.with_action_frontier(
+                controller.scheduler.snapshot()
+            ).with_crawler_state(controller.state)
+
+        def reader_handler(action) -> ToolExecution:
+            document = documents_by_key.get(action.candidate_id)
+            if document is None:
+                return ToolExecution(action=action, status="skipped", error="candidate_not_found")
+            if str(getattr(document, "abstract", "") or "").strip():
+                return ToolExecution(
+                    action=action,
+                    status="done",
+                    records=[document],
+                    total=1,
+                    metadata={"changed": False, "reason": "abstract_already_available"},
+                )
+            identifiers = getattr(document, "identifiers", None)
+            doi = str(getattr(identifiers, "doi", "") or "") if identifiers else ""
+            if not doi:
+                return ToolExecution(action=action, status="skipped", error="no_doi_for_abstract_enrichment")
+            abstract = self.abstract_fetcher.fetch(doi)
+            if not abstract:
+                return ToolExecution(action=action, status="done", records=[document], total=1, metadata={"changed": False})
+            document.abstract = abstract
+            return ToolExecution(action=action, status="done", records=[document], total=1, metadata={"changed": True})
+
+        def citation_handler(action) -> ToolExecution:
+            document = documents_by_key.get(action.candidate_id)
+            if document is None:
+                return ToolExecution(action=action, status="skipped", error="citation_seed_not_found")
+            direction = "backward" if action.action_type == "expand_backward" else "forward"
+            per_seed = max(1, min(int(getattr(self.config, "citation_per_seed", 4) or 4), 10))
+            plan = CitationSeedPlan(
+                record=document,
+                role="selector",
+                directions=(direction,),
+                depth=1,
+            )
+            data = self.provider.citation_neighbors_with_graph(
+                [document],
+                per_seed=per_seed,
+                max_records=per_seed,
+                field_ids=openalex_field_ids(self.discipline_fields),
+                seed_plans=[plan],
+                depth=1,
+                cancel_check=self._check_cancelled,
+                request_attempts=1,
+                request_timeout=10,
+            )
+            return ToolExecution(
+                action=action,
+                status="done",
+                records=list(data.get("records") or []),
+                total=len(data.get("records") or []),
+                metadata={key: value for key, value in data.items() if key != "records"},
+            )
+
+        handlers = {"read": reader_handler, "enrich": reader_handler}
+        if "expand_backward" in supported_actions:
+            handlers.update({"expand_backward": citation_handler, "expand_forward": citation_handler})
+        executor = ToolExecutor(handlers, passthrough_exceptions=(SearchCancelled,))
+
+        self._emit_log(
+            f"Candidate feedback frontier started: pending_actions="
+            f"{sum(1 for action in controller.scheduler.state.actions if action.status == 'pending')}; "
+            f"supported={','.join(sorted(supported_actions))}."
+        )
+        self._emit_ranking_step(
+            "candidate_feedback",
+            "processing",
+            "Candidate feedback loop",
+            current=0,
+            total=max(1, len(controller.scheduler.state.actions)),
+            detail="Selecting, enriching, and expanding high-value candidates under a shared frontier budget.",
+        )
+        feedback_results: Dict[str, dict] = {}
+
+        def select_feedback_action(action, result) -> FrontierOutcome:
+            selector_batch = SelectorBatch()
+            added_documents: list = []
+            gaps_before = set(controller.concept_gaps())
+            ledger_before = self.search_run_state.candidate_queue.ledger if self.search_run_state else {}
+            labels_before = {
+                document_key(document): ledger_before[document_key(document)].selector_label
+                for document in result.records
+                if document_key(document) in ledger_before
+            }
+            if result.status == "done" and action.action_type in {"read", "enrich"}:
+                selector_batch = self._select_candidate_batch(
+                    question,
+                    result.records,
+                    f"frontier:{action.action_type}",
+                )
+            elif result.status == "done" and action.action_type.startswith("expand_"):
+                evidence_by_key = self._citation_evidence_by_key(
+                    result.records,
+                    {
+                        "edges": result.metadata.get("edges") or [],
+                        "nodes": result.metadata.get("nodes") or [],
+                    },
+                )
+                for evidence in evidence_by_key.values():
+                    for path in evidence.get("citation_paths") or []:
+                        path["depth"] = action.depth
+                newly_queued = self._enqueue_candidate_queue(
+                    result.records,
+                    f"citation_frontier:{action.action_type}",
+                    evidence_by_key=evidence_by_key,
+                )
+                for document in newly_queued:
+                    key = document_key(document)
+                    if not key or key in documents_by_key:
+                        continue
+                    documents_by_key[key] = document
+                    candidate_depths[key] = action.depth
+                    candidates.append(document)
+                    added_documents.append(document)
+                selector_batch = self._select_candidate_batch(
+                    question,
+                    added_documents,
+                    f"citation_frontier:{action.action_type}",
+                )
+                for node in result.metadata.get("nodes") or []:
+                    node_id = str(node.get("id") or "") if isinstance(node, dict) else ""
+                    if node_id:
+                        citation_nodes[node_id] = dict(node)
+                for edge in result.metadata.get("edges") or []:
+                    if not isinstance(edge, dict):
+                        continue
+                    edge_key = (
+                        edge.get("source"),
+                        edge.get("target"),
+                        edge.get("direction"),
+                    )
+                    if edge_key not in citation_edge_keys:
+                        citation_edge_keys.add(edge_key)
+                        citation_edges.append(dict(edge))
+
+            if selector_batch.decisions:
+                controller.observe_selector(
+                    selector_batch,
+                    allow_follow_up_actions=True,
+                    candidate_depths=candidate_depths,
+                )
+                if added_documents and "expand_backward" in supported_actions:
+                    remaining_citation_actions = max(
+                        0,
+                        controller.scheduler.state.budget.max_citation_requests
+                        - controller.scheduler.state.budget.citation_requests,
+                    )
+                    controller.seed_citation_actions(
+                        selector_batch,
+                        roles_by_candidate=self._frontier_citation_seed_roles(
+                            added_documents,
+                            selector_batch,
+                        ),
+                        candidate_depths=candidate_depths,
+                        max_actions=remaining_citation_actions,
+                    )
+            gaps_after = set(controller.concept_gaps())
+            counts = selector_batch.label_counts()
+            newly_relevant = sum(
+                1
+                for decision in selector_batch.decisions
+                if decision.label == "include" and labels_before.get(decision.candidate_id) != "include"
+            )
+            feedback_results[action.action_id] = {
+                "counts": counts,
+                "added_documents": added_documents,
+            }
+            return FrontierOutcome(
+                action_id=action.action_id,
+                status="done" if result.status == "done" else ("skipped" if result.status == "skipped" else "failed"),
+                candidates_seen=len(result.records),
+                added_unique=len(added_documents),
+                include_count=counts.get("include", 0),
+                uncertain_count=counts.get("uncertain", 0),
+                exclude_count=counts.get("exclude", 0),
+                newly_relevant_count=newly_relevant,
+                concept_gap_reduction=len(gaps_before - gaps_after),
+                elapsed_ms=result.elapsed_ms,
+                error=result.error,
+            )
+
+        processed = 0
+        while True:
+            self._check_cancelled()
+            cycle = self.search_loop.run_frontier_cycle(
+                controller,
+                executor.execute,
+                select_feedback_action,
+                passthrough_exceptions=(SearchCancelled,),
+            )
+            if not cycle.scheduled or cycle.action is None:
+                break
+            action = cycle.action
+            feedback = feedback_results.pop(action.action_id, {})
+            counts = feedback.get("counts") or {"include": 0, "uncertain": 0, "exclude": 0}
+            added_documents = feedback.get("added_documents") or []
+            sync_controller_state()
+            processed += 1
+            self._emit_ranking_step(
+                "candidate_feedback",
+                "processing",
+                "Candidate feedback loop",
+                current=processed,
+                total=max(processed, len(controller.scheduler.state.actions)),
+                detail=(
+                    f"Completed {action.action_type}; added={len(added_documents)}; "
+                    f"include={counts.get('include', 0)}; uncertain={counts.get('uncertain', 0)}."
+                ),
+            )
+            self._save_checkpoint(
+                "citation_layer",
+                records=self._selector_filtered_candidates(candidates),
+                metadata={
+                    "resume_from_stage": "candidate_feedback",
+                    "action_id": action.action_id,
+                    "frontier_round": controller.scheduler.state.round_index,
+                },
+            )
+
+        selected = self._selector_filtered_candidates(self._dedupe_documents(candidates))
+        citation_outcomes = [
+            outcome
+            for outcome in controller.scheduler.state.outcomes
+            if next(
+                (
+                    action.action_type.startswith("expand_")
+                    for action in controller.scheduler.state.actions
+                    if action.action_id == outcome.action_id
+                ),
+                False,
+            )
+        ]
+        if any(outcome.added_unique for outcome in citation_outcomes):
+            selected = self._refuse_candidates_after_citation(question, selected)
+        self.citation_map.update(
+            {
+                "supported": self.data_source == "openalex",
+                "status": "complete" if citation_outcomes else "skipped",
+                "added_candidates": sum(outcome.added_unique for outcome in citation_outcomes),
+                "candidate_pool": len(selected),
+                "nodes": list(citation_nodes.values()),
+                "edges": citation_edges,
+                "frontier": controller.scheduler.state.model_dump(mode="json"),
+            }
+        )
+        self._emit_log(
+            f"Candidate feedback frontier completed: actions={processed}; retained={len(selected)}; "
+            f"excluded={len(candidates) - len(selected)}; stop={controller.scheduler.state.stop_reason or 'frontier_empty'}."
+        )
+        self._emit_ranking_step(
+            "candidate_feedback",
+            "complete",
+            "Candidate feedback loop",
+            current=processed,
+            total=max(1, processed),
+            detail=f"Retained {len(selected)} include/uncertain candidates for final ranking.",
+            candidate_count=len(selected),
+        )
+        return selected
+
+    def _frontier_citation_seed_roles(self, documents: list, batch: SelectorBatch) -> dict[str, list[str]]:
+        decisions = {decision.candidate_id: decision for decision in batch.decisions if decision.label != "exclude"}
+        if not decisions:
+            return {}
+        try:
+            seed_limit = max(1, int(getattr(self.config, "citation_seed_count", 30) or 30))
+        except (TypeError, ValueError):
+            seed_limit = 30
+        eligible = [document for document in documents if document_key(document) in decisions]
+        relevance = sorted(
+            eligible,
+            key=lambda document: (-decisions[document_key(document)].relevance_score, document_key(document)),
+        )[:seed_limit]
+        impact = sorted(
+            eligible,
+            key=lambda document: (-_citation_count(document), document_key(document)),
+        )[:max(1, seed_limit // 3)]
+        recent = sorted(
+            eligible,
+            key=lambda document: (
+                -(getattr(getattr(document, "source", None), "publish_year", 0) or 0),
+                document_key(document),
+            ),
+        )[:max(1, seed_limit // 3)]
+        roles: dict[str, list[str]] = {}
+        for role, values in (("relevance", relevance), ("impact", impact), ("recent", recent)):
+            for document in values:
+                key = document_key(document)
+                roles[key] = self._merge_unique(roles.get(key, []), [role])
+        return roles
+
+    def _prepare_candidates_legacy(self, question: str, hits: list) -> list:
+        candidates = self._dedupe_documents(list(hits or []))
+        # Queue insertion returns only records that are new to the ledger. A
+        # paper discovered during an earlier query iteration is still part of
+        # the fused retrieval pool and must continue to citation/ranking.
+        self._enqueue_candidate_queue(candidates, "retrieval")
         self.citation_map = self._empty_citation_map(
             enabled=getattr(self.config, "expand_citations", True),
             initial_candidates=len(candidates),
@@ -1940,35 +4853,67 @@ class PaperSeekAgent:
             self._emit_log("Citation expansion skipped: this data source does not support OpenAlex citation traversal yet.")
             self.citation_map.update({"supported": False, "status": "unsupported"})
             return candidates
+        last_source_status = str((getattr(self.provider, "last_response_info", {}) or {}).get("status") or "")
+        if last_source_status == "429":
+            self._emit_log("Citation expansion skipped because OpenAlex is rate limiting this run; keeping the current candidate pool.")
+            self.citation_map.update({"supported": True, "status": "rate_limited"})
+            self._emit_ranking_step(
+                "citation_expansion",
+                "skipped",
+                "Citation expansion",
+                current=0,
+                total=1,
+                detail="OpenAlex returned 429 during retrieval; citation traversal was skipped to avoid blocking the run.",
+            )
+            return candidates
 
-        seed_ranking_limit = self._citation_seed_ranking_limit()
-        seed_candidates = candidates[:seed_ranking_limit]
+        self._check_cancelled()
+        seed_selection_limit = self._citation_seed_selection_limit()
+        seed_candidates = self._citation_seed_candidate_pool(candidates, seed_selection_limit)
         if len(candidates) > len(seed_candidates):
             self._emit_log(
-                "Citation seed ranking candidate list truncated: "
-                f"candidates={len(candidates)}; seed_ranking_limit={seed_ranking_limit}."
+                "Citation seed selection pool truncated: "
+                f"candidates={len(candidates)}; seed_selection_limit={seed_selection_limit}."
             )
-        self._emit_log("Citation expansion started: ranking seed papers before traversing references and citing works.")
+        self._emit_log(
+            "Citation expansion started: selecting seed papers from the fused retrieval order "
+            "before traversing references and citing works."
+        )
         self._emit_ranking_step(
             "citation_seed_ranking",
             "processing",
-            "Citation seed ranking",
+            "Citation seed selection",
             current=0,
             total=max(1, len(seed_candidates)),
-            detail="Ranking a bounded pre-ranked candidate prefix to choose citation expansion seeds.",
+            detail="Selecting a bounded, query-view-diversified seed pool from the existing fused retrieval order.",
         )
-        seed_ranked = self._rank_results(question, seed_candidates, step_id="citation_seed_ranking", step_title="Citation seed ranking")
+        seed_ranked = [
+            {
+                "document": document,
+                "score": 10,
+                "reasoning": "Selected from the fused retrieval order.",
+                **self._retrieval_entry_metadata(document),
+            }
+            for document in seed_candidates
+        ]
+        self._check_cancelled()
         self._emit_ranking_step(
             "citation_seed_ranking",
             "complete",
-            "Citation seed ranking",
+            "Citation seed selection",
             current=len(seed_candidates),
             total=max(1, len(seed_candidates)),
-            detail="Seed ranking completed.",
+            detail="Seed selection completed without an additional LLM scoring pass.",
         )
         seed_limit = max(1, int(getattr(self.config, "citation_seed_count", 30) or 30))
         citation_depth = max(1, min(int(getattr(self.config, "citation_depth", 2) or 2), 3))
-        seed_plans = self._build_citation_seed_plans(seed_ranked, candidates, seed_limit, citation_depth)
+        citation_plan = self._plan_citation_expansion(
+            candidate_count=len(candidates),
+            seed_ranking_count=len(seed_candidates),
+            seed_count=seed_limit,
+            depth=citation_depth,
+        )
+        seed_plans = self._build_citation_seed_plans(seed_ranked, candidates, citation_plan)
         seeds = [plan.record for plan in seed_plans]
         if not seed_plans:
             self._emit_log("Citation expansion skipped: no seed papers available.")
@@ -1994,32 +4939,150 @@ class PaperSeekAgent:
             citation_depth=citation_depth,
         )
         try:
-            citation_data = self.provider.citation_neighbors_with_graph(
-                seeds,
-                per_seed=getattr(self.config, "citation_per_seed", 4),
-                max_records=getattr(self.config, "citation_max_records", 160),
-                field_ids=openalex_field_ids(self.discipline_fields),
-                seed_plans=seed_plans,
-                depth=citation_depth,
+            traversal_per_seed = max(1, int(getattr(self.config, "citation_per_seed", 4) or 4))
+        except (TypeError, ValueError):
+            traversal_per_seed = 4
+        try:
+            traversal_max_records = max(1, int(getattr(self.config, "citation_max_records", 160) or 160))
+        except (TypeError, ValueError):
+            traversal_max_records = 160
+        traversal_depth = citation_depth
+        citation_data = None
+        retry_attempts = 0
+        citation_progress_state = {"last_emit": 0.0, "last_current": -1}
+
+        def emit_citation_progress(progress: dict) -> None:
+            self._check_cancelled()
+            event = str(progress.get("event") or "")
+            total = max(1, int(progress.get("total") or len(seed_plans) or 1))
+            current = max(0, min(total, int(progress.get("current") or 0)))
+            records = max(0, int(progress.get("records") or 0))
+            now = time.perf_counter()
+            step = max(1, total // 10)
+            should_emit = (
+                event == "start"
+                or current >= total
+                or current % step == 0
+                or (current != citation_progress_state["last_current"] and now - citation_progress_state["last_emit"] >= 5.0)
             )
-        except ProviderError as exc:
-            self._emit_log(f"Citation expansion skipped after OpenAlex error: {exc}")
-            self.citation_map.update({"status": "error", "error": str(exc)})
+            if not should_emit:
+                return
+            citation_progress_state["last_emit"] = now
+            citation_progress_state["last_current"] = current
+            self._emit_log(f"Citation expansion progress: {current}/{total} seed plans processed; added={records}.")
             self._emit_ranking_step(
                 "citation_expansion",
-                "error",
+                "processing",
                 "Citation expansion",
-                current=0,
-                total=max(1, len(seeds)),
-                detail=f"Citation traversal failed: {exc}",
+                current=current,
+                total=total,
+                detail=f"Traversing OpenAlex citation neighborhoods; added {records} candidates so far.",
                 seed_count=len(seeds),
+                citation_depth=traversal_depth,
+                added_candidates=records,
             )
-            return candidates
 
+        while citation_data is None:
+            self._check_cancelled()
+            try:
+                try:
+                    citation_data = self.provider.citation_neighbors_with_graph(
+                        seeds,
+                        per_seed=traversal_per_seed,
+                        max_records=traversal_max_records,
+                        field_ids=openalex_field_ids(self.discipline_fields),
+                        seed_plans=seed_plans,
+                        depth=traversal_depth,
+                        cancel_check=self._check_cancelled,
+                        progress_callback=emit_citation_progress,
+                        request_attempts=1,
+                        request_timeout=10,
+                    )
+                except TypeError as exc:
+                    if "unexpected keyword argument" not in str(exc):
+                        raise
+                    citation_data = self.provider.citation_neighbors_with_graph(
+                        seeds,
+                        per_seed=traversal_per_seed,
+                        max_records=traversal_max_records,
+                        field_ids=openalex_field_ids(self.discipline_fields),
+                        seed_plans=seed_plans,
+                        depth=traversal_depth,
+                    )
+            except ProviderError as exc:
+                self._observe_citation_traversal(
+                    status="error",
+                    seed_count=len(seeds),
+                    depth=traversal_depth,
+                    per_seed=traversal_per_seed,
+                    max_records=traversal_max_records,
+                    candidate_pool=len(candidates),
+                    error=exc,
+                )
+                decision = self._recover_citation_error(
+                    exc,
+                    seed_count=len(seeds),
+                    depth=traversal_depth,
+                    per_seed=traversal_per_seed,
+                    max_records=traversal_max_records,
+                    retry_attempts=retry_attempts,
+                    max_retries=1,
+                )
+                if decision.action == CITATION_RETRY_REDUCED:
+                    retry_attempts += 1
+                    traversal_per_seed = decision.per_seed
+                    traversal_max_records = decision.max_records
+                    traversal_depth = decision.depth
+                    self._emit_log(
+                        "Citation expansion retrying with a reduced traversal budget: "
+                        f"per_seed={traversal_per_seed}; max_records={traversal_max_records}; depth={traversal_depth}."
+                    )
+                    self._emit_ranking_step(
+                        "citation_expansion",
+                        "processing",
+                        "Citation expansion",
+                        current=0,
+                        total=max(1, len(seeds)),
+                        detail="Citation traversal failed once; retrying with a reduced traversal budget.",
+                        seed_count=len(seeds),
+                        citation_depth=traversal_depth,
+                    )
+                    continue
+                self._check_cancelled()
+                self._emit_log(f"Citation expansion skipped after OpenAlex error: {exc}")
+                self.citation_map.update({"status": "error", "error": str(exc)})
+                self._emit_ranking_step(
+                    "citation_expansion",
+                    "error",
+                    "Citation expansion",
+                    current=0,
+                    total=max(1, len(seeds)),
+                    detail=f"Citation traversal failed: {exc}",
+                    seed_count=len(seeds),
+                )
+                return candidates
+
+        self._check_cancelled()
         related = citation_data.get("records", [])
-        before = len(candidates)
-        candidates = self._dedupe_documents(candidates + related)
-        added = len(candidates) - before
+        citation_frontier = dict(citation_data.get("frontier") or {})
+        citation_evidence = self._citation_evidence_by_key(related, citation_data)
+        added_related = self._enqueue_candidate_queue(
+            related,
+            "citation_expansion",
+            evidence_by_key=citation_evidence,
+        )
+        candidates = candidates + added_related
+        added = len(added_related)
+        self._observe_citation_traversal(
+            status="complete",
+            seed_count=len(seeds),
+            depth=traversal_depth,
+            per_seed=traversal_per_seed,
+            max_records=traversal_max_records,
+            added_candidates=added,
+            candidate_pool=len(candidates),
+            frontier=citation_frontier,
+        )
         self.citation_map.update({
             "enabled": True,
             "supported": True,
@@ -2027,26 +5090,134 @@ class PaperSeekAgent:
             "initial_candidates": len(hits or []),
             "seed_count": len(seeds),
             "seed_plan_counts": self._citation_seed_plan_counts(seed_plans),
-            "citation_depth": citation_depth,
+            "citation_depth": traversal_depth,
+            "frontier": citation_frontier,
             "added_candidates": added,
             "candidate_pool": len(candidates),
             "nodes": citation_data.get("nodes", []),
             "edges": citation_data.get("edges", []),
         })
-        self._emit_log(f"Citation expansion completed: added {added} citation-neighbor candidates; candidate pool={len(candidates)}.")
+        frontier_stop = str(citation_frontier.get("stop_reason") or "completed")
+        frontier_requests = int(citation_frontier.get("request_count") or 0)
+        self._emit_log(
+            f"Citation expansion completed: added {added} citation-neighbor candidates; "
+            f"candidate pool={len(candidates)}; frontier_stop={frontier_stop}; requests={frontier_requests}."
+        )
         self._emit_ranking_step(
             "citation_expansion",
             "complete",
             "Citation expansion",
             current=len(seeds),
             total=max(1, len(seeds)),
-            detail=f"Added {added} citation-neighbor candidates; candidate pool={len(candidates)}.",
+            detail=(
+                f"Added {added} citation-neighbor candidates; candidate pool={len(candidates)}; "
+                f"frontier stop={frontier_stop}; requests={frontier_requests}."
+            ),
             seed_count=len(seeds),
             candidate_count=len(candidates),
             added_candidates=added,
-            citation_depth=citation_depth,
+            citation_depth=traversal_depth,
         )
+        candidates = self._refuse_candidates_after_citation(question, candidates)
+        self.citation_map["candidate_pool"] = len(candidates)
         return candidates
+
+    def _citation_evidence_by_key(self, records: list, citation_data: dict) -> Dict[str, Dict[str, Any]]:
+        edges = [edge for edge in (citation_data.get("edges") or []) if isinstance(edge, dict)]
+        output: Dict[str, Dict[str, Any]] = {}
+        for document in records or []:
+            key = document_key(document)
+            identifiers = getattr(document, "identifiers", None)
+            node_id = str(
+                getattr(document, "uid", "")
+                or (getattr(identifiers, "openalex", "") if identifiers else "")
+                or getattr(document, "title", "")
+                or ""
+            )
+            if not key or not node_id:
+                continue
+            paths = []
+            for edge in edges:
+                edge_source = str(edge.get("source") or "")
+                edge_target = str(edge.get("target") or "")
+                edge_type = str(edge.get("type") or "")
+                if edge_source == node_id and edge_type == "cites":
+                    direction = "forward"
+                    parent_id = edge_target
+                elif edge_target == node_id and edge_type == "references":
+                    direction = "backward"
+                    parent_id = edge_source
+                else:
+                    continue
+                try:
+                    depth = max(0, int(edge.get("layer") or 0))
+                except (TypeError, ValueError):
+                    depth = 0
+                paths.append(
+                    CandidateCitationPath(
+                        seed_id=str(edge.get("seed") or ""),
+                        parent_id=parent_id,
+                        direction=direction,
+                        depth=depth,
+                    )
+                )
+            output[key] = {
+                "citation_paths": paths,
+                "detail": f"citation_paths={len(paths)}",
+            }
+        return output
+
+    def _citation_seed_candidate_pool(self, candidates: list, limit: int) -> list:
+        limit = max(1, int(limit or 1))
+        candidate_by_key = {
+            document_key(document): document
+            for document in candidates or []
+            if document_key(document)
+        }
+        selected = []
+        selected_keys = set()
+
+        def add_documents(documents, quota: int) -> None:
+            added = 0
+            for document in documents or []:
+                key = document_key(document)
+                if not key or key not in candidate_by_key or key in selected_keys:
+                    continue
+                selected.append(candidate_by_key[key])
+                selected_keys.add(key)
+                added += 1
+                if len(selected) >= limit or added >= quota:
+                    break
+
+        view_types = {
+            view.view_id: view.view_type
+            for view in (self.search_plan.query_views if self.search_plan else [])
+        }
+        successor_ids = [
+            view_id
+            for view_id, view_type in view_types.items()
+            if view_type == "successor_paradigm" and view_id in self.query_portfolio_lane_results
+        ]
+        successor_quota = max(1, limit // 2)
+        for view_id in successor_ids:
+            add_documents(self.query_portfolio_lane_results.get(view_id, []), successor_quota)
+            if len(selected) >= limit:
+                return selected
+
+        other_ids = [
+            view_id
+            for view_id in self.query_portfolio_lane_results
+            if view_id not in successor_ids
+        ]
+        remaining_for_views = max(0, (limit * 3 // 4) - len(selected))
+        per_view_quota = max(1, remaining_for_views // max(1, len(other_ids)))
+        for view_id in other_ids:
+            add_documents(self.query_portfolio_lane_results.get(view_id, []), per_view_quota)
+            if len(selected) >= limit:
+                return selected
+
+        add_documents(candidates, limit - len(selected))
+        return selected
 
     def _empty_citation_map(self, enabled: bool = True, initial_candidates: int = 0, candidate_pool: int = 0) -> dict:
         return {
@@ -2096,25 +5267,30 @@ class PaperSeekAgent:
     @staticmethod
     def _dedupe_documents(documents: list) -> list:
         deduped = []
-        seen = set()
+        seen_aliases = set()
         for doc in documents or []:
-            identifiers = getattr(doc, "identifiers", None)
-            doi = (getattr(identifiers, "doi", "") if identifiers else "") or ""
-            key = (doi or getattr(doc, "uid", "") or getattr(doc, "title", "")).strip().lower()
-            if not key or key in seen:
+            aliases = document_alias_keys(doc)
+            if not aliases or any(alias in seen_aliases for alias in aliases):
                 continue
-            seen.add(key)
+            seen_aliases.update(aliases)
             deduped.append(doc)
         return deduped
 
     def _emit(self, event_type: str, **payload: Any) -> None:
+        self._check_cancelled()
         if self.event_handler:
             self.event_handler({"type": event_type, **payload})
+
+    def _check_cancelled(self) -> None:
+        if self.cancel_check and self.cancel_check():
+            raise SearchCancelled("Search cancelled by user.")
 
     def _emit_log(self, message: str, **payload: Any) -> None:
         self._emit("log", message=message, **payload)
 
     def _emit_stage(self, stage: str, status: str, **data: Any) -> None:
+        if stage == "query" and self.search_plan is not None:
+            data.setdefault("search_plan", self.search_plan.model_dump())
         self._emit("stage", stage=stage, status=status, data=data)
 
     def _emit_ranking_step(
@@ -2260,18 +5436,106 @@ class PaperSeekAgent:
         self._emit_log("Search intent analysis started.")
         self._llm_request_log("intent_analysis")
         try:
-            raw = self.llm.chat(messages, temperature=0.2)
+            chat_json = getattr(self.llm, "chat_json", None)
+            raw = (
+                chat_json(messages, temperature=0.0, max_tokens=4096)
+                if callable(chat_json)
+                else self.llm.chat(messages, temperature=0.0)
+            )
             self._llm_response_log("intent_analysis")
         except Exception as exc:
             self._emit_log(f"Search intent analysis skipped after LLM error: {exc}")
-            return f"Intent analysis unavailable after LLM error. Original question: {question}"
-        intent = _extract_intent_summary(raw)
-        if intent:
+            self.search_plan = fallback_search_plan(question, f"LLM error: {exc.__class__.__name__}")
+            return self.search_plan.audit_summary()
+        self.search_plan = parse_search_plan(raw, question)
+        response_info = getattr(self.llm, "last_response_info", {}) or {}
+        self.search_plan_diagnostics.append(
+            {
+                "attempt": 1,
+                "output_characters": len(raw or ""),
+                "finish_reason": response_info.get("finish_reason"),
+                "completion_tokens": response_info.get("completion_tokens"),
+                "parsed": self.search_plan is not None,
+                "coverage_gaps": self.search_plan.coverage_gaps() if self.search_plan is not None else ["invalid_search_plan_json"],
+            }
+        )
+        portfolio_required = bool(getattr(self.config, "query_portfolio_enabled", False)) and supports_query_portfolio(
+            self.data_source
+        )
+        plan_gaps = (
+            self.search_plan.coverage_gaps()
+            if self.search_plan is not None and portfolio_required
+            else ([] if self.search_plan is not None else ["a valid SearchPlan JSON object"])
+        )
+        if plan_gaps:
+            gaps = "; ".join(plan_gaps)
+            self._emit_log(f"Search intent plan missed required structured coverage: {gaps}; requesting one corrected plan.")
+            if self.search_plan is None:
+                retry_messages = [
+                    {"role": "system", "content": SYSTEM_SEARCH_INTENT_ANALYSIS},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Research question: {question}\n\n"
+                            "The previous response was invalid or truncated. Start over without repeating it. "
+                            "Return one compact SearchPlan JSON object under 1800 tokens. Use exactly 3 query_views, "
+                            "ordered by expected unique recall contribution, with at most 3 concept_groups per view "
+                            "and at most 5 short terms per group. "
+                            "Every view must contain valid concept_groups. Output only JSON."
+                        ),
+                    },
+                ]
+            else:
+                retry_messages = [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The plan is structurally valid but has this coverage gap: "
+                            f"{gaps}. Return a complete replacement SearchPlan JSON object. Preserve useful existing views, "
+                            "add the missing distinct views, and output only JSON. Every query view must contain valid concept_groups."
+                        ),
+                    },
+                ]
+            self._llm_request_log("intent_analysis_coverage_retry")
+            try:
+                retry_raw = (
+                    chat_json(retry_messages, temperature=0.0, max_tokens=4096)
+                    if callable(chat_json)
+                    else self.llm.chat(retry_messages, temperature=0.0)
+                )
+                self._llm_response_log("intent_analysis_coverage_retry")
+                retry_plan = parse_search_plan(retry_raw, question)
+                response_info = getattr(self.llm, "last_response_info", {}) or {}
+                self.search_plan_diagnostics.append(
+                    {
+                        "attempt": 2,
+                        "output_characters": len(retry_raw or ""),
+                        "finish_reason": response_info.get("finish_reason"),
+                        "completion_tokens": response_info.get("completion_tokens"),
+                        "parsed": retry_plan is not None,
+                        "coverage_gaps": retry_plan.coverage_gaps() if retry_plan is not None else ["invalid_search_plan_json"],
+                    }
+                )
+                if retry_plan is not None and not retry_plan.coverage_gaps():
+                    self.search_plan = retry_plan
+                elif self.search_plan is None and retry_plan is not None:
+                    self.search_plan = retry_plan
+                    self._emit_log("Search intent repair remained incomplete but produced a valid plan; continuing with its usable views.")
+                else:
+                    self._emit_log("Search intent repair remained incomplete; keeping the first valid plan when available.")
+            except Exception as exc:
+                self._emit_log(f"Search intent repair failed; keeping the first valid plan when available: {exc}")
+        if self.search_plan is not None:
             self._emit_log("Search intent analysis completed.")
         else:
-            self._emit_log("Search intent analysis returned no usable intent; continuing without intent context.")
-            intent = f"Intent analysis returned no usable structured result. Original question: {question}"
-        return intent
+            self._emit_log(
+                "Search intent analysis returned no usable structured plan after one repair; "
+                "continuing with the deterministic fallback plan."
+            )
+            self.search_plan = fallback_search_plan(question, "invalid structured output")
+        return self.search_plan.audit_summary()
 
     def _intent_context(self) -> str:
         if not self.search_intent:
@@ -2280,7 +5544,9 @@ class PaperSeekAgent:
             "\nInterpreted search intent:\n"
             f"{self.search_intent}\n"
             "Use this intent as the invariant goal when generating or revising the query. "
-            "Preserve the core concepts and avoid the listed boundaries.\n"
+            "Preserve must_have_facets and required_relation, while treating optional_facets as supporting coverage rather than automatic AND constraints. "
+            "Build a high-recall candidate query rather than a final-answer filter, and avoid semantic drift across the listed boundaries. "
+            "Treat boundaries as interpretation guardrails, not automatic NOT clauses; only exclusions explicitly requested by the user may become hard negative query terms.\n"
         )
 
     def _result_feedback(self, query: str, hits: list, total: Optional[int], adjustment: str, limit: int = 5) -> str:
@@ -2306,6 +5572,18 @@ class PaperSeekAgent:
                 lines.append(f"  {index}. {title[:220]}{suffix}")
         else:
             lines.append("- Top returned candidate titles: none returned.")
+        selector_feedback = self.last_query_selector_feedback
+        if selector_feedback and _queries_equivalent(query, str(selector_feedback.get("query") or "")):
+            lines.append(
+                "- CandidateSelector audit: "
+                f"inspected={selector_feedback.get('observed', 0)}; "
+                f"include={selector_feedback.get('include', 0)}; "
+                f"uncertain={selector_feedback.get('uncertain', 0)}; "
+                f"exclude={selector_feedback.get('exclude', 0)}."
+            )
+            missing = [str(value) for value in selector_feedback.get("missing_concepts") or [] if str(value).strip()]
+            if missing:
+                lines.append(f"- SearchPlan concept gaps reported by CandidateSelector: {', '.join(missing)}")
         lines.append(
             "Before revising the query, compare these titles with the interpreted search intent. "
             "Decide whether the returned set is on-intent, off-intent, or missing a core facet. "
@@ -2321,13 +5599,38 @@ class PaperSeekAgent:
     def _query_temperature() -> float:
         return 0.0
 
+    def _chat_query_json(self, messages: list) -> str:
+        chat_json = getattr(self.llm, "chat_json", None)
+        if callable(chat_json):
+            return chat_json(messages, temperature=self._query_temperature(), max_tokens=2048)
+        return self.llm.chat(messages, temperature=self._query_temperature())
+
     @staticmethod
     def _strict_query_output_instruction(output_label: str) -> str:
+        normalized_label = str(output_label or "").casefold()
+        atomic_edit_contract = ""
+        if "broadened" in normalized_label:
+            atomic_edit_contract = (
+                "- Make exactly one atomic broadening edit to the current query. Change one concept group only: "
+                "remove one non-essential restrictive group, replace one group's wording with broader alternatives, "
+                "or broaden the alternatives inside that one group. Copy every other concept group and filter unchanged. "
+                "Do not remove one group and broaden another in the same response.\n"
+                "- In rationale, name the one changed concept group and describe its before/after meaning.\n"
+            )
+        elif "narrowed" in normalized_label:
+            atomic_edit_contract = (
+                "- Make exactly one atomic narrowing edit to the current query. Change one concept group only: "
+                "add one missing must-have group, replace one drift-causing alternative, or tighten the alternatives "
+                "inside one existing group. Copy every other concept group and filter unchanged. Do not add two missing "
+                "facets or tighten multiple groups in the same response.\n"
+                "- In rationale, name the one changed concept group and describe its before/after meaning.\n"
+            )
         return (
             "\nStructured output contract:\n"
             "- Return exactly one valid JSON object and no text outside JSON.\n"
             "- Use this schema: {\"query\":\"...\", \"rationale\":\"...\"}.\n"
             f"- The query field must contain exactly one complete {output_label}; it is the only value PaperSeek will send to the source API.\n"
+            f"{atomic_edit_contract}"
             "- The rationale field may briefly explain the adjustment, direction, or title-intent diagnostic for audit.\n"
             "- Do not put the rationale, labels, markdown, bullets, or comments inside the query field.\n"
             "- If you compare returned titles with the intent, put the on-intent/off-intent conclusion in rationale and keep query clean.\n"
@@ -2389,7 +5692,7 @@ class PaperSeekAgent:
         ]
         self._emit_stage("query", "processing", source=self.data_source)
         self._llm_request_log("wos_query_generation")
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log("wos_query_generation")
         query = self._finalize_source_query(
             question,
@@ -2417,7 +5720,7 @@ class PaperSeekAgent:
                 )},
             ]
             self._llm_request_log("openalex_query_broaden")
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log("openalex_query_broaden")
             query = self._finalize_source_query(
                 question,
@@ -2444,7 +5747,7 @@ class PaperSeekAgent:
                 )},
             ]
             self._llm_request_log("crossref_query_broaden")
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log("crossref_query_broaden")
             query = self._finalize_source_query(
                 question,
@@ -2522,7 +5825,7 @@ class PaperSeekAgent:
                 )},
             ]
             self._llm_request_log(f"{self.data_source}_query_broaden")
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log(f"{self.data_source}_query_broaden")
             query = self._finalize_source_query(
                 question,
@@ -2549,7 +5852,7 @@ class PaperSeekAgent:
             )},
         ]
         self._llm_request_log("wos_query_broaden")
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log("wos_query_broaden")
         query = self._finalize_source_query(
             question,
@@ -2579,7 +5882,7 @@ class PaperSeekAgent:
                 )},
             ]
             self._llm_request_log("openalex_query_narrow")
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log("openalex_query_narrow")
             query = self._finalize_source_query(
                 question,
@@ -2606,7 +5909,7 @@ class PaperSeekAgent:
                 )},
             ]
             self._llm_request_log("crossref_query_narrow")
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log("crossref_query_narrow")
             query = self._finalize_source_query(
                 question,
@@ -2684,7 +5987,7 @@ class PaperSeekAgent:
                 )},
             ]
             self._llm_request_log(f"{self.data_source}_query_narrow")
-            raw = self.llm.chat(messages, temperature=self._query_temperature())
+            raw = self._chat_query_json(messages)
             self._llm_response_log(f"{self.data_source}_query_narrow")
             query = self._finalize_source_query(
                 question,
@@ -2716,7 +6019,7 @@ class PaperSeekAgent:
             )},
         ]
         self._llm_request_log("wos_query_narrow")
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log("wos_query_narrow")
         query = self._finalize_source_query(
             question,
@@ -2745,7 +6048,7 @@ class PaperSeekAgent:
         ]
         self._emit_stage("query", "processing", source=self.data_source)
         self._llm_request_log("openalex_query_generation")
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log("openalex_query_generation")
         query = self._finalize_source_query(
             question,
@@ -2775,7 +6078,7 @@ class PaperSeekAgent:
         ]
         self._emit_stage("query", "processing", source=self.data_source)
         self._llm_request_log(f"{self.data_source}_query_generation")
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log(f"{self.data_source}_query_generation")
         query = self._finalize_source_query(
             question,
@@ -2797,7 +6100,7 @@ class PaperSeekAgent:
         ]
         self._emit_stage("query", "processing", source=self.data_source)
         self._llm_request_log(log_name)
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log(log_name)
         query = self._finalize_source_query(
             question,
@@ -2835,7 +6138,7 @@ class PaperSeekAgent:
             )},
         ]
         self._llm_request_log(log_name)
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log(log_name)
         query = self._finalize_source_query(
             question,
@@ -2863,7 +6166,7 @@ class PaperSeekAgent:
         ]
         self._emit_stage("query", "processing", source=self.data_source)
         self._llm_request_log("crossref_query_generation")
-        raw = self.llm.chat(messages, temperature=self._query_temperature())
+        raw = self._chat_query_json(messages)
         self._llm_response_log("crossref_query_generation")
         query = self._finalize_source_query(
             question,
@@ -2883,16 +6186,32 @@ class PaperSeekAgent:
         ranking_context: Optional[Dict[str, Any]] = None,
         step_id: str = "llm_reranking",
         step_title: str = "LLM reranking",
+        resume_scores: Optional[list] = None,
+        completed_batch_ids: Optional[list[str]] = None,
+        checkpoint_records: Optional[list] = None,
+        checkpoint_resume_stage: str = "pre_rank",
     ) -> list:
         if not documents:
             return []
+        self._check_cancelled()
 
         batch_size = self._ranking_batch_size(len(documents))
         batches = [documents[index:index + batch_size] for index in range(0, len(documents), batch_size)]
+        batch_ids = {
+            index: self._ranking_batch_id(step_id, batch)
+            for index, batch in enumerate(batches, 1)
+        }
+        completed_id_set = set(completed_batch_ids or [])
+        scores = list(resume_scores or [])
+        checkpoint_records = list(checkpoint_records or documents)
         ranking_context = ranking_context or {}
         if ranking_context:
             self.ranking_context = dict(ranking_context)
         if len(batches) <= 1:
+            batch_id = batch_ids[1]
+            if batch_id in completed_id_set:
+                self._emit_log("Resumed completed result-ranking batch 1/1 from checkpoint.")
+                return self._rank_from_scores(documents, scores)
             self._emit_ranking_step(
                 step_id,
                 "processing",
@@ -2902,10 +6221,33 @@ class PaperSeekAgent:
                 detail=f"Scoring {len(documents)} candidates in one LLM batch.",
             )
             try:
+                self._check_cancelled()
                 self._llm_request_log("result_ranking")
                 scores = self._score_ranking_batch(question, documents, self._new_ranking_llm_client())
+                self._check_cancelled()
+                if documents and not scores:
+                    raise EmptyRankingBatchError("LLM ranking batch returned no valid score entries.")
                 self._llm_response_log("result_ranking")
+            except SearchCancelled:
+                raise
             except Exception as exc:
+                self._observe_ranking_batch_error(
+                    exc,
+                    step_id=step_id,
+                    batch_index=1,
+                    batch_count=1,
+                    concurrency=1,
+                    candidate_count=len(documents),
+                    rate_limited=self._is_rate_limit_error(exc),
+                )
+                self._recover_ranking_failures(
+                    step_id=step_id,
+                    concurrency=1,
+                    next_concurrency=0,
+                    failed_batches=1,
+                    failed_candidates=len(documents),
+                    rate_limited=self._is_rate_limit_error(exc),
+                )
                 self._emit_log(f"Result ranking batch failed; keeping local pre-ranking order: {exc}")
                 self._emit_ranking_step(
                     step_id,
@@ -2917,6 +6259,14 @@ class PaperSeekAgent:
                     candidate_count=len(documents),
                 )
                 return self._rank_from_scores(documents, [])
+            completed_id_set.add(batch_id)
+            self._save_checkpoint(
+                "ranking_batch",
+                records=checkpoint_records,
+                ranking_scores=scores,
+                completed_batch_ids=sorted(completed_id_set),
+                metadata={"step_id": step_id, "resume_from_stage": checkpoint_resume_stage},
+            )
             self._emit_ranking_step(
                 step_id,
                 "complete",
@@ -2944,81 +6294,193 @@ class PaperSeekAgent:
             f"Result ranking started in {len(batches)} batches; "
             f"candidates={len(documents)}; batch_size={batch_size}; concurrency={initial_workers}."
         )
-        scores = []
-        remaining_batches = [(index, batch) for index, batch in enumerate(batches, 1)]
-        completed_batches = 0
+        remaining_batches = [
+            (index, batch)
+            for index, batch in enumerate(batches, 1)
+            if batch_ids[index] not in completed_id_set
+        ]
+        completed_batches = len(batches) - len(remaining_batches)
+        if completed_batches:
+            self._emit_log(
+                f"Resumed {completed_batches}/{len(batches)} completed result-ranking batches from checkpoint."
+            )
         schedule = self._ranking_concurrency_schedule(len(batches))
         for tier_index, workers in enumerate(schedule):
+            self._check_cancelled()
             if not remaining_batches:
                 break
             run_workers = workers
             if tier_index > 0:
                 self._emit_log(f"Retrying {len(remaining_batches)} failed result-ranking batch(es) with concurrency={run_workers}.")
-            failed_batches = []
             lower_tier_available = tier_index < len(schedule) - 1
-            backoff_to_lower_tier = False
-            worklist = list(remaining_batches)
-            for start in range(0, len(worklist), run_workers):
-                chunk = worklist[start:start + run_workers]
-                with ThreadPoolExecutor(max_workers=run_workers) as executor:
-                    future_to_batch = {
-                        executor.submit(self._score_ranking_batch, question, batch, self._new_ranking_llm_client()): (index, batch)
-                        for index, batch in chunk
-                    }
-                    for future in as_completed(future_to_batch):
-                        index, batch = future_to_batch[future]
-                        try:
-                            batch_scores = future.result()
-                        except Exception as exc:
-                            self._emit_log(
-                                f"Result ranking batch {index}/{len(batches)} failed at concurrency={run_workers}; "
-                                f"will retry if a lower concurrency tier is available: {exc}"
-                            )
-                            failed_batches.append((index, batch))
-                            if lower_tier_available and self._is_rate_limit_error(exc):
-                                backoff_to_lower_tier = True
-                            self._emit_ranking_step(
-                                step_id,
-                                "processing",
-                                step_title,
-                                current=completed_batches,
-                                total=len(batches),
-                                detail=f"Batch {index}/{len(batches)} failed at concurrency={run_workers}; retrying failed batches with lower concurrency.",
-                                concurrency=run_workers,
-                                batch_size=batch_size,
-                                candidate_count=len(documents),
-                            )
-                            continue
-                        scores.extend(batch_scores)
-                        completed_batches += 1
-                        self._emit_log(f"Result ranking batch {index}/{len(batches)} completed; candidates={len(batch)}; scored={len(batch_scores)}.")
-                        self._emit_ranking_step(
-                            step_id,
-                            "processing",
-                            step_title,
-                            current=completed_batches,
-                            total=len(batches),
-                            detail=f"Completed batch {index}/{len(batches)} at concurrency={run_workers}.",
+            same_tier_retry_used = False
+            while True:
+                failed_batches = []
+                empty_output_batches = []
+                backoff_to_lower_tier = False
+                worklist = list(remaining_batches)
+                for start in range(0, len(worklist), run_workers):
+                    self._check_cancelled()
+                    chunk = worklist[start:start + run_workers]
+                    executor = ThreadPoolExecutor(max_workers=run_workers)
+                    try:
+                        future_to_batch = {
+                            executor.submit(self._score_ranking_batch, question, batch, self._new_ranking_llm_client()): (index, batch)
+                            for index, batch in chunk
+                        }
+                        pending = set(future_to_batch)
+                        while pending:
+                            done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+                            self._check_cancelled()
+                            if not done:
+                                continue
+                            for future in done:
+                                self._check_cancelled()
+                                index, batch = future_to_batch[future]
+                                try:
+                                    batch_scores = future.result()
+                                    self._check_cancelled()
+                                    if batch and not batch_scores:
+                                        raise EmptyRankingBatchError("LLM ranking batch returned no valid score entries.")
+                                except SearchCancelled:
+                                    raise
+                                except Exception as exc:
+                                    rate_limited = self._is_rate_limit_error(exc)
+                                    empty_output = isinstance(exc, EmptyRankingBatchError)
+                                    self._observe_ranking_batch_error(
+                                        exc,
+                                        step_id=step_id,
+                                        batch_index=index,
+                                        batch_count=len(batches),
+                                        concurrency=run_workers,
+                                        candidate_count=len(batch),
+                                        rate_limited=rate_limited,
+                                    )
+                                    self._emit_log(
+                                        f"Result ranking batch {index}/{len(batches)} failed at concurrency={run_workers}; "
+                                        f"will retry if a lower concurrency tier is available: {exc}"
+                                    )
+                                    failed_batches.append((index, batch))
+                                    if empty_output:
+                                        empty_output_batches.append((index, batch))
+                                    if lower_tier_available and rate_limited:
+                                        backoff_to_lower_tier = True
+                                    self._emit_ranking_step(
+                                        step_id,
+                                        "processing",
+                                        step_title,
+                                        current=completed_batches,
+                                        total=len(batches),
+                                        detail=(
+                                            f"Batch {index}/{len(batches)} returned no valid scores at concurrency={run_workers}; retrying once at the same concurrency."
+                                            if empty_output
+                                            else f"Batch {index}/{len(batches)} failed at concurrency={run_workers}; retrying failed batches with lower concurrency."
+                                        ),
+                                        concurrency=run_workers,
+                                        batch_size=batch_size,
+                                        candidate_count=len(documents),
+                                    )
+                                    continue
+                                scores.extend(batch_scores)
+                                completed_id_set.add(batch_ids[index])
+                                completed_batches += 1
+                                self._emit_log(f"Result ranking batch {index}/{len(batches)} completed; candidates={len(batch)}; scored={len(batch_scores)}.")
+                                self._emit_ranking_step(
+                                    step_id,
+                                    "processing",
+                                    step_title,
+                                    current=completed_batches,
+                                    total=len(batches),
+                                    detail=f"Completed batch {index}/{len(batches)} at concurrency={run_workers}.",
+                                    concurrency=run_workers,
+                                    batch_size=batch_size,
+                                    candidate_count=len(documents),
+                                )
+                                self._save_checkpoint(
+                                    "ranking_batch",
+                                    records=checkpoint_records,
+                                    ranking_scores=scores,
+                                    completed_batch_ids=sorted(completed_id_set),
+                                    metadata={"step_id": step_id, "resume_from_stage": checkpoint_resume_stage},
+                                )
+                    except SearchCancelled:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        executor = None
+                        raise
+                    finally:
+                        if executor is not None:
+                            executor.shutdown(wait=True)
+                    if backoff_to_lower_tier:
+                        unsubmitted = worklist[start + len(chunk):]
+                        failed_batches.extend(unsubmitted)
+                        next_workers = schedule[tier_index + 1] if lower_tier_available else 0
+                        failed_docs_for_tier = sum(len(batch) for _, batch in failed_batches)
+                        decision = self._recover_ranking_failures(
+                            step_id=step_id,
                             concurrency=run_workers,
-                            batch_size=batch_size,
-                            candidate_count=len(documents),
+                            next_concurrency=next_workers,
+                            failed_batches=len(failed_batches),
+                            failed_candidates=failed_docs_for_tier,
+                            rate_limited=True,
                         )
-                if backoff_to_lower_tier:
-                    unsubmitted = worklist[start + len(chunk):]
-                    failed_batches.extend(unsubmitted)
-                    self._emit_log(
-                        f"Rate limit detected at concurrency={run_workers}; "
-                        f"moving {len(failed_batches)} failed or unsubmitted batch(es) to the next lower concurrency tier."
+                        self._emit_log(
+                            f"Rate limit detected at concurrency={run_workers}; "
+                            f"moving {len(failed_batches)} failed or unsubmitted batch(es) to the next lower concurrency tier."
+                        )
+                        if decision.action != RANKING_RETRY_LOWER_CONCURRENCY:
+                            break
+                        break
+                if (
+                    failed_batches
+                    and empty_output_batches
+                    and not backoff_to_lower_tier
+                    and not same_tier_retry_used
+                    and len(empty_output_batches) == len(failed_batches)
+                ):
+                    failed_docs_for_tier = sum(len(batch) for _, batch in failed_batches)
+                    decision = self._recover_ranking_failures(
+                        step_id=step_id,
+                        concurrency=run_workers,
+                        next_concurrency=run_workers,
+                        failed_batches=len(failed_batches),
+                        failed_candidates=failed_docs_for_tier,
+                        rate_limited=False,
                     )
-                    break
+                    if decision.action == RANKING_RETRY_SAME_TIER:
+                        same_tier_retry_used = True
+                        remaining_batches = failed_batches
+                        self._emit_log(
+                            f"Retrying {len(remaining_batches)} empty result-ranking batch(es) once more at concurrency={run_workers}."
+                        )
+                        continue
+                break
+            if failed_batches and lower_tier_available and not backoff_to_lower_tier:
+                next_workers = schedule[tier_index + 1]
+                failed_docs_for_tier = sum(len(batch) for _, batch in failed_batches)
+                self._recover_ranking_failures(
+                    step_id=step_id,
+                    concurrency=run_workers,
+                    next_concurrency=next_workers,
+                    failed_batches=len(failed_batches),
+                    failed_candidates=failed_docs_for_tier,
+                    rate_limited=False,
+                )
             remaining_batches = failed_batches
 
         if remaining_batches:
+            failed_docs = sum(len(batch) for _, batch in remaining_batches)
+            self._recover_ranking_failures(
+                step_id=step_id,
+                concurrency=schedule[-1] if schedule else initial_workers,
+                next_concurrency=0,
+                failed_batches=len(remaining_batches),
+                failed_candidates=failed_docs,
+                rate_limited=False,
+            )
             self._emit_log(
                 f"{len(remaining_batches)} result ranking batch(es) still failed at minimum concurrency=4; "
                 "returning those candidates in source order with zero scores."
             )
-            failed_docs = sum(len(batch) for _, batch in remaining_batches)
             self._emit_ranking_step(
                 step_id,
                 "skipped" if not scores else "complete",
@@ -3035,6 +6497,15 @@ class PaperSeekAgent:
             )
 
         if not scores:
+            if not remaining_batches:
+                self._recover_ranking_failures(
+                    step_id=step_id,
+                    concurrency=initial_workers,
+                    next_concurrency=0,
+                    failed_batches=len(batches),
+                    failed_candidates=len(documents),
+                    rate_limited=False,
+                )
             self._emit_log("All result ranking batches failed; returning candidates in source order with zero scores.")
             self._emit_ranking_step(
                 step_id,
@@ -3060,6 +6531,12 @@ class PaperSeekAgent:
                 candidate_count=len(documents),
             )
         return self._rank_from_scores(documents, scores)
+
+    @staticmethod
+    def _ranking_batch_id(step_id: str, documents: list) -> str:
+        candidate_ids = [str(getattr(document, "uid", "") or document_key(document)) for document in documents]
+        digest = hashlib.sha256("\0".join(candidate_ids).encode("utf-8")).hexdigest()[:20]
+        return f"{step_id}:{digest}"
 
     def _ranking_batch_size(self, total_documents: int) -> int:
         configured = getattr(self.config, "ranking_batch_size", 8) or 8
@@ -3147,9 +6624,23 @@ class PaperSeekAgent:
             return self.llm
 
     def _score_ranking_batch(self, question: str, documents: list, llm_client: LLMClient) -> list:
+        scores = self._request_ranking_scores(question, documents, llm_client)
+        matched, missing = self._match_ranking_scores_to_documents(documents, scores)
+        if matched and missing:
+            self._emit_log(
+                f"Result ranking batch omitted {len(missing)}/{len(documents)} candidate(s); "
+                "retrying only the missing candidates once."
+            )
+            retry_scores = self._request_ranking_scores(question, missing, llm_client)
+            retry_matched, _ = self._match_ranking_scores_to_documents(missing, retry_scores)
+            matched.extend(retry_matched)
+        return matched
+
+    def _request_ranking_scores(self, question: str, documents: list, llm_client: LLMClient) -> list:
+        abstract_limit = max(500, min(1200, 12000 // max(1, len(documents))))
         descriptions = []
         for i, doc in enumerate(documents, 1):
-            descriptions.append(_describe_document(doc, i))
+            descriptions.append(_describe_document(doc, i, abstract_limit=abstract_limit))
 
         papers_text = "\n\n".join(descriptions)
 
@@ -3157,27 +6648,88 @@ class PaperSeekAgent:
             {"role": "system", "content": SYSTEM_RESULT_RANKING},
             {"role": "user", "content": (
                 f"Research question: {question}\n\n"
+                f"Stable SearchPlan (intent context, not paper evidence):\n"
+                f"{self._ranking_plan_context()}\n\n"
                 f"Papers to evaluate:\n\n{papers_text}\n\n"
-                f"Output ONLY the JSON array."
+                f'Output ONLY one JSON object with the top-level key "scores".'
             )},
         ]
 
-        raw = llm_client.chat(messages, temperature=0.3)
+        chat_json = getattr(llm_client, "chat_json", None)
+        max_tokens = min(8192, max(4096, len(documents) * 256))
+        raw = (
+            chat_json(messages, temperature=0.0, max_tokens=max_tokens)
+            if callable(chat_json)
+            else llm_client.chat(messages, temperature=0.3)
+        )
         return self._parse_ranking_response(raw)
 
+    @staticmethod
+    def _ranking_document_identity(document: Any) -> str:
+        return str(getattr(document, "uid", "") or document_key(document) or "").strip()
+
+    def _match_ranking_scores_to_documents(self, documents: list, scores: list) -> Tuple[list, list]:
+        identities = [self._ranking_document_identity(document) for document in documents]
+        exact = {identity.casefold(): index for index, identity in enumerate(identities) if identity}
+        matched_indexes = set()
+        matched_scores = []
+        for entry in self._validated_ranking_scores(scores):
+            uid = str(entry.get("uid") or "").strip()
+            if not uid:
+                continue
+            index = exact.get(uid.casefold())
+            if index is None:
+                candidates = [
+                    candidate_index
+                    for candidate_index, identity in enumerate(identities)
+                    if identity and (uid.casefold() in identity.casefold() or identity.casefold() in uid.casefold())
+                ]
+                if len(candidates) == 1:
+                    index = candidates[0]
+            if index is None or index in matched_indexes:
+                continue
+            normalized = dict(entry)
+            normalized["uid"] = identities[index]
+            matched_scores.append(normalized)
+            matched_indexes.add(index)
+        missing = [
+            document
+            for index, document in enumerate(documents)
+            if index not in matched_indexes
+        ]
+        return matched_scores, missing
+
+    def _ranking_plan_context(self) -> str:
+        if self.search_plan is None:
+            return "{}"
+        plan = self.search_plan
+        payload = {
+            "intent": plan.intent,
+            "question_type": plan.question_type,
+            "core_concepts": list(plan.core_concepts),
+            "must_have_facets": list(plan.must_have_facets),
+            "optional_facets": list(plan.optional_facets),
+            "required_relation": plan.required_relation,
+            "likely_synonyms": list(plan.likely_synonyms),
+            "adjacent_concepts": list(plan.adjacent_concepts),
+            "boundaries": list(plan.boundaries),
+            "ambiguities": list(plan.ambiguities),
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
     def _rank_from_scores(self, documents: list, scores: list) -> list:
-        uid_to_doc = {doc.uid: doc for doc in documents}
+        valid_scores, missing_documents = self._match_ranking_scores_to_documents(documents, scores)
+        identity_to_doc = {
+            self._ranking_document_identity(document): document
+            for document in documents
+            if self._ranking_document_identity(document)
+        }
 
         ranked = []
-        for entry in scores:
+        for entry in valid_scores:
             uid = entry.get("uid", "")
-            doc = uid_to_doc.get(uid)
+            doc = identity_to_doc.get(uid)
             if doc is None:
-                for d in documents:
-                    if d.uid and uid and (uid in d.uid or d.uid in uid):
-                        doc = d
-                        break
-            if doc is None and uid:
                 continue
 
             ranked.append({
@@ -3187,8 +6739,7 @@ class PaperSeekAgent:
                 **self._retrieval_entry_metadata(doc),
             })
 
-        remaining = [d for d in documents if d.uid not in {e.get("uid", "") for e in scores}]
-        for doc in remaining:
+        for doc in missing_documents:
             ranked.append({"document": doc, "score": 0, "reasoning": "", **self._retrieval_entry_metadata(doc)})
 
         return sorted(ranked, key=lambda item: float(item.get("score") or 0), reverse=True)
@@ -3206,18 +6757,33 @@ class PaperSeekAgent:
             raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         try:
-            return json.loads(raw)
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                payload = payload.get("scores")
+            return self._validated_ranking_scores(payload)
         except json.JSONDecodeError:
             pass
 
         m = re.search(r"\[.*\]", raw, re.DOTALL)
         if m:
             try:
-                return json.loads(m.group(0))
+                return self._validated_ranking_scores(json.loads(m.group(0)))
             except json.JSONDecodeError:
                 pass
 
         return []
+
+    @staticmethod
+    def _validated_ranking_scores(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        output = []
+        for item in value:
+            try:
+                output.append(RankingScoreEntry.model_validate(item).model_dump())
+            except (TypeError, ValueError):
+                continue
+        return output
 
     def _enrich_with_abstracts(self, ranked: list) -> list:
         for entry in ranked:

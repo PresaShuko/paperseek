@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from contextlib import contextmanager
 import json
@@ -27,7 +26,20 @@ CONFIG_ENV_KEYS = (
     "LLM_API_TYPE",
     "LLM_MODEL",
     "LLM_BASE_URL",
+    "SEARCH_BUDGET",
+    "MAX_ITERATIONS",
+    "CITATION_SEED_COUNT",
+    "CITATION_PER_SEED",
+    "CITATION_MAX_RECORDS",
+    "CITATION_DEPTH",
+    "RETRIEVAL_POOL_MAX",
+    "RETRIEVAL_POOL_MIN",
+    "RETRIEVAL_LANE_LIMIT",
+    "QUERY_PORTFOLIO_MAX",
+    "QUERY_PORTFOLIO_LIMIT",
     "RANKING_CANDIDATE_LIMIT",
+    "SEARCH_LOOP_BACKEND",
+    "PAPERSEEK_PYDANTICAI_QUERY_RETRY",
     "DISCIPLINE_FIELDS",
 )
 
@@ -44,6 +56,58 @@ def assert_contains_all(testcase, text: str, expected: tuple[str, ...] | list[st
     for item in expected:
         with testcase.subTest(item=item):
             testcase.assertIn(item, text)
+
+
+def fake_harness_search_result(question: str = "graph neural networks", source: str = "openalex") -> dict:
+    return {
+        "question": question,
+        "search_intent": "Find core literature about graph neural networks.",
+        "source": source,
+        "final_query": "graph neural networks",
+        "db": source.upper(),
+        "field": "",
+        "total": 1,
+        "iterations": 1,
+        "history": [{"iteration": 1, "total": 1, "action": "accept"}],
+        "query_iteration_memory": [
+            {"iteration": 1, "query": "graph neural networks", "total": 1, "hit_count": 1}
+        ],
+        "search_loop": {"backend_requested": "auto", "backend_used": "native"},
+        "search_state": {
+            "question": question,
+            "source": source,
+            "candidate_queue": {
+                "keys": ["uid:w1"],
+                "ledger": {
+                    "uid:w1": {
+                        "candidate_id": "uid:w1",
+                        "title": "Graph Neural Network Robustness",
+                        "selector_label": "include",
+                        "lifecycle": [
+                            {"stage": "candidate_selector", "action": "selected_for_llm", "origin": "local_fused_rank"},
+                            {"stage": "results", "action": "final_output", "origin": "ranked_output"},
+                        ],
+                    }
+                },
+                "ledger_summary": {
+                    "total_candidates": 1,
+                    "serialized_candidates": 1,
+                    "omitted_candidates": 0,
+                    "selector_counts": {"include": 1},
+                    "lifecycle_candidate_counts": {"selected_for_llm": 1, "final_output": 1},
+                    "citation_candidate_count": 0,
+                },
+                "origin_counts": {"retrieval": 1},
+                "duplicate_count": 0,
+                "events": [],
+            },
+            "ranking_recovery_decisions": [{"action": "retry_same_tier"}],
+            "citation_recovery_decisions": [{"action": "skip_citation_expansion"}],
+        },
+        "citation_map": {},
+        "ranking_steps": [{"id": "llm_ranking", "status": "complete"}],
+        "ranked": [],
+    }
 
 
 @contextmanager

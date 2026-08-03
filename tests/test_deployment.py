@@ -43,6 +43,8 @@ class DeploymentTest(unittest.TestCase):
         self.assertIn("PORT: ${PAPERSEEK_CONTAINER_PORT:-7860}", compose)
         self.assertIn("LLM_PROVIDER", compose)
         self.assertIn("OPENALEX_API_KEY", compose)
+        self.assertIn("SEARCH_BUDGET: ${SEARCH_BUDGET:-fast}", compose)
+        self.assertIn("MAX_ITERATIONS: ${MAX_ITERATIONS:-}", compose)
 
     def test_modelscope_deploy_config_uses_docker_port(self):
         config = read_json("ms_deploy.json")

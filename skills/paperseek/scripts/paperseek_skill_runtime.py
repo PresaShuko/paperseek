@@ -8,9 +8,9 @@ full implementation; otherwise this module handles search, smoke, sources,
 doctor, config inspection, and history path lookup.
 """
 
-from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from html import unescape
 import json
 import math
@@ -211,7 +211,7 @@ SOURCE_METADATA = [
         "id": "paperhub",
         "display_name": "Computer science top conferences",
         "status": "supported",
-        "description": "Computer science top-conference paper search support.",
+        "description": "Manifest-driven computer science top-conference search using the current paper-hub index.",
         "api_key": "not_required",
         "default": False,
         "supports_abstracts": True,
@@ -737,11 +737,11 @@ def fetch_google_scholar(query: str, limit: int, config: Dict[str, str]) -> Tupl
 def fetch_paperhub(query: str, limit: int, config: Dict[str, str]) -> Tuple[List[Dict[str, object]], int, str]:
     del config
     papers = load_paperhub_papers()
-    terms = paperhub_terms(query)
+    parsed_query = parse_paperhub_query(query)
     scored = []
     for paper in papers:
-        score = paperhub_score(paper, terms)
-        if score > 0:
+        score = paperhub_score(paper, parsed_query)
+        if score is not None:
             scored.append((score, paper))
     scored.sort(key=lambda item: (item[0], safe_int(item[1].get("year"), 0), str(item[1].get("conference") or "")), reverse=True)
     selected = [paper for _, paper in scored[: max(1, min(limit, 50))]]
@@ -1778,47 +1778,143 @@ def load_paperhub_papers() -> List[Dict[str, object]]:
         return PAPERHUB_CACHE
     base = "https://raw.githubusercontent.com/Yupu-Wang/paper-hub/main/data"
     manifest = http_json(base + "/manifest.json")
-    papers: List[Dict[str, object]] = []
-    for shard in manifest.get("shards") or []:
-        if not isinstance(shard, dict) or not shard.get("file"):
-            continue
-        try:
-            payload = http_json(base + "/" + str(shard["file"]))
-        except Exception:
-            continue
-        for paper in payload.get("papers") or []:
-            if isinstance(paper, dict):
-                papers.append(paper)
+    shards = manifest.get("shards") if isinstance(manifest, dict) else None
+    if not isinstance(shards, list) or not shards:
+        raise RuntimeError("Paper Hub manifest did not contain a shard list.")
+    normalized_shards = []
+    for shard in shards:
+        if not isinstance(shard, dict):
+            raise RuntimeError("Paper Hub manifest contained an invalid shard entry.")
+        file_name = str(shard.get("file") or "").strip().replace("\\", "/")
+        if not file_name or file_name.startswith("/") or ".." in file_name.split("/"):
+            raise RuntimeError("Paper Hub manifest contained an unsafe shard path.")
+        normalized_shards.append({**shard, "file": file_name})
+
+    def load_shard(shard: Dict[str, object]) -> List[Dict[str, object]]:
+        payload = http_json(base + "/" + str(shard["file"]))
+        shard_papers = payload.get("papers") if isinstance(payload, dict) else None
+        if not isinstance(shard_papers, list):
+            raise RuntimeError(f"Paper Hub shard {shard['file']} did not contain a paper list.")
+        valid_papers = [paper for paper in shard_papers if isinstance(paper, dict)]
+        expected_count = safe_int(shard.get("count"), 0)
+        if expected_count and len(valid_papers) != expected_count:
+            raise RuntimeError(
+                f"Paper Hub shard {shard['file']} count mismatch: "
+                f"expected {expected_count}, received {len(valid_papers)}."
+            )
+        return valid_papers
+
+    workers = min(8, len(normalized_shards))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="paperhub") as executor:
+        futures = [executor.submit(load_shard, shard) for shard in normalized_shards]
+        chunks = [future.result() for future in futures]
+    papers = [paper for chunk in chunks for paper in chunk]
+    expected_total = sum(safe_int(shard.get("count"), 0) for shard in normalized_shards)
+    if expected_total and len(papers) != expected_total:
+        raise RuntimeError(
+            f"Paper Hub snapshot count mismatch: expected {expected_total}, received {len(papers)}."
+        )
     PAPERHUB_CACHE = papers
     return papers
 
 
-def paperhub_terms(query: str) -> List[str]:
+def parse_paperhub_query(query: str) -> Dict[str, object]:
+    parsed: Dict[str, object] = {
+        "groups": [],
+        "excludes": [],
+        "conference": "",
+        "year": 0,
+        "after": 0,
+        "before": 0,
+    }
+    groups = parsed["groups"]
+    excludes = parsed["excludes"]
+    append_to_previous_group = False
+    token_pattern = re.compile(r'(-?)"([^"]+)"|(\S+)')
     stop = {"and", "or", "not", "the", "with", "for", "from", "paper", "papers", "study", "research"}
-    return [term for term in re.findall(r"[A-Za-z0-9][A-Za-z0-9_+-]{1,}", str(query or "").lower()) if term not in stop][:20]
+    for match in token_pattern.finditer(str(query or "")):
+        quoted = bool(match.group(2))
+        value = match.group(2) if quoted else match.group(3)
+        excluded = bool(match.group(1))
+        value = re.sub(r"^[()]+|[()]+$", "", str(value or "").strip()).strip()
+        if not value:
+            continue
+        if value.upper() == "OR":
+            append_to_previous_group = True
+            continue
+        if not quoted and value.startswith("-"):
+            excluded = True
+            value = re.sub(r"^[()]+|[()]+$", "", value[1:].strip()).strip()
+        if value.startswith("+"):
+            value = value[1:].strip()
+        if not value:
+            continue
+        field_match = re.match(r"^(conference|conf|venue|year|after|before):(.+)$", value, flags=re.I)
+        if field_match and not excluded:
+            field_name = field_match.group(1).lower()
+            field_value = field_match.group(2).strip('"')
+            if field_name in {"conference", "conf", "venue"}:
+                parsed["conference"] = field_value.upper()
+            else:
+                year_match = re.search(r"(19|20)\d{2}", field_value)
+                if year_match:
+                    parsed[field_name] = int(year_match.group(0))
+            append_to_previous_group = False
+            continue
+        term = value.lower()
+        if not quoted and term in stop:
+            append_to_previous_group = False
+            continue
+        if excluded:
+            excludes.append(term)
+            append_to_previous_group = False
+        elif append_to_previous_group and groups:
+            groups[-1].append(term)
+            append_to_previous_group = False
+        else:
+            groups.append([term])
+    return parsed
 
 
-def paperhub_score(paper: Dict[str, object], terms: Sequence[str]) -> int:
-    if not terms:
-        return 1
+def paperhub_score(paper: Dict[str, object], query: Dict[str, object]) -> Optional[int]:
+    conference = str(paper.get("conference") or "").upper()
+    year = safe_int(paper.get("year"), 0)
+    if query.get("conference") and conference != query["conference"]:
+        return None
+    if query.get("year") and year != query["year"]:
+        return None
+    if query.get("after") and year <= query["after"]:
+        return None
+    if query.get("before") and year >= query["before"]:
+        return None
     title = str(paper.get("title") or "").lower()
     abstract = str(paper.get("abstract") or "").lower()
     keywords = " ".join(str(value) for value in (paper.get("keywords") or [])).lower()
     authors = " ".join(str(value) for value in (paper.get("authors") or [])).lower()
     venue = f"{paper.get('conference') or ''} {paper.get('year') or ''} {paper.get('presentation') or ''}".lower()
+    full_text = " ".join((title, abstract, keywords, authors, venue))
+    if any(term and term in full_text for term in query.get("excludes") or []):
+        return None
     score = 0
-    for term in terms:
-        if term in title:
-            score += 8
-        if term in keywords:
-            score += 5
-        if term in abstract:
-            score += 3
-        if term in authors:
-            score += 2
-        if term in venue:
-            score += 4
-    return score
+    for group in query.get("groups") or []:
+        best = 0
+        for term in group:
+            term_score = 0
+            if term in title:
+                term_score += 8
+            if term in keywords:
+                term_score += 5
+            if term in abstract:
+                term_score += 3
+            if term in authors:
+                term_score += 2
+            if term in venue:
+                term_score += 4
+            best = max(best, term_score)
+        if best <= 0:
+            return None
+        score += best
+    return max(score, 1)
 
 
 def standalone_warnings(config: Dict[str, str]) -> List[str]:

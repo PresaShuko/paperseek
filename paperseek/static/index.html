@@ -26,7 +26,6 @@
         <button class="tab muted" type="button" data-view="history">History</button>
       </nav>
       <div class="status-strip">
-        <button id="exportCsvButton" class="result-export-button" type="button" disabled>Export Results CSV</button>
         <div class="language-switch" role="group" aria-label="Language">
           <button class="active" type="button" data-language="en">EN</button>
           <button type="button" data-language="zh">中文</button>
@@ -56,6 +55,28 @@
                 <option value="wos">Web of Science Starter (temporarily unavailable)</option>
               </select>
             </label>
+            <fieldset class="budget-field" aria-describedby="searchBudgetHelp">
+              <legend>Search budget</legend>
+              <div class="budget-segmented">
+                <label>
+                  <input type="radio" name="searchBudget" value="fast" checked>
+                  <span>Fast</span>
+                </label>
+                <label>
+                  <input type="radio" name="searchBudget" value="medium">
+                  <span>Medium</span>
+                </label>
+                <label>
+                  <input type="radio" name="searchBudget" value="high">
+                  <span>High</span>
+                </label>
+                <label>
+                  <input type="radio" name="searchBudget" value="max">
+                  <span>Max</span>
+                </label>
+              </div>
+              <small id="searchBudgetHelp">Fewest requests for faster searches.</small>
+            </fieldset>
             <details id="disciplinePicker" class="discipline-picker">
               <summary>
                 <span id="disciplinePickerLabel">Source Filter</span>
@@ -268,7 +289,6 @@
                 <div hidden>
                   <input id="targetMin" type="hidden" value="5">
                   <input id="targetMax" type="hidden" value="50">
-                  <input id="maxIterations" type="hidden" value="5">
                   <input id="fetchAbstracts" type="checkbox">
                 </div>
               </div>
@@ -277,17 +297,21 @@
         </form>
       </section>
 
-      <section class="right-pane" aria-label="Workflow and results">
+      <section id="rightPane" class="right-pane log-collapsed" aria-label="Workflow and results">
         <div id="workflow" class="workflow"></div>
-        <aside class="log-panel" aria-label="System log">
+        <aside id="logPanel" class="log-panel is-collapsed" aria-label="System log">
           <div class="log-header">
-            <span>System Dashboard</span>
+            <button id="logToggle" class="log-toggle" type="button" aria-expanded="false" aria-controls="logOutput">
+              <span class="disclosure-chevron" aria-hidden="true"></span>
+              <span data-i18n-text="System Log">System Log</span>
+              <span id="logErrorBadge" class="log-error-badge is-hidden" data-i18n-text="Error">Error</span>
+            </button>
             <div class="log-actions">
               <button id="exportLogButton" class="utility-button" type="button" disabled>Export Log</button>
               <span id="runId">idle</span>
             </div>
           </div>
-          <pre id="logOutput"></pre>
+          <pre id="logOutput" aria-live="polite"></pre>
         </aside>
       </section>
     </main>

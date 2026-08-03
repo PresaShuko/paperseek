@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """PaperSeek Skill CLI launcher with a self-contained helper fallback."""
 
-from __future__ import annotations
 
 import os
 import sys

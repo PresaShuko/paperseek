@@ -1,7 +1,12 @@
+import asyncio
+import json
+import os
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from tests.helpers import CONFIG_ENV_KEYS, temporary_env
+from tests.helpers import CONFIG_ENV_KEYS, ROOT, fake_harness_search_result, temporary_env
 
 
 SOURCE_IDS = ["openalex", "arxiv", "semanticscholar", "pubmed", "googlescholar", "paperhub", "crossref", "wos"]
@@ -10,10 +15,56 @@ SOURCE_IDS = ["openalex", "arxiv", "semanticscholar", "pubmed", "googlescholar",
 def _mcp_available() -> bool:
     try:
         import mcp  # noqa: F401
-        import sys
-        return sys.version_info >= (3, 10)
+        return True
     except ImportError:
         return False
+
+
+def _tool_json(result):
+    for item in getattr(result, "content", None) or []:
+        text = getattr(item, "text", None)
+        if text:
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                return payload
+    raise ValueError("MCP tool response did not contain a JSON text block")
+
+
+async def _run_stdio_smoke():
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(ROOT)
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "paperseek.mcp_server"],
+        cwd=Path(ROOT),
+        env=environment,
+    )
+    async with stdio_client(parameters) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            tools_result = await session.list_tools()
+            tool_names = [tool.name for tool in tools_result.tools]
+            sources = _tool_json(await session.call_tool("list_sources"))
+            diagnostics = _tool_json(await session.call_tool("check_config", {"source": "arxiv"}))
+            invalid_search = _tool_json(await session.call_tool("search_papers", {"question": ""}))
+
+    expected_tools = {
+        "search_papers",
+        "check_config",
+        "smoke_test",
+        "list_sources",
+        "list_history",
+        "get_history_run",
+    }
+    return {
+        "expected_tools_present": expected_tools.issubset(set(tool_names)),
+        "source_count": len(sources.get("sources") or []),
+        "arxiv_config_ok": bool(diagnostics.get("ok")),
+        "invalid_search_error": str(invalid_search.get("error") or ""),
+    }
 
 
 class McpServerLogicTest(unittest.TestCase):
@@ -24,6 +75,16 @@ class McpServerLogicTest(unittest.TestCase):
         import paperseek.mcp_server as mod
         self.assertTrue(hasattr(mod, "search_papers_logic"))
         self.assertTrue(hasattr(mod, "create_server"))
+
+    def test_real_stdio_session_lists_and_calls_tools(self):
+        if not _mcp_available():
+            self.skipTest("mcp package is not installed")
+        report = asyncio.run(_run_stdio_smoke())
+
+        self.assertTrue(report["expected_tools_present"])
+        self.assertGreaterEqual(report["source_count"], len(SOURCE_IDS))
+        self.assertTrue(report["arxiv_config_ok"])
+        self.assertIn("required", report["invalid_search_error"])
 
     # ------------------------------------------------------------------
     # list_sources_logic
@@ -126,6 +187,43 @@ class McpServerLogicTest(unittest.TestCase):
         self.assertIn("error", result)
         self.assertIn("Configuration error", result["error"])
 
+    def test_search_success_preserves_harness_payload(self):
+        from paperseek.mcp_server import search_papers_logic
+
+        class FakeAgent:
+            def __init__(self, config, llm):
+                self.config = config
+                self.llm = llm
+
+            def search(self, question):
+                return fake_harness_search_result(question, self.config.data_source)
+
+        with temporary_env(
+            {
+                "DATA_SOURCE": "openalex",
+                "LLM_PROVIDER": "ollama",
+                "LLM_API_TYPE": "openai_chat",
+                "LLM_MODEL": "qwen3:8b",
+                "LLM_BASE_URL": "http://127.0.0.1:11434/v1",
+                "LLM_API_KEY": "",
+                "PAPERSEEK_HISTORY_ENABLED": "false",
+            },
+            clear=CONFIG_ENV_KEYS + ("PAPERSEEK_HISTORY_ENABLED",),
+        ):
+            with patch("paperseek.mcp_server.create_llm_client", return_value=object()), patch(
+                "paperseek.mcp_server.PaperSeekAgent", FakeAgent
+            ):
+                result = search_papers_logic(
+                    question="graph neural networks",
+                    source="arxiv",
+                    search_loop_backend="native",
+                )
+
+        self.assertEqual(result["source"], "arxiv")
+        self.assertEqual(result["search_loop"]["backend_used"], "native")
+        self.assertEqual(result["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
+        self.assertEqual(result["ranking_steps"][0]["id"], "llm_ranking")
+
     # ------------------------------------------------------------------
     # smoke_test_logic
     # ------------------------------------------------------------------
@@ -212,6 +310,7 @@ class McpServerLogicTest(unittest.TestCase):
                 target_min=10,
                 target_max=30,
                 max_iterations=3,
+                search_loop_backend="native",
                 ranking_candidate_limit=128,
                 expand_citations=False,
                 fetch_abstracts=True,
@@ -222,9 +321,26 @@ class McpServerLogicTest(unittest.TestCase):
         self.assertEqual(config.target_min, 10)
         self.assertEqual(config.target_max, 30)
         self.assertEqual(config.max_iterations, 3)
+        self.assertEqual(config.search_loop_backend, "native")
         self.assertEqual(config.ranking_candidate_limit, 128)
         self.assertFalse(config.expand_citations)
         self.assertTrue(config.fetch_abstracts)
+
+    def test_build_search_config_rejects_invalid_search_loop_backend(self):
+        from paperseek.mcp_server import _build_search_config
+
+        with self.assertRaisesRegex(ValueError, "search_loop_backend"):
+            _build_search_config(search_loop_backend="invalid")
+
+    def test_build_search_config_applies_search_budget(self):
+        from paperseek.mcp_server import _build_search_config
+
+        config = _build_search_config(search_budget="max")
+
+        self.assertEqual(config.search_budget, "max")
+        self.assertEqual(config.max_iterations, 12)
+        self.assertEqual(config.retrieval_pool_max, 10000)
+        self.assertEqual(config.ranking_candidate_limit, 1024)
 
     def test_build_search_config_preserves_env_when_no_overrides(self):
         from paperseek.mcp_server import _build_search_config

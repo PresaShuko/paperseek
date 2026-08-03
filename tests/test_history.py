@@ -6,12 +6,36 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from paperseek.config import AgentConfig
-from paperseek.history import HistoryStore, safe_search_params_from_config
+from paperseek.history import HistoryStore, result_payload_from_search_result, safe_search_params_from_config
 from paperseek.web_app import app
 from tests.helpers import temporary_env
 
 
 class HistoryStoreTest(unittest.TestCase):
+    def test_result_payload_preserves_search_loop_state_for_api_surfaces(self):
+        payload = result_payload_from_search_result(
+            {
+                "question": "open innovation",
+                "source": "openalex",
+                "final_query": '"open innovation"',
+                "db": "OPENALEX",
+                "field": "",
+                "total": 1,
+                "iterations": 1,
+                "history": [{"iteration": 1, "total": 1}],
+                "search_loop": {"backend_used": "langgraph"},
+                "search_state": {"recovery_decisions": [{"action": "repair_query"}]},
+                "ranking_steps": [{"id": "llm_ranking"}],
+                "citation_map": {},
+                "ranked": [],
+            },
+            "openalex",
+        )
+
+        self.assertEqual(payload["search_loop"]["backend_used"], "langgraph")
+        self.assertEqual(payload["search_state"]["recovery_decisions"][0]["action"], "repair_query")
+        self.assertEqual(payload["ranking_steps"][0]["id"], "llm_ranking")
+
     def test_store_saves_run_events_and_results_without_raw_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "paperseek.db"
@@ -39,7 +63,15 @@ class HistoryStoreTest(unittest.TestCase):
                     "total": 1,
                     "iterations": 1,
                     "history": [{"iteration": 1, "query": '"open innovation"', "total": 1}],
+                    "search_loop": {"backend_requested": "auto", "backend_used": "langgraph"},
+                    "search_state": {
+                        "question": "open innovation",
+                        "source": "openalex",
+                        "current_query": '"open innovation"',
+                        "recovery_decisions": [{"action": "repair_query", "message": "Recovered with sk-secret-value"}],
+                    },
                     "citation_map": {"enabled": True, "nodes": [], "edges": []},
+                    "ranking_steps": [{"id": "llm_ranking", "status": "complete", "api_key": "ranking-secret"}],
                     "ranked": [
                         {
                             "rank": 1,
@@ -68,17 +100,64 @@ class HistoryStoreTest(unittest.TestCase):
             self.assertIsNotNone(detail)
             self.assertEqual(detail["status"], "success")
             self.assertEqual(detail["history"][0]["total"], 1)
+            self.assertEqual(detail["search_loop"]["backend_used"], "langgraph")
+            self.assertEqual(detail["search_state"]["recovery_decisions"][0]["action"], "repair_query")
+            self.assertEqual(detail["ranking_steps"][0]["id"], "llm_ranking")
             self.assertEqual(detail["ranked"][0]["title"], "Open Innovation")
             self.assertEqual(detail["ranked"][0]["keywords"], "open innovation; platforms")
             self.assertTrue(detail["params"]["has_llm_api_key"])
             self.assertEqual(detail["params"]["discipline_fields"], ["17", "14"])
+            self.assertEqual(detail["params"]["search_budget"], "fast")
+            self.assertFalse(detail["params"]["llm_thinking_enabled"])
             serialized = json.dumps(detail, ensure_ascii=False)
             self.assertNotIn("llm-secret", serialized)
             self.assertNotIn("oa-secret", serialized)
             self.assertNotIn("event-secret", serialized)
+            self.assertNotIn("sk-secret-value", serialized)
+            self.assertNotIn("ranking-secret", serialized)
 
             self.assertTrue(store.delete_run(run_id))
             self.assertEqual(store.list_runs(), [])
+
+    def test_fail_run_can_persist_partial_harness_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore(db_path=Path(tmp) / "paperseek.db", enabled=True)
+            run_id = store.create_run("open innovation", {"data_source": "openalex"})
+
+            store.fail_run(
+                run_id,
+                "upstream timeout",
+                payload={
+                    "question": "open innovation",
+                    "source": "openalex",
+                    "final_query": '"open innovation"',
+                    "db": "OPENALEX",
+                    "field": "",
+                    "total": 1200,
+                    "iterations": 3,
+                    "history": [{"iteration": 3, "total": 1200, "action": "narrow"}],
+                    "search_loop": {"backend_used": "langgraph"},
+                    "search_state": {
+                        "current_query": '"open innovation"',
+                        "recovery_decisions": [{"action": "repair_query"}],
+                    },
+                    "citation_map": {"status": "partial"},
+                    "ranking_steps": [{"id": "llm_ranking", "status": "processing"}],
+                },
+            )
+
+            detail = store.get_run(run_id)
+
+            self.assertIsNotNone(detail)
+            self.assertEqual(detail["status"], "error")
+            self.assertEqual(detail["error_message"], "upstream timeout")
+            self.assertEqual(detail["total"], 1200)
+            self.assertEqual(detail["iterations"], 3)
+            self.assertEqual(detail["history"][0]["action"], "narrow")
+            self.assertEqual(detail["search_loop"]["backend_used"], "langgraph")
+            self.assertEqual(detail["search_state"]["recovery_decisions"][0]["action"], "repair_query")
+            self.assertEqual(detail["citation_map"]["status"], "partial")
+            self.assertEqual(detail["ranking_steps"][0]["status"], "processing")
 
     def test_store_defaults_to_shanghai_timezone_for_timestamps(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -26,6 +26,7 @@ export default defineConfig({
     },
     nav: [
       { text: '首页', link: '/' },
+      { text: 'v0.3.0', link: '/v0.3.0' },
       { text: '开源版手册', link: '/user-manual' },
       { text: '在线版手册', link: '/online-demo' },
       { text: '部署', link: '/deployment' },
@@ -36,6 +37,7 @@ export default defineConfig({
         text: '开始',
         items: [
           { text: '文档站首页', link: '/' },
+          { text: 'v0.3.0 更新说明', link: '/v0.3.0' },
           { text: '开源版完整用户手册', link: '/user-manual' },
           { text: '在线体验版用户手册', link: '/online-demo' }
         ]

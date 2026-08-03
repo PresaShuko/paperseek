@@ -1,5 +1,6 @@
 import unittest
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
@@ -7,11 +8,17 @@ from paperseek_core.sources.providers import (
     ArxivProvider,
     reconstruct_abstract,
     GoogleScholarSerperProvider,
+    OpenAlexProvider,
     PaperHubProvider,
+    PaperIdentifiers,
+    PaperRecord,
+    ProviderError,
     PubMedProvider,
     SemanticScholarProvider,
+    _retry_delay,
     normalize_doi,
 )
+from paperseek_core.retrieval import RetrievalLane
 
 
 class FakeResponse:
@@ -28,6 +35,25 @@ class FakeResponse:
 
 
 class SourceProviderTest(unittest.TestCase):
+    def setUp(self):
+        SemanticScholarProvider._last_request_at = 0.0
+        PaperHubProvider.reset_cache()
+
+    @patch("paperseek_core.sources.providers.time.sleep")
+    @patch("paperseek_core.sources.providers.time.monotonic", side_effect=[10.0, 10.0, 10.25, 11.05])
+    def test_semantic_scholar_throttle_enforces_one_request_per_second(self, _monotonic, sleep):
+        SemanticScholarProvider._throttle()
+        SemanticScholarProvider._throttle()
+
+        sleep.assert_called_once_with(0.95)
+
+    def test_semantic_scholar_429_uses_source_specific_backoff(self):
+        response = FakeResponse(status_code=429)
+        response.headers = {}
+
+        self.assertEqual(_retry_delay(response, 1, "semanticscholar"), 2.0)
+        self.assertEqual(_retry_delay(response, 2, "semanticscholar"), 4.0)
+
     def test_normalize_doi(self):
         self.assertEqual(normalize_doi(None), "")
         self.assertEqual(normalize_doi(""), "")
@@ -41,6 +67,46 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(normalize_doi("doi:10.1234/5678"), "10.1234/5678")
         self.assertEqual(normalize_doi(" DOI:10.1234/5678 "), "10.1234/5678")
         self.assertEqual(normalize_doi("HTTPS://DOI.ORG/10.1234/5678"), "10.1234/5678")
+
+    def test_openalex_semantic_lane_uses_semantic_parameter_without_keyword_sort(self):
+        captured = {}
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query="", attempts=None):
+            captured.update({"provider": provider, "url": url, "params": dict(params or {})})
+            payload = {"meta": {"count": 1, "page": 1, "per_page": 1}, "results": []}
+            return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+
+        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+            OpenAlexProvider(api_key="test-key").search(
+                "methods for calibrating peer review bias",
+                limit=100,
+                lane=RetrievalLane.SEMANTIC,
+            )
+
+        self.assertEqual(captured["params"]["search.semantic"], "methods for calibrating peer review bias")
+        self.assertNotIn("search", captured["params"])
+        self.assertNotIn("sort", captured["params"])
+        self.assertEqual(captured["params"]["per-page"], 50)
+        self.assertEqual(captured["params"]["api_key"], "test-key")
+
+    def test_openalex_semantic_lane_requires_api_key_before_request(self):
+        with self.assertRaisesRegex(Exception, "semantic search requires an API key"):
+            OpenAlexProvider().search("semantic retrieval", lane=RetrievalLane.SEMANTIC)
+
+    def test_openalex_normalizes_escaped_whitespace_before_deduplication(self):
+        record = OpenAlexProvider()._to_record(
+            {
+                "id": "https://openalex.org/W1",
+                "doi": "https://doi.org/10.1/example",
+                "title": "Unified Text-to-Text\\n Transformer",
+            },
+        )
+
+        self.assertEqual(record.title, "Unified Text-to-Text Transformer")
+
+    def test_openalex_advertises_semantic_lane_only_with_api_key(self):
+        self.assertNotIn(RetrievalLane.SEMANTIC, OpenAlexProvider().retrieval_capabilities().lanes)
+        self.assertIn(RetrievalLane.SEMANTIC, OpenAlexProvider(api_key="key").retrieval_capabilities().lanes)
 
     def test_arxiv_provider_parses_atom_records(self):
         atom = """<?xml version="1.0" encoding="UTF-8"?>
@@ -80,8 +146,8 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(result.hits[0].identifiers.arxiv, "2401.00001v1")
         self.assertEqual(result.hits[0].identifiers.doi, "10.1234/example")
         self.assertEqual(captured["url"], "http://export.arxiv.org/api/query")
-        self.assertEqual(captured["timeout"], 20)
-        self.assertEqual(captured["attempts"], 1)
+        self.assertEqual(captured["attempts"], 3)
+        self.assertEqual(captured["timeout"], 45)
         self.assertEqual(captured["params"]["search_query"], 'all:"graph retrieval"')
 
     def test_arxiv_provider_escapes_quotes_in_plain_query(self):
@@ -225,6 +291,140 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(record.citations[0].count, 12)
         self.assertEqual(record.abstract, "A Google Scholar result snippet.")
 
+    def test_openalex_citation_neighbors_reports_progress(self):
+        provider = OpenAlexProvider()
+        seed = PaperRecord(
+            uid="https://openalex.org/W1",
+            title="Seed Paper",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/W1"),
+            raw={"referenced_works": ["https://openalex.org/W2"]},
+        )
+        neighbor = PaperRecord(
+            uid="https://openalex.org/W2",
+            title="Neighbor Paper",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/W2"),
+            raw={},
+        )
+        progress = []
+
+        with patch.object(provider, "_fetch_works", return_value=[neighbor]) as fetch_works:
+            result = provider.citation_neighbors_with_graph(
+                [seed],
+                per_seed=1,
+                max_records=5,
+                depth=1,
+                progress_callback=progress.append,
+                request_attempts=1,
+                request_timeout=5,
+            )
+
+        self.assertEqual([record.title for record in result["records"]], ["Neighbor Paper"])
+        fetch_works.assert_called_once_with(["https://openalex.org/W2"], attempts=1, timeout=5)
+        self.assertEqual(result["frontier"]["direction_stats"]["backward"]["requests"], 1)
+        self.assertTrue(any(item.get("event") == "start" for item in progress))
+        self.assertTrue(any(item.get("event") == "seed_complete" and item.get("records") == 1 for item in progress))
+
+    def test_openalex_fetches_forward_and_backward_neighbors_concurrently(self):
+        provider = OpenAlexProvider()
+        seed = PaperRecord(
+            uid="https://openalex.org/W1",
+            title="Seed Paper",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/W1"),
+            raw={"referenced_works": ["https://openalex.org/W2"]},
+        )
+        backward = PaperRecord(
+            uid="https://openalex.org/W2",
+            title="Backward",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/W2"),
+            raw={},
+        )
+        forward = PaperRecord(
+            uid="https://openalex.org/W3",
+            title="Forward",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/W3"),
+            raw={},
+        )
+        barrier = threading.Barrier(2, timeout=2)
+
+        def fetch_backward(*args, **kwargs):
+            barrier.wait()
+            return [backward]
+
+        def fetch_forward(*args, **kwargs):
+            barrier.wait()
+            return [forward]
+
+        with (
+            patch.object(provider, "_fetch_works", side_effect=fetch_backward),
+            patch.object(provider, "_fetch_forward_citations", side_effect=fetch_forward),
+        ):
+            result = provider.citation_neighbors_with_graph(
+                [seed],
+                per_seed=1,
+                max_records=5,
+                depth=1,
+                request_attempts=1,
+                request_timeout=5,
+            )
+
+        self.assertEqual({record.uid for record in result["records"]}, {
+            "https://openalex.org/W2",
+            "https://openalex.org/W3",
+        })
+
+    def test_openalex_batch_fetches_referenced_work_ids_in_one_request(self):
+        provider = OpenAlexProvider(api_key="oa-test")
+        captured = {}
+
+        def fake_get(_, url, *, params=None, headers=None, timeout=30, query="", attempts=3):
+            captured.update({"url": url, "params": dict(params or {}), "query": query})
+            return FakeResponse(
+                payload={
+                    "results": [
+                        {"id": "https://openalex.org/W2", "title": "Second"},
+                        {"id": "https://openalex.org/W1", "title": "First"},
+                    ]
+                },
+                status_code=200,
+                url=url,
+            ), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+
+        with patch("paperseek_core.sources.providers.get_with_retries", side_effect=fake_get):
+            records = provider._fetch_works(
+                ["https://openalex.org/W1", "W2", "W1"],
+                attempts=1,
+                timeout=5,
+            )
+
+        self.assertEqual(captured["url"], provider.BASE_URL)
+        self.assertEqual(captured["params"]["filter"], "openalex:W1|W2")
+        self.assertEqual(captured["params"]["per-page"], 2)
+        self.assertEqual(captured["params"]["api_key"], "oa-test")
+        self.assertEqual([record.uid for record in records], ["https://openalex.org/W1", "https://openalex.org/W2"])
+
+    def test_openalex_citation_neighbors_respects_cancel_callback(self):
+        provider = OpenAlexProvider()
+        seed = PaperRecord(
+            uid="https://openalex.org/W1",
+            title="Seed Paper",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/W1"),
+            raw={"referenced_works": ["https://openalex.org/W2"]},
+        )
+
+        def cancel():
+            raise RuntimeError("cancelled")
+
+        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+            provider.citation_neighbors_with_graph(
+                [seed],
+                per_seed=1,
+                max_records=5,
+                depth=1,
+                cancel_check=cancel,
+                request_attempts=1,
+                request_timeout=5,
+            )
+
     def test_google_scholar_serper_provider_rejects_unexpected_json(self):
         def fake_post(url, json=None, headers=None, timeout=0):
             return FakeResponse(payload=["not", "a", "dict"], status_code=200, url=url)
@@ -355,8 +555,6 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(result.metadata.total, 12)
 
     def test_paperhub_provider_loads_manifest_and_scores_shards(self):
-        PaperHubProvider._paper_cache = None
-
         def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
             if url.endswith("manifest.json"):
                 return FakeResponse(payload={"shards": [{"file": "shards/iclr-2025.fake.json"}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
@@ -374,7 +572,6 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(record.source.publish_year, 2025)
 
     def test_paperhub_provider_initializes_cache_once_under_concurrency(self):
-        PaperHubProvider._paper_cache = None
         calls = []
 
         def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
@@ -393,6 +590,103 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual([result.metadata.total for result in results], [1, 1])
         self.assertEqual(sum(1 for url in calls if url.endswith("manifest.json")), 1)
         self.assertEqual(sum(1 for url in calls if url.endswith("iclr-2025.fake.json")), 1)
+
+    def test_paperhub_provider_loads_current_multi_shard_manifest_atomically(self):
+        shards = [
+            {"conference": "AAAI", "year": 2026, "count": 1, "file": "shards/aaai-2026.fake.json"},
+            {"conference": "ICLR", "year": 2025, "count": 1, "file": "shards/iclr-2025.fake.json"},
+            {"conference": "ICLR", "year": 2026, "count": 1, "file": "shards/iclr-2026.fake.json"},
+            {"conference": "ICML", "year": 2025, "count": 1, "file": "shards/icml-2025.fake.json"},
+            {"conference": "ICML", "year": 2026, "count": 1, "file": "shards/icml-2026.fake.json"},
+            {"conference": "NDSS", "year": 2026, "count": 1, "file": "shards/ndss-2026.fake.json"},
+            {"conference": "NeurIPS", "year": 2025, "count": 1, "file": "shards/neurips-2025.fake.json"},
+        ]
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
+            if url.endswith("manifest.json"):
+                payload = {"built_at": "2026-07-20T15:35:26+08:00", "shards": shards}
+                return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            shard = next(item for item in shards if url.endswith(item["file"]))
+            payload = {
+                "papers": [{
+                    "id": f"{shard['conference']}-{shard['year']}",
+                    "title": "Top Conference Paper",
+                    "authors": ["Ada"],
+                    "conference": shard["conference"],
+                    "year": shard["year"],
+                    "abstract": "computer science research",
+                }]
+            }
+            return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+
+        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+            provider = PaperHubProvider()
+            result = provider.search("conference:ICML year:2026", limit=10)
+
+        self.assertEqual(result.metadata.total, 1)
+        self.assertEqual(result.hits[0].uid, "ICML-2026")
+        self.assertEqual(len(PaperHubProvider._paper_cache), 7)
+        self.assertIn("2026-07-20T15:35:26+08:00", provider.last_response_info["manifest_version"])
+
+    def test_paperhub_provider_never_caches_a_partial_snapshot(self):
+        manifest = {
+            "built_at": "2026-07-20T15:35:26+08:00",
+            "shards": [
+                {"count": 1, "file": "shards/good.fake.json"},
+                {"count": 1, "file": "shards/broken.fake.json"},
+            ],
+        }
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
+            if url.endswith("manifest.json"):
+                return FakeResponse(payload=manifest), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            if url.endswith("good.fake.json"):
+                return FakeResponse(payload={"papers": [{"id": "good", "title": "Good", "authors": ["Ada"]}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            return FakeResponse(status_code=503, text="unavailable"), {"method": "GET", "url": url, "status": 503, "elapsed_ms": 1}
+
+        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+            with self.assertRaisesRegex(ProviderError, "broken.fake.json returned HTTP 503"):
+                PaperHubProvider().search("graph", limit=10)
+
+        self.assertIsNone(PaperHubProvider._paper_cache)
+
+    def test_paperhub_provider_revalidates_unchanged_manifest_without_redownloading_shards(self):
+        calls = []
+        manifest = {
+            "built_at": "2026-07-20T15:35:26+08:00",
+            "shards": [{"count": 1, "file": "shards/icml-2026.fake.json"}],
+        }
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
+            calls.append(url)
+            if url.endswith("manifest.json"):
+                return FakeResponse(payload=manifest), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            return FakeResponse(payload={"papers": [{"id": "p1", "title": "Graph Retrieval", "authors": ["Ada"]}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+
+        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+            provider = PaperHubProvider()
+            provider.search("graph", limit=1)
+            PaperHubProvider._paper_cache_loaded_at = time.monotonic() - provider.CACHE_TTL_SECONDS - 1
+            provider.search("graph", limit=1)
+
+        self.assertEqual(sum(url.endswith("manifest.json") for url in calls), 2)
+        self.assertEqual(sum(url.endswith("icml-2026.fake.json") for url in calls), 1)
+        self.assertTrue(provider.last_response_info["cache_revalidated"])
+
+    def test_paperhub_provider_uses_last_complete_snapshot_when_refresh_fails(self):
+        PaperHubProvider._paper_cache = [{"id": "cached", "title": "Graph Retrieval", "authors": ["Ada"]}]
+        PaperHubProvider._paper_cache_loaded_at = 0.0
+        PaperHubProvider._paper_cache_manifest_version = "old"
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
+            return FakeResponse(status_code=503, text="unavailable"), {"method": "GET", "url": url, "status": 503, "elapsed_ms": 1}
+
+        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+            provider = PaperHubProvider()
+            result = provider.search("graph", limit=1)
+
+        self.assertEqual(result.hits[0].uid, "cached")
+        self.assertEqual(provider.last_response_info["status"], "stale_cache")
 
 
 

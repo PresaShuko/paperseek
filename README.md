@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://pypi.org/project/paperseek/"><img alt="PyPI" src="https://img.shields.io/pypi/v/paperseek?color=3775A9&label=PyPI"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
   <a href="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml/badge.svg"></a>
@@ -48,6 +48,17 @@
 
 ## 更新说明
 
+### v0.3.0 - 检索规划、可恢复循环与渐进式审计
+
+- 新增结构化检索计划：先识别核心概念、必要条件、可选条件、关系约束和歧义，再为所选数据源生成可校验的查询；查询生成与修订统一使用结构化 JSON 契约，格式或源语法不合格时会在请求数据源前重试。
+- 新增有界 Query Portfolio 与候选账本。主查询之外至少规划三个互补视角，并按预算选择有效、非重复视角执行；每个候选记录来源、去重和恢复信息，便于审计召回过程。
+- 检索循环改为显式状态机，支持原生执行器和可选 LangGraph 后端；停止、失败和网络波动会保留部分结果与检查点，允许从最近阶段恢复，而不是重新开始整个检索。
+- 新增 `fast`、`medium`、`high`、`max` 检索预算。默认 `fast` 关闭可选模型思考并控制请求量；更高预算会同步扩大查询、召回、排序和引用扩展容量。
+- Web UI 改为渐进式过程展示：当前阶段自动展开，已完成阶段折叠为摘要，错误和恢复审计按需展开；检索完成后仍停留在流程页，由用户决定何时查看结果或引用图谱。
+- 本次重构参考了 PASA 的 Crawler / Selector 分工与候选队列、PydanticAI 的结构化输出校验、LangGraph 的显式状态图，以及 ARIS 的检查点与恢复审计；计算机顶会数据源继续基于经作者同意的 PaperHub 集成。完整致谢见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+- WoS Starter 客户端改为轻量独立适配层，保留 PaperSeek 所需的请求、错误和响应模型接口，并增加鉴权头、参数、解析与错误传播测试。
+- Python 最低版本调整为 3.10。升级、配置变化和兼容边界见 [v0.3.0 更新说明](docs/v0.3.0.md)。
+
 ### v0.2.1 - 在线服务与模型路由更新
 
 - 在线版 PaperSeek Service 开放 Semantic Scholar、PubMed 和 Crossref 数据源；Crossref 不需要 API Key。
@@ -64,7 +75,7 @@
 ### v0.1.1 - 界面语言、历史与学科筛选
 
 - Web UI 支持 `EN` / `中文` 语言切换，语言选择会保存在当前浏览器中，见 [#10](https://github.com/MingfengHong/paperseek/issues/10)。
-- 新增本地历史记录保存，记录检索运行、日志事件、检索式和结果，便于回看和恢复结果视图，并为后续阶段断点重跑能力打基础，见 [#2](https://github.com/MingfengHong/paperseek/issues/2)。
+- 新增本地历史记录保存，记录检索运行、日志事件、检索式和结果，便于回看并恢复结果视图，见 [#2](https://github.com/MingfengHong/paperseek/issues/2)。
 - 优化 CSV 与日志导出文件名，使用研究问题主题和本地时间生成更容易辨认的文件名，见 [#3](https://github.com/MingfengHong/paperseek/issues/3)。
 - 支持 OpenAlex Field 学科分类筛选，并将所选学科传递给引用扩展，减少结果池偏离所选领域的情况。
 
@@ -77,12 +88,13 @@ PaperSeek 专注于第一轮候选文献发现和元数据整理，帮助研究�
 ## PaperSeek 会做什么
 
 - **理解研究问题**：从中文或英文研究问题生成适配 OpenAlex、arXiv、Semantic Scholar、PubMed、Google Scholar（通过 Serper）、计算机顶会、Crossref 或 WoS Starter 的检索查询。
-- **自动校准检索式**：根据目标结果数量放宽或收窄查询。默认从 5 轮调整开始；如果候选池仍为空、过小或明显超过预重排安全范围，会继续进行有限的自适应调整。
+- **规划互补检索视角**：先把问题整理成可审计的 SearchPlan，再在受控请求预算内执行互补 Query Portfolio，减少单一命名体系造成的漏检。
+- **自动校准检索式**：结合命中数量和前排题名是否符合研究意图调整查询。默认采用 `fast` 检索预算；只有连续零结果或候选过少时才有限延长，宽但相关的结果直接进入有界多路召回。
 - **结构化候选集**：整理题名、作者、期刊、年份、DOI、摘要、引用数、关键词和链接等元数据。
 - **排序并解释相关性**：用 LLM 对候选论文打分，并给出简短评分理由。
 - **扩展引用网络**：通过 OpenAlex 扩展高匹配论文的参考文献和被引论文，并展示 Citation Map。
 - **按数据源限定领域**：在研究问题下方选择数据源，再使用 OpenAlex Field、WoS Category 或 arXiv Category 等可靠原生过滤；无可靠硬过滤的数据源使用领域文本提示辅助生成检索式。
-- **保留可复核过程**：在 Web UI 中查看工作流、结果表、引用图和本地历史记录，并导出 CSV。
+- **保留可复核过程**：在 Web UI 中查看意图、查询视角、候选来源、排序阶段、引用图和本地历史记录；停止或失败后可从最近检查点继续，并可导出 CSV。
 
 ## 选择使用方式
 
@@ -247,14 +259,14 @@ PaperSeek 的网页界面分为四个工作区：
 
 | 页面 | 用途 |
 | --- | --- |
-| Search | 输入研究问题，选择 Discipline Fields，配置数据源、LLM、迭代次数和目标结果数；实时查看工作流与系统日志。 |
+| Search | 输入研究问题，选择数据源、检索预算与学科筛选，配置 LLM；实时查看工作流与系统日志。 |
 | Results | 查看最终排序结果，搜索、过滤、排序、勾选，并导出论文 CSV。 |
 | Citation Map | 查看 OpenAlex 引用扩展形成的关系图，按箭头方向探索论文之间的引用关系。 |
-| History | 查看本地保存的搜索运行、最终检索式、结果列表和运行事件。 |
+| History | 查看本地保存的搜索运行、SearchPlan、最终检索式、结果列表和运行事件；从停止或失败运行的最近检查点继续。 |
 
 ![PaperSeek web interface](docs/assets/paperseek-web.png)
 
-如果后端已经通过系统环境变量或 `.env` 配置了 API Key，Web UI 会显示环境中已配置的状态，不会把密钥内容发送到浏览器。Web UI 中填写的 API Key、Base URL 和参数只用于当前浏览器会话，不写入本地配置文件。历史记录会保存运行参数摘要、检索式、日志事件和结果，但不会保存任何 API Key。
+如果后端已经通过系统环境变量或 `.env` 配置了 API Key，Web UI 会显示环境中已配置的状态，不会把密钥内容发送到浏览器。Web UI 中填写的 API Key、Base URL 和参数只用于当前浏览器会话，不写入本地配置文件。历史记录会保存运行参数摘要、SearchPlan、查询视角、检索式、审计状态、日志事件、检查点和结果，但不会保存任何 API Key；成功完成后会删除该运行的临时检查点。
 
 Results 导出的 CSV 文件名使用研究问题主题和本地日期，便于区分多次运行。
 
@@ -348,12 +360,12 @@ paperseek search "open innovation and digital platforms" --source openalex
 
 | 数据源 | 默认状态 | API Key | 适合场景 | 说明 |
 | --- | --- | --- | --- | --- |
-| OpenAlex | 默认 | 推荐 | 精确检索、摘要、引用数、引用扩展、引用图 | 开放学术元数据库，适合通用文献发现与引用关系探索。 |
+| OpenAlex | 默认 | 推荐 | 关键词与语义召回、摘要、引用数、引用扩展、引用图 | 开放学术元数据库，适合通用文献发现与引用关系探索；配置 API Key 后会增加语义召回通道。 |
 | arXiv | 支持 | 不需要 | 预印本、计算机科学、物理、数学、统计等领域 | 使用 arXiv 公共 API Atom feed，返回摘要、分类和 PDF 链接。 |
 | Semantic Scholar | 支持 | 可选 | 跨学科学术图谱、引用数、开放 PDF 线索 | 匿名访问适合轻量测试；配置 API Key 可获得更稳定的限额。 |
 | PubMed | 支持 | 可选 | 医学、生物医学与生命科学文献 | 使用 NCBI E-utilities；建议配置邮箱和 tool 标识以符合负责任使用要求。 |
 | Google Scholar | 支持 | 必需 | Google Scholar 结果、引用数线索和开放 PDF 线索 | 通过 Serper `/scholar` API 请求，需要 `SERPER_API_KEY` 或 `SERPER_API_KEYS`。 |
-| 计算机顶会 | 支持 | 不需要 | ICLR、ICML、NeurIPS、AAAI、NDSS 等计算机顶会论文 | 面向计算机顶会论文发现，不需要数据源 Key。 |
+| 计算机顶会 | 支持 | 不需要 | ICLR、ICML、NeurIPS、AAAI、NDSS 等计算机顶会论文 | 运行时读取 paper-hub 最新 manifest，不需要数据源 Key。当前上游快照包含 ICLR 2025/2026、ICML 2025/2026、NeurIPS 2025、AAAI 2026 和 NDSS 2026。 |
 | Crossref | 支持 | 通常不需要 | DOI、出版元数据、期刊和出版社信息校验 | DOI 与出版元数据注册库，适合题录校验和 DOI 补全。 |
 | Web of Science Starter | 适配中 | 必需 | 已有 Clarivate API 权限的机构用户 | 商业数据库 API，返回字段和可用性取决于订阅计划与机构授权。 |
 
@@ -427,16 +439,29 @@ ModelScope API-Inference 可用于 LLM 和 Qwen embedding，不作为 Rerank 服
 
 1. **Query Generation**：LLM 根据研究问题、可选领域文本提示和源特定过滤生成初始查询。
 2. **Source Search**：请求所选数据源（OpenAlex、arXiv、Semantic Scholar、PubMed、Google Scholar、计算机顶会、Crossref 或 WoS Starter），并记录 HTTP 状态和命中数量。
-3. **Query Refinement**：若命中数过少或过多，LLM 调整查询并继续下一轮。
+3. **Query Refinement**：结果过少时放宽查询；前排题名明显偏离研究意图时重定向查询。宽但相关的结果不再为追逐较小命中数而反复收窄。
 4. **Ranking & Results**：将候选池交给 LLM 统一评分，输出前若干条结果。
 
-如果启用 OpenAlex 引用扩展，PaperSeek 会从相关性、高被引和最新性三类 seed 中默认选择最多 30 篇：高相关 seed 同时扩展参考文献和被引论文，高被引 seed 重点扩展参考文献，最新 seed 重点扩展被引论文。扩展记录会合并进同一个候选池，再统一预重排和 LLM 打分。
+如果启用 OpenAlex 引用扩展，PaperSeek 会直接复用多路融合后的候选顺序，从相关性、高被引和最新性三类 seed 中按检索预算选择种子论文，不再为选种额外执行一轮 LLM 全量打分；默认 `fast` 为最多 3 篇。高相关 seed 同时扩展参考文献和被引论文，高被引 seed 重点扩展参考文献，最新 seed 重点扩展被引论文。OpenAlex 参考文献 ID 会批量读取，同一 seed 的前向与后向请求会在受控并发下执行，并为不同 seed 预留新增记录份额。扩展记录会合并进同一个候选池，并在候选截断前重新执行本地 BM25、稀疏向量相似度与 RRF 融合，再统一交给 LLM 打分。
 
-在进入 LLM 打分前，PaperSeek 会先进行轻量多路召回预重排：按数据源能力综合相关性、高引用/影响力、时效性和本地质量等信号，去重后用 RRF 融合召回排名，并叠加纯 Python hashing embedding cosine、BM25 和词项覆盖分数。默认 LLM 前融合候选池上限为 `3000`。社区版默认不依赖外部 embedding 服务；如需外部增强，可在 Web UI 高级设置中从 Local Python、中国科技云、OpenAI、阿里云百炼、硅基流动、OpenRouter、NVIDIA NIM、智谱、火山方舟、ModelScope 或自定义端点中选择 embedding 服务，其中 ModelScope API-Inference 仅使用 `Qwen/Qwen3-Embedding-8B` 和 `Qwen/Qwen3-Embedding-4B`。如果用户自行配置外部 embedding/reranker，也可使用中国科技云的 `qwen3-embedding:8b`、`bge-large-zh:latest`、OpenRouter 的 embedding/rerank 模型或 NVIDIA NIM 的 `nvidia/nv-embedqa-e5-v5`、`nv-rerank-qa-mistral-4b:1` 等模型，配置多个模型时会按顺序 fallback，失败时会回退到本地 RRF 顺序。
+在进入 LLM 打分前，PaperSeek 会先进行轻量多路召回预重排：按数据源能力综合相关性、高引用/影响力、时效性和本地质量等信号，去重后用 RRF 融合召回排名，并叠加纯 Python hashing embedding cosine、BM25 和词项覆盖分数。允许并发的数据源会并行执行独立召回路线；运行时会保留较深的主相关性路线，同时把影响力、时效性等多样性路线限制在足以进入最终 LLM 候选门限的深度，避免重复读取不会进入后续排序的长尾记录。默认 `fast` 预算的 LLM 前融合候选池上限为 `3000`。社区版默认不依赖外部 embedding 服务；如需外部增强，可在 Web UI 高级设置中从 Local Python、中国科技云、OpenAI、阿里云百炼、硅基流动、OpenRouter、NVIDIA NIM、智谱、火山方舟、ModelScope 或自定义端点中选择 embedding 服务，其中 ModelScope API-Inference 仅使用 `Qwen/Qwen3-Embedding-8B` 和 `Qwen/Qwen3-Embedding-4B`。如果用户自行配置外部 embedding/reranker，也可使用中国科技云的 `qwen3-embedding:8b`、`bge-large-zh:latest`、OpenRouter 的 embedding/rerank 模型或 NVIDIA NIM 的 `nvidia/nv-embedqa-e5-v5`、`nv-rerank-qa-mistral-4b:1` 等模型，配置多个模型时会按顺序 fallback，失败时会回退到本地 RRF 顺序。
 
-候选池较大时，LLM 排序会自动分批并发执行。默认批大小为 `8`、并发为 `16`；超过 16 篇候选论文时会自适应放大批大小。若一个或多个批次失败，系统会按 `16 -> 8 -> 4` 降低并发重试；如果并发 `4` 仍失败，只回退失败批次，不会使整次检索失败。ranking 批次默认使用 `RANKING_LLM_TIMEOUT_SECONDS=60`，超时后回退本地预排序，避免长时间端点等待拖断整次检索。高级用户仍可手动把 `RANKING_CONCURRENCY` 设为 `32`，此时会按 `32 -> 16 -> 8 -> 4` 降级。
+候选池较大时，LLM 排序会按固定批次并发执行。默认批大小为 `8`、并发为 `16`；实测扩大批次没有稳定缩短总耗时，且更容易出现模型漏回个别候选，因此默认保留较小批次。若模型返回部分结果，系统只重试缺失候选；若一个或多个批次失败，则按 `16 -> 8 -> 4` 降低并发重试。并发 `4` 仍失败时只回退失败批次，不会使整次检索失败。ranking 批次默认使用 `RANKING_LLM_TIMEOUT_SECONDS=60`，超时后回退本地预排序，避免长时间端点等待拖断整次检索。高级用户仍可手动把 `RANKING_CONCURRENCY` 设为 `32`，此时会按 `32 -> 16 -> 8 -> 4` 降级。
 
-`TARGET_MAX` 用于指导检索式收窄或放宽，不是最终展示的硬上限。LLM 打分前最多保留 `RANKING_CANDIDATE_LIMIT` 条候选，默认 `256`。最终结果少于 50 条时全部展示；结果较多时至少展示前 50 条，如果 5 分及以上候选超过 50 条，则展示全部高分候选。
+`TARGET_MIN` 用于判断候选是否少到需要恢复；`TARGET_MAX` 是用户期望范围和排序参考，不会仅因数据库总命中数较大就触发反复收窄，也不是最终展示的硬上限。LLM 打分前最多保留 `RANKING_CANDIDATE_LIMIT` 条候选，默认 `fast` 预算为 `256`。最终结果少于 50 条时全部展示；结果较多时至少展示前 50 条，如果 5 分及以上候选超过 50 条，则展示全部高分候选。
+
+### 检索预算
+
+Web UI、CLI、API 和 MCP 都支持 `fast`、`medium`、`high`、`max` 四档检索预算，默认使用 `fast`。`fast` 的请求次数最少，并会在端点支持显式开关时关闭模型思考；更高档位会同时扩大查询视角、多路召回、LLM 候选和引用扩展，而不是只增加检索式迭代次数。
+
+| 预算 | 模型思考 | 查询软上限 | 查询视角 | 每路召回配置上限 | 融合候选池 | LLM 候选 | 引用扩展（seed / 每 seed / 总新增 / 深度） |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `fast` | 关闭（端点支持时） | 5 | 3 | 500 | 3000 | 256 | 3 / 4 / 40 / 2 |
+| `medium` | 服务默认 | 7 | 3 | 750 | 4500 | 384 | 8 / 6 / 80 / 2 |
+| `high` | 服务默认 | 9 | 4 | 1000 | 7000 | 512 | 16 / 8 / 160 / 3 |
+| `max` | 服务默认 | 12 | 6 | 1000 | 10000 | 1024 | 30 / 10 / 320 / 3 |
+
+数据源自身的分页、速率和结果上限仍然生效。表中的每路召回值是配置上限；实际运行还会按最终 LLM 候选门限裁剪路线深度，主相关性路线保留较深候选，影响力、时效性等多样性路线只读取有机会进入融合前列的部分。`high` 和 `max` 会明显增加 API 请求、LLM 成本与等待时间，适合困难主题或需要更高召回率的检索。高级环境变量或 CLI 粒度参数可以覆盖所选预算中的单项值。
 
 ## 引用图
 
@@ -482,17 +507,20 @@ A -> B  表示 A 引用了 B
 | --- | --- | --- |
 | `SEARCH_FIELD` | 空 | 自由文本学科或领域提示。 |
 | `DISCIPLINE_FIELDS` | 空 | OpenAlex Field、WoS Category 或 arXiv Category 等原生过滤值；多个值建议用分号分隔。其它数据源使用 `SEARCH_FIELD` 文本提示。 |
-| `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | 目标结果数量范围。 |
-| `MAX_ITERATIONS` | `5` | 最大查询调整轮数。 |
+| `SEARCH_BUDGET` | `fast` | 统一检索预算：`fast`、`medium`、`high`、`max`。 |
+| `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | 用户期望结果范围；最小值参与过小结果恢复，最大值不作为强制收窄或展示上限。 |
+| `MAX_ITERATIONS` | `5` | `fast` 的查询调整软预算；显式配置时覆盖预算预设。 |
+| `SEARCH_LOOP_BACKEND` | `auto` | 查询调度后端：`auto` 使用稳定的内置控制器；`native` 显式使用内置控制器；`langgraph` 显式启用 LangGraph 状态机。 |
 | `EXPAND_CITATIONS` | `true` | 是否启用 OpenAlex 引用扩展。 |
 | `FETCH_ABSTRACTS` | `false` | 是否尝试从外部 DOI 元数据补摘要。 |
-| `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `30` / `4` / `160` | 引用扩展规模控制。 |
+| `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | `fast` 的引用扩展规模；显式配置时覆盖预算预设。 |
 | `CITATION_DEPTH` | `2` | OpenAlex 引用扩展遍历层数。 |
 | `RANKING_BATCH_SIZE` / `RANKING_CONCURRENCY` | `8` / `16` | LLM 排序批大小和并发数。 |
 | `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | `2048` / `180` | LLM 输出长度和常规单次请求超时。 |
 | `RANKING_LLM_TIMEOUT_SECONDS` | `60` | 仅用于 LLM 排序批次的超时；超时后回退本地预排序。 |
-| `RETRIEVAL_POOL_MAX` / `RETRIEVAL_POOL_MIN` | `3000` / `5` | LLM 打分前的融合候选池范围。 |
-| `RETRIEVAL_LANE_LIMIT` / `RETRIEVAL_RRF_K` | `1000` / `60` | 每路召回上限和 RRF 融合常数。 |
+| `RANKING_CANDIDATE_LIMIT` | `256` | 默认 `fast` 下送入 LLM 打分的候选上限。 |
+| `RETRIEVAL_POOL_MAX` / `RETRIEVAL_POOL_MIN` | `3000` / `5` | 默认 `fast` 下 LLM 打分前的融合候选池范围。 |
+| `RETRIEVAL_LANE_LIMIT` / `RETRIEVAL_RRF_K` | `500` / `60` | 默认 `fast` 下每路召回的配置上限和 RRF 融合常数；实际路线深度还会按 LLM 候选门限裁剪。 |
 | `RETRIEVAL_EMBEDDING_PROVIDER` | `local` | 社区版默认使用本地纯 Python 预重排；可改为 OpenAI-compatible embedding 服务。 |
 | `RETRIEVAL_EMBEDDING_MODEL` | `qwen3-embedding:8b,bge-large-zh:latest` | 外部 embedding 模型列表。 |
 | `RETRIEVAL_RERANKER_PROVIDER` / `RETRIEVAL_RERANKER_MODEL` | 空 / `qwen3-reranker:8b` | RRF 后的可选外部 reranker。 |
@@ -505,7 +533,7 @@ A -> B  表示 A 引用了 B
 
 ### OpenAlex
 
-OpenAlex 可匿名访问，但推荐配置免费 API Key：
+OpenAlex 可匿名访问基础接口，但推荐配置免费 API Key；PaperSeek 只有在配置 Key 后才会使用 OpenAlex 语义召回：
 
 1. 打开 [OpenAlex](https://openalex.org/) 并注册账号。
 2. 进入 [OpenAlex API settings](https://openalex.org/settings/api)。
@@ -554,7 +582,7 @@ export CROSSREF_EMAIL=you@example.org
 ### arXiv 与计算机顶会
 
 - arXiv 不需要 API Key，适合预印本和 arXiv 覆盖学科的快速发现。
-- 计算机顶会检索不需要 API Key。
+- 计算机顶会检索不需要 API Key。PaperSeek 运行时读取 [paper-hub](https://github.com/Yupu-Wang/paper-hub) 的 manifest 与内容哈希 shard；截至其 2026-07-20 快照，共覆盖 26,579 篇论文，后续上游新增 shard 无需修改 PaperSeek 查询接口。
 
 ### Web of Science Starter API
 
@@ -674,10 +702,14 @@ PaperSeek 的设计和实现参考了以下开源项目：
 
 - [dr-dumpling/paper-search-cli](https://github.com/dr-dumpling/paper-search-cli/)：参考 CLI 使用方式与文献检索工作流设计。
 - [666ghj/MiroFish](https://github.com/666ghj/MiroFish)：参考 Web 前端界面的左右分栏和工作流展示风格。
-- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client)：参考 Web of Science Starter API 的客户端调用方式。
+- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client)：参考 Web of Science Starter API 的接口行为和响应结构；PaperSeek 使用独立的轻量适配层。
 - [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub)：经作者同意后集成，用于提供计算机顶会检索支持。
 - [Lloyd-Jahn/openclaw-paper-search](https://github.com/Lloyd-Jahn/openclaw-paper-search)：参考文献搜索工具的组织方式。
+- [bytedance/pasa](https://github.com/bytedance/pasa)：参考 Crawler / Selector 分工、候选队列和引用扩展调度。
+- [pydantic/pydantic](https://github.com/pydantic/pydantic) 与 [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai)：用于类型化数据契约，并通过可选适配器提供有界结构化输出重试。
+- [langchain-ai/langchain](https://github.com/langchain-ai/langchain) 与 [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)：通过公开 Python API 提供可选状态图执行后端；默认仍使用 PaperSeek 原生执行器。
+- [wanshuiyin/Auto-claude-code-research-in-sleep](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep)：参考长流程中的显式状态、检查点、预算和恢复审计设计。
 
 ## 开源协议
 
-PaperSeek 使用 [Apache License 2.0](LICENSE) 开源。
+PaperSeek 使用 [Apache License 2.0](LICENSE) 开源。依赖和参考项目致谢见 [第三方声明](THIRD_PARTY_NOTICES.md)。

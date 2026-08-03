@@ -1,7 +1,13 @@
 import unittest
 from types import SimpleNamespace
 
-from paperseek_core.agent import PaperSeekAgent, _query_response_from_json, _sanitize_openalex_query
+from paperseek_core import prompts
+from paperseek_core.agent import (
+    PaperSeekAgent,
+    _query_response_from_json,
+    _sanitize_openalex_query,
+    _sanitize_semantic_scholar_query,
+)
 from paperseek_core.sources.providers import PaperRecord, ProviderError, ProviderSearchResult, SearchMetadata
 
 
@@ -13,6 +19,20 @@ class CapturingLlm:
     def chat(self, messages, temperature=0.3):
         self.calls.append({"messages": messages, "temperature": temperature})
         return '{"query":"graph neural networks","rationale":"test response"}'
+
+
+class StructuredCapturingLlm(CapturingLlm):
+    def chat_json(self, messages, temperature=0.0, max_tokens=None):
+        self.calls.append({
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "mode": "json",
+        })
+        return '{"query":"graph neural networks","rationale":"structured response"}'
+
+    def chat(self, messages, temperature=0.3):
+        raise AssertionError("query generation must prefer chat_json when available")
 
 
 class SequencedLlm:
@@ -38,8 +58,9 @@ class FeedbackProvider:
             return ProviderSearchResult(
                 metadata=SearchMetadata(total=5, page=1, limit=limit),
                 hits=[
-                    PaperRecord(uid="p1", title="Digital Platform Governance and Algorithmic Control", provider="paperhub"),
-                    PaperRecord(uid="p2", title="AI Governance in Online Platforms", provider="paperhub"),
+                    PaperRecord(uid="p1", title="Air Pollution and Regional Innovation", provider="paperhub"),
+                    PaperRecord(uid="p2", title="Municipal Fiscal Stress and Local Debt", provider="paperhub"),
+                    PaperRecord(uid="p3", title="Environmental Regulation and Green Growth", provider="paperhub"),
                 ],
             )
         return ProviderSearchResult(
@@ -105,9 +126,17 @@ class QueryTotalProvider:
     def search(self, query, limit=50, page=1, field_ids=None, lane="relevance"):
         self.queries.append(query)
         total = self.totals.get(query, 1)
+        if total > 3000:
+            hits = [
+                PaperRecord(uid=f"p{len(self.queries)}-a", title="Air Pollution and Regional Innovation", provider="openalex"),
+                PaperRecord(uid=f"p{len(self.queries)}-b", title="Municipal Fiscal Stress and Local Debt", provider="openalex"),
+                PaperRecord(uid=f"p{len(self.queries)}-c", title="Environmental Regulation and Green Growth", provider="openalex"),
+            ]
+        else:
+            hits = [PaperRecord(uid=f"p{len(self.queries)}", title=f"Result for {query}", provider="openalex")]
         return ProviderSearchResult(
             metadata=SearchMetadata(total=total, page=1, limit=limit),
-            hits=[PaperRecord(uid=f"p{len(self.queries)}", title=f"Result for {query}", provider="openalex")],
+            hits=hits,
         )
 
 
@@ -126,6 +155,101 @@ class SourcePromptRoutingTest(unittest.TestCase):
             serper_api_key="serper-test",
         )
         return PaperSeekAgent(config, llm), llm
+
+    def test_revision_prompts_keep_broadening_and_narrowing_operations_separate(self):
+        broaden_prompts = (
+            prompts.SYSTEM_QUERY_BROADEN,
+            prompts.SYSTEM_OPENALEX_QUERY_BROADEN,
+            prompts.SYSTEM_CROSSREF_QUERY_BROADEN,
+            prompts.SYSTEM_ARXIV_QUERY_BROADEN,
+            prompts.SYSTEM_SEMANTIC_SCHOLAR_QUERY_BROADEN,
+            prompts.SYSTEM_PUBMED_QUERY_BROADEN,
+            prompts.SYSTEM_GOOGLE_SCHOLAR_QUERY_BROADEN,
+            prompts.SYSTEM_PAPERHUB_QUERY_BROADEN,
+            prompts.SYSTEM_GENERIC_SOURCE_QUERY_BROADEN,
+        )
+        narrow_prompts = (
+            prompts.SYSTEM_QUERY_NARROW,
+            prompts.SYSTEM_OPENALEX_QUERY_NARROW,
+            prompts.SYSTEM_CROSSREF_QUERY_NARROW,
+            prompts.SYSTEM_ARXIV_QUERY_NARROW,
+            prompts.SYSTEM_SEMANTIC_SCHOLAR_QUERY_NARROW,
+            prompts.SYSTEM_PUBMED_QUERY_NARROW,
+            prompts.SYSTEM_GOOGLE_SCHOLAR_QUERY_NARROW,
+            prompts.SYSTEM_PAPERHUB_QUERY_NARROW,
+            prompts.SYSTEM_GENERIC_SOURCE_QUERY_NARROW,
+        )
+
+        for value in broaden_prompts:
+            self.assertIn("single broadening operation", value)
+            self.assertIn("Never add a new mandatory concept while broadening", value)
+            self.assertNotIn("single narrowing operation", value)
+        for value in narrow_prompts:
+            self.assertIn("single narrowing operation", value)
+            self.assertNotIn("Never add a new mandatory concept while broadening", value)
+
+        broaden_contract = PaperSeekAgent._strict_query_output_instruction("broadened OpenAlex query string")
+        narrow_contract = PaperSeekAgent._strict_query_output_instruction("narrowed OpenAlex query string")
+        generation_contract = PaperSeekAgent._strict_query_output_instruction("OpenAlex query string")
+        self.assertIn("exactly one atomic broadening edit", broaden_contract)
+        self.assertIn("Copy every other concept group and filter unchanged", broaden_contract)
+        self.assertIn("exactly one atomic narrowing edit", narrow_contract)
+        self.assertIn("Do not add two missing facets", narrow_contract)
+        self.assertNotIn("atomic broadening edit", generation_contract)
+        self.assertNotIn("atomic narrowing edit", generation_contract)
+
+    def test_source_prompts_capture_current_api_search_constraints(self):
+        self.assertNotIn("search full text", prompts.SYSTEM_QUERY_BROADEN)
+        self.assertIn("Keywords Plus", prompts.SYSTEM_QUERY_BROADEN)
+        self.assertIn("approximately 4 KB", prompts.SYSTEM_OPENALEX_QUERY_GENERATION)
+        self.assertIn("hyphen", prompts.SYSTEM_SEMANTIC_SCHOLAR_QUERY_GENERATION)
+        self.assertIn("Automatic Term Mapping", prompts.SYSTEM_PUBMED_QUERY_GENERATION)
+        self.assertIn("must_have_facets", prompts.SYSTEM_SEARCH_INTENT_ANALYSIS)
+        self.assertIn("same absolute rubric", prompts.SYSTEM_RESULT_RANKING)
+        self.assertNotIn("Sort scores by score", prompts.SYSTEM_RESULT_RANKING)
+
+    def test_semantic_scholar_query_sanitizer_replaces_hyphenated_terms(self):
+        self.assertEqual(
+            _sanitize_semantic_scholar_query("retrieval-augmented human–computer interaction"),
+            "retrieval augmented human computer interaction",
+        )
+
+    def test_ranking_score_contract_rejects_nonnumeric_values_without_clamping(self):
+        scores = PaperSeekAgent._validated_ranking_scores(
+            [
+                {"uid": "valid", "score": 10, "reasoning": "Direct match."},
+                {"uid": "valid-zero", "score": 0, "reasoning": "No substantive match."},
+                {"uid": "relative-score", "score": 11, "reasoning": "Preserved for relative ordering."},
+                {"uid": "invalid", "score": "not-a-score", "reasoning": "Invalid."},
+            ]
+        )
+
+        self.assertEqual(
+            [entry["uid"] for entry in scores],
+            ["valid", "valid-zero", "relative-score"],
+        )
+
+    def test_query_generation_prefers_structured_json_mode(self):
+        llm = StructuredCapturingLlm()
+        config = SimpleNamespace(
+            data_source="openalex",
+            discipline_fields=(),
+            search_field="",
+            expand_citations=False,
+            semantic_scholar_api_key="",
+            pubmed_api_key="",
+            pubmed_email="",
+            pubmed_tool="paperseek",
+            serper_api_key="",
+        )
+        agent = PaperSeekAgent(config, llm)
+
+        query = agent._generate_query("graph neural networks")
+
+        self.assertEqual(query, "graph neural networks")
+        self.assertEqual(llm.calls[-1]["mode"], "json")
+        self.assertEqual(llm.calls[-1]["temperature"], 0.0)
+        self.assertEqual(llm.calls[-1]["max_tokens"], 2048)
 
     def test_new_sources_use_dedicated_generation_prompts(self):
         expected_markers = {
@@ -235,8 +359,8 @@ class SourcePromptRoutingTest(unittest.TestCase):
         self.assertIn("AI governance", first_query_prompt)
         self.assertIn("Previous source feedback", revision_prompt)
         self.assertIn("Top returned candidate titles", revision_prompt)
-        self.assertIn("Digital Platform Governance and Algorithmic Control", revision_prompt)
-        self.assertIn("above LLM pre-ranking safety pool", revision_prompt)
+        self.assertIn("Air Pollution and Regional Innovation", revision_prompt)
+        self.assertIn("title-intent", revision_prompt)
         self.assertIn("on-intent", revision_prompt)
         self.assertIn("off-intent", revision_prompt)
         self.assertIn("JSON rationale field", revision_prompt)
@@ -255,7 +379,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=5,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
         )
         agent = PaperSeekAgent(config, llm)
@@ -267,6 +391,10 @@ class SourcePromptRoutingTest(unittest.TestCase):
 
         query_events = [event for event in events if event.get("type") == "stage" and event.get("stage") == "query"]
         self.assertTrue(any((event.get("data") or {}).get("intent") for event in query_events))
+        structured_events = [event for event in query_events if (event.get("data") or {}).get("search_plan")]
+        self.assertTrue(structured_events)
+        self.assertEqual(structured_events[0]["data"]["search_plan"]["intent"], "Find AI governance literature")
+        self.assertEqual(structured_events[0]["data"]["search_plan"]["core_concepts"], ["AI governance"])
         self.assertIn("Find AI governance literature", result["search_intent"])
 
     def test_query_response_from_json_separates_query_and_rationale(self):
@@ -313,6 +441,15 @@ class SourcePromptRoutingTest(unittest.TestCase):
             '("AI governance" AND (framework OR guideline)',
         )
 
+    def test_openalex_query_sanitizer_collapses_semantically_redundant_repeated_clauses(self):
+        self.assertEqual(
+            _sanitize_openalex_query(
+                '("remote work" OR telework) AND productivity AND '
+                '("remote work" OR telework) AND productivity'
+            ),
+            '("remote work" OR telework) AND productivity',
+        )
+
     def test_openalex_provider_error_runs_limited_syntax_repair_retry(self):
         llm = SequencedLlm([
             '{"intent":"Find AI governance policy literature","core_concepts":["AI governance","policy"],"likely_synonyms":["regulation"],"boundaries":[],"adjustment_strategy":"Keep AI governance central."}',
@@ -326,7 +463,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=5,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
             openalex_api_key="",
             openalex_email="",
@@ -341,6 +478,9 @@ class SourcePromptRoutingTest(unittest.TestCase):
 
         self.assertEqual(provider.queries, ["AI governance policy", "AI governance regulation policy"])
         self.assertEqual(result["total"], 1)
+        self.assertEqual(result["search_state"]["errors"][0]["status"], 400)
+        self.assertEqual(result["search_state"]["errors"][0]["stage"], "source_search")
+        self.assertTrue(result["search_state"]["errors"][0]["retryable"])
 
     def test_openalex_sanitizer_runs_before_provider_request(self):
         llm = SequencedLlm([
@@ -354,7 +494,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=5,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
             openalex_api_key="",
             openalex_email="",
@@ -384,7 +524,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=50,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
             openalex_api_key="",
             openalex_email="",
@@ -421,7 +561,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=50,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
             openalex_api_key="",
             openalex_email="",
@@ -456,7 +596,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=50,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
             openalex_api_key="",
             openalex_email="",
@@ -490,7 +630,7 @@ class SourcePromptRoutingTest(unittest.TestCase):
             expand_citations=False,
             target_min=1,
             target_max=50,
-            max_iterations=1,
+            max_iterations=2,
             fetch_abstracts=False,
             openalex_api_key="",
             openalex_email="",
@@ -509,6 +649,60 @@ class SourcePromptRoutingTest(unittest.TestCase):
 
         self.assertEqual(provider.queries, ['"AI governance" policy framework', '"AI governance" "policy framework" accountability'])
         self.assertEqual(result["total"], 20)
+
+    def test_reasoning_revision_is_retried_across_sources_before_provider_request(self):
+        sources = ("openalex", "crossref", "arxiv", "semanticscholar", "pubmed", "googlescholar", "paperhub")
+        dirty_revision = (
+            "Let's finalize: the previous query is too broad, but maybe adding accountability "
+            "would be safer than adding many unrelated keywords."
+        )
+        initial_query = "AI governance"
+        repaired_query = "AI governance accountability"
+
+        for source in sources:
+            with self.subTest(source=source):
+                llm = SequencedLlm([
+                    '{"intent":"Find AI governance accountability literature","core_concepts":["AI governance","accountability"],"likely_synonyms":["responsible AI"],"boundaries":[],"adjustment_strategy":"Narrow with accountability."}',
+                    f'{{"query":"{initial_query}","rationale":"Initial compact query."}}',
+                    dirty_revision,
+                    f'{{"query":"{repaired_query}","rationale":"Clean JSON retry adds accountability."}}',
+                ])
+                config = SimpleNamespace(
+                    data_source=source,
+                    discipline_fields=(),
+                    search_field="",
+                    expand_citations=False,
+                    target_min=1,
+                    target_max=50,
+                    max_iterations=2,
+                    fetch_abstracts=False,
+                    openalex_api_key="",
+                    openalex_email="",
+                    crossref_email="",
+                    semantic_scholar_api_key="",
+                    pubmed_api_key="",
+                    pubmed_email="",
+                    pubmed_tool="paperseek",
+                    serper_api_key="serper-test",
+                    retrieval_pool_max=3000,
+                    retrieval_pool_min=5,
+                    search_loop_backend="native",
+                )
+                agent = PaperSeekAgent(config, llm)
+                provider = QueryTotalProvider({
+                    initial_query: 5000,
+                    repaired_query: 10,
+                })
+                agent.provider = provider
+                agent._retrieve_candidates = lambda question, query, hits: hits
+                agent._rank_results = lambda question, documents, **_: []
+
+                result = agent.search("AI governance accountability")
+
+                self.assertEqual(provider.queries, [initial_query, repaired_query])
+                self.assertNotIn(dirty_revision, provider.queries)
+                self.assertEqual(result["total"], 10)
+                self.assertEqual(result["history"][0]["action"], "narrow")
 
     def test_unchanged_revision_stops_without_repeating_same_request(self):
         llm = SequencedLlm([

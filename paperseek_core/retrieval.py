@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import blake2b
@@ -9,9 +8,11 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 class RetrievalLane:
     RELEVANCE = "relevance"
+    SEMANTIC = "semantic"
     IMPACT = "impact"
     RECENT = "recent"
     LOCAL_QUALITY = "local_quality"
+    CITATION = "citation_expansion"
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class ProviderRetrievalCapabilities:
     source: str
     lanes: Tuple[str, ...] = (RetrievalLane.RELEVANCE,)
     max_lane_limit: int = 1000
+    lane_concurrency: int = 1
 
     def supports(self, lane: str) -> bool:
         return lane in self.lanes
@@ -34,10 +36,18 @@ class FusedRetrievalResult:
 
 LANE_WEIGHTS = {
     RetrievalLane.RELEVANCE: 1.0,
+    RetrievalLane.SEMANTIC: 1.0,
     RetrievalLane.IMPACT: 0.9,
     RetrievalLane.RECENT: 0.8,
     RetrievalLane.LOCAL_QUALITY: 0.9,
+    RetrievalLane.CITATION: 1.0,
 }
+
+RRF_COMPONENT_WEIGHT = 0.50
+PRIMARY_LANE_PRIOR_WEIGHT = 0.15
+EMBEDDING_COMPONENT_WEIGHT = 0.1225
+BM25_COMPONENT_WEIGHT = 0.14
+TERM_COVERAGE_WEIGHT = 0.0875
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_+\-.]{1,}", re.I)
 _STOPWORDS = {
@@ -82,6 +92,19 @@ def document_key(document: Any) -> str:
     return f"title:{title}" if title else ""
 
 
+def document_alias_keys(document: Any) -> Tuple[str, ...]:
+    """Return stable identifiers plus title identity for cross-source deduplication."""
+
+    aliases: List[str] = []
+    primary = document_key(document)
+    if primary:
+        aliases.append(primary)
+    title = _normalize_title(getattr(document, "title", ""))
+    if title:
+        aliases.append(f"title:{title}")
+    return tuple(dict.fromkeys(aliases))
+
+
 def document_text(document: Any) -> str:
     parts: List[str] = []
     for value in (
@@ -119,14 +142,22 @@ def fuse_candidates_rrf(
     pool_max = max(1, int(pool_max or 3000))
     rrf_k = max(1, int(rrf_k or 60))
     key_to_doc: Dict[str, Any] = {}
+    alias_to_key: Dict[str, str] = {}
     lane_ranks: Dict[str, Dict[str, int]] = {}
 
     for lane, documents in lane_results.items():
         seen_in_lane = set()
         ranks: Dict[str, int] = {}
         for document in documents or []:
-            key = document_key(document)
-            if not key or key in seen_in_lane:
+            aliases = document_alias_keys(document)
+            key = next((alias_to_key[alias] for alias in aliases if alias in alias_to_key), "")
+            if not key:
+                key = document_key(document)
+            if not key:
+                continue
+            for alias in aliases:
+                alias_to_key.setdefault(alias, key)
+            if key in seen_in_lane:
                 continue
             seen_in_lane.add(key)
             key_to_doc.setdefault(key, document)
@@ -148,9 +179,10 @@ def fuse_candidates_rrf(
     coverage = [_term_coverage(query, text) for text in texts]
     bm25_norm = _normalize_scores(bm25)
 
-    scored = []
-    metadata_by_key: Dict[str, Dict[str, Any]] = {}
-    for index, key in enumerate(keys):
+    raw_rrf_scores = []
+    source_ranks = []
+    retrieval_lanes = []
+    for key in keys:
         rrf_score = 0.0
         lanes = []
         source_rank = None
@@ -161,18 +193,41 @@ def fuse_candidates_rrf(
             lanes.append(lane)
             source_rank = rank if source_rank is None else min(source_rank, rank)
             rrf_score += LANE_WEIGHTS.get(lane, 0.8) / (rrf_k + rank)
-        final_score = rrf_score + (0.35 * cosine[index]) + (0.35 * bm25_norm[index]) + (0.20 * coverage[index])
+        raw_rrf_scores.append(rrf_score)
+        source_ranks.append(source_rank)
+        retrieval_lanes.append(lanes)
+
+    normalized_rrf_scores = _normalize_scores(raw_rrf_scores)
+    scored = []
+    metadata_by_key: Dict[str, Dict[str, Any]] = {}
+    for index, key in enumerate(keys):
+        relevance_rank = lane_ranks.get(RetrievalLane.RELEVANCE, {}).get(key)
+        primary_prior = 1.0 / math.log2(relevance_rank + 1.0) if relevance_rank else 0.0
+        final_score = (
+            RRF_COMPONENT_WEIGHT * normalized_rrf_scores[index]
+            + PRIMARY_LANE_PRIOR_WEIGHT * primary_prior
+            + EMBEDDING_COMPONENT_WEIGHT * cosine[index]
+            + BM25_COMPONENT_WEIGHT * bm25_norm[index]
+            + TERM_COVERAGE_WEIGHT * coverage[index]
+        )
         metadata = {
-            "source_rank": source_rank or index + 1,
+            "source_rank": source_ranks[index] or index + 1,
+            "retrieval_source_ranks": {
+                lane: ranks[key]
+                for lane, ranks in lane_ranks.items()
+                if key in ranks
+            },
             "retrieval_score": round(final_score, 6),
-            "retrieval_lanes": lanes,
-            "retrieval_rrf_score": round(rrf_score, 6),
+            "retrieval_lanes": retrieval_lanes[index],
+            "retrieval_rrf_score": round(raw_rrf_scores[index], 6),
+            "retrieval_rrf_normalized": round(normalized_rrf_scores[index], 6),
+            "retrieval_primary_prior": round(primary_prior, 6),
             "retrieval_embedding_score": round(cosine[index], 6),
             "retrieval_bm25_score": round(bm25_norm[index], 6),
             "retrieval_term_coverage": round(coverage[index], 6),
         }
         metadata_by_key[key] = metadata
-        scored.append((final_score, -(source_rank or index + 1), key))
+        scored.append((final_score, -(source_ranks[index] or index + 1), key))
 
     scored.sort(reverse=True)
     selected_keys = [key for _, _, key in scored[:pool_max]]

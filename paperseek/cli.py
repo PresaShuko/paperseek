@@ -10,12 +10,14 @@ Agent-friendly commands are also available:
     paperseek smoke --source openalex --json
 """
 
-from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 
+from paperseek_core.budgets import SEARCH_BUDGET_NAMES, apply_search_budget
 from paperseek.config import (
     SUPPORTED_LLM_API_TYPES,
     SUPPORTED_LLM_PROVIDERS,
@@ -138,8 +140,17 @@ Environment variables:
   LLM_MODEL          Model name
   LLM_BASE_URL       Custom API endpoint URL
   LLM_MAX_TOKENS     Maximum LLM output tokens per request, default: 2048
+  SEARCH_BUDGET      Search breadth preset: fast, medium, high, or max; default: fast
   SEARCH_FIELD       Default discipline/field constraint
   DISCIPLINE_FIELDS  OpenAlex Field IDs or labels for source-specific discipline limits
+  SEARCH_LOOP_BACKEND
+                     Query-loop backend: auto, langgraph, or native
+  QUERY_PORTFOLIO_ENABLED
+                     Set to "false" to disable SearchPlan multi-view retrieval
+  QUERY_PORTFOLIO_MAX
+                     Maximum actual source requests from SearchPlan views, fast default: 2
+  QUERY_PORTFOLIO_LIMIT
+                     Maximum records requested per query view, default: 100
   EXPAND_CITATIONS   Set to "false" to skip OpenAlex citation expansion
   FETCH_ABSTRACTS    Set to "true" to enable DOI-based abstract fetching
   PAPERSEEK_TIMEZONE History timestamp timezone, default: Asia/Shanghai
@@ -176,13 +187,33 @@ Environment variables:
     parser.add_argument("--llm-model", default=None, help="LLM model name")
     parser.add_argument("--llm-base-url", default=None, help="Custom LLM API endpoint")
     parser.add_argument("--llm-max-tokens", type=int, default=None, help="Maximum LLM output tokens per request")
+    parser.add_argument(
+        "--search-budget",
+        default=None,
+        choices=list(SEARCH_BUDGET_NAMES),
+        help="Search breadth and resource preset (default: fast)",
+    )
     parser.add_argument("--min", type=int, default=None, help="Target minimum results (default: 5)")
     parser.add_argument("--max", type=int, default=None, help="Target maximum results (default: 50)")
-    parser.add_argument("--iterations", type=int, default=None, help="Max broaden/narrow cycles (default: 5)")
-    parser.add_argument("--retrieval-pool-max", type=int, default=None, help="Maximum fused candidates before LLM ranking (default: 3000)")
+    parser.add_argument("--iterations", type=int, default=None, help="Max broaden/narrow cycles (fast default: 5)")
+    parser.add_argument("--retrieval-pool-max", type=int, default=None, help="Maximum fused candidates before LLM ranking (fast default: 3000)")
     parser.add_argument("--retrieval-pool-min", type=int, default=None, help="Minimum useful candidate count after adaptive iterations (default: 5)")
-    parser.add_argument("--retrieval-lane-limit", type=int, default=None, help="Maximum records per retrieval lane before fusion (default: 1000)")
-    parser.add_argument("--ranking-candidate-limit", type=int, default=None, help="Maximum candidates sent to LLM scoring after pre-ranking (default: 256)")
+    parser.add_argument("--retrieval-lane-limit", type=int, default=None, help="Maximum records per retrieval lane before fusion (fast default: 500)")
+    parser.add_argument("--ranking-candidate-limit", type=int, default=None, help="Maximum candidates sent to LLM scoring after pre-ranking (fast default: 256)")
+    parser.add_argument(
+        "--query-portfolio",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable SearchPlan multi-view retrieval (default: enabled)",
+    )
+    parser.add_argument(
+        "--query-portfolio-max",
+        type=int,
+        default=None,
+        help="Maximum actual source requests from SearchPlan views (fast default: 2)",
+    )
+    parser.add_argument("--query-portfolio-limit", type=int, default=None, help="Maximum records requested per query view (default: 100)")
+    parser.add_argument("--search-loop-backend", default=None, choices=["auto", "langgraph", "native"], help="Search loop backend: auto/native use the built-in controller; langgraph enables the LangGraph state machine")
     retrieval_providers = ["local", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter", "nvidia", "zhipu", "volcengine", "modelscope", "custom"]
     reranker_providers = ["off", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter", "nvidia", "zhipu", "volcengine", "custom"]
     parser.add_argument("--retrieval-embedding-provider", default=None, choices=retrieval_providers, help="Embedding provider for pre-ranking")
@@ -197,6 +228,8 @@ Environment variables:
 
 
 def _apply_search_args(config: AgentConfig, args) -> AgentConfig:
+    if getattr(args, "search_budget", None):
+        apply_search_budget(config, args.search_budget)
     if args.source:
         config.data_source = args.source
     if args.wos_key:
@@ -259,6 +292,14 @@ def _apply_search_args(config: AgentConfig, args) -> AgentConfig:
         config.retrieval_lane_limit = args.retrieval_lane_limit
     if args.ranking_candidate_limit is not None:
         config.ranking_candidate_limit = args.ranking_candidate_limit
+    if args.query_portfolio is not None:
+        config.query_portfolio_enabled = args.query_portfolio
+    if args.query_portfolio_max is not None:
+        config.query_portfolio_max = max(1, args.query_portfolio_max)
+    if args.query_portfolio_limit is not None:
+        config.query_portfolio_limit = max(1, args.query_portfolio_limit)
+    if args.search_loop_backend:
+        config.search_loop_backend = args.search_loop_backend
     if args.retrieval_embedding_provider:
         config.retrieval_embedding_provider = args.retrieval_embedding_provider
     if args.retrieval_embedding_model:
@@ -299,18 +340,41 @@ def _run_search(argv, prog: str):
 
     agent = PaperSeekAgent(config, llm)
 
+    search_kwargs = {"verbose": args.verbose}
+    if os.getenv("PAPERSEEK_BENCHMARK_TRACE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        trace_started = time.perf_counter()
+
+        def emit_benchmark_trace(event):
+            trace_event = dict(event)
+            trace_event["benchmark_elapsed_ms"] = round((time.perf_counter() - trace_started) * 1000, 3)
+            print(
+                "PAPERSEEK_BENCHMARK_EVENT " + json.dumps(trace_event, ensure_ascii=False, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
+
+        search_kwargs["event_handler"] = emit_benchmark_trace
+
     try:
-        result = agent.search(args.question, verbose=args.verbose)
+        result = agent.search(args.question, **search_kwargs)
         history_payload = result_payload_from_search_result(result, config.data_source)
         if history_run_id:
             history_payload["run_id"] = history_run_id
         history_store.complete_run(history_run_id, history_payload)
     except LLMError as exc:
-        history_store.fail_run(history_run_id, str(exc))
+        history_store.fail_run(
+            history_run_id,
+            str(exc),
+            result_payload_from_search_result(agent.partial_result_payload(args.question), config.data_source),
+        )
         print(f"LLM error: {exc}", file=sys.stderr)
         sys.exit(1)
     except Exception as exc:
-        history_store.fail_run(history_run_id, str(exc))
+        history_store.fail_run(
+            history_run_id,
+            str(exc),
+            result_payload_from_search_result(agent.partial_result_payload(args.question), config.data_source),
+        )
         print(f"Search error: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -326,6 +390,14 @@ def _run_search(argv, prog: str):
             history=result.get("history", []),
             source=result.get("source", ""),
             citation_map=result.get("citation_map", {}),
+            search_intent=result.get("search_intent", ""),
+            search_plan=result.get("search_plan", {}),
+            query_view_selection=result.get("query_view_selection", []),
+            query_portfolio=result.get("query_portfolio", []),
+            query_iteration_memory=result.get("query_iteration_memory", []),
+            search_loop=result.get("search_loop", {}),
+            search_state=result.get("search_state", {}),
+            ranking_steps=result.get("ranking_steps", []),
         ))
     else:
         print(format_text(

@@ -1,12 +1,12 @@
-from __future__ import annotations
 
 from typing import Callable
 
 from paperseek_core.agent import LiteratureSearchAgent, PaperSeekAgent, WosSearchAgent
+from paperseek_core.budgets import SEARCH_BUDGET_NAMES, apply_search_budget
 from paperseek_core.config import LLMConfig, SearchConfig, SourceConfig, build_runtime_config
 from paperseek_core.llm import create_llm_client
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 
 def run_search(
@@ -26,8 +26,10 @@ __all__ = [
     "LiteratureSearchAgent",
     "PaperSeekAgent",
     "SearchConfig",
+    "SEARCH_BUDGET_NAMES",
     "SourceConfig",
     "WosSearchAgent",
     "__version__",
+    "apply_search_budget",
     "run_search",
 ]

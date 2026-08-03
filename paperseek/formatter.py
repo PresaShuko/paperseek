@@ -150,17 +150,33 @@ def format_text(items: list, question: str, final_query: str, db: str,
 
 def format_json(items: list, question: str, final_query: str, db: str,
                 total_count: int, iterations: int, field_name: str = "",
-                history: list = None, source: str = "", citation_map: dict = None) -> str:
+                history: list = None, source: str = "", citation_map: dict = None,
+                search_intent: str = "", search_loop: dict = None,
+                search_state: dict = None, ranking_steps: list = None,
+                search_plan: dict = None, query_view_selection: list = None,
+                query_portfolio: list = None,
+                query_iteration_memory: list = None) -> str:
     output = {
         "question": question,
+        "search_intent": search_intent or "",
+        "search_plan": search_plan or {},
+        "query_view_selection": query_view_selection or [],
+        "query_portfolio": query_portfolio or [],
+        "query_iteration_memory": query_iteration_memory or [],
         "source": source or None,
         "query": final_query,
         "database": db,
+        "final_query": final_query,
+        "db": db,
         "field": field_name or None,
         "total_results": total_count,
+        "total": total_count,
         "iterations": iterations,
         "history": history or [],
+        "search_loop": search_loop or {},
+        "search_state": search_state or {},
         "citation_map": citation_map or {},
+        "ranking_steps": ranking_steps or [],
         "ranked": ranked_items_to_dict(items)
     }
     return json.dumps(output, ensure_ascii=False, indent=2)

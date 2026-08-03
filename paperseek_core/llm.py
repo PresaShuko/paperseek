@@ -74,6 +74,14 @@ class LLMClient(ABC):
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.3) -> str:
         ...
 
+    def chat_json(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+    ) -> str:
+        return self.chat(messages, temperature=temperature)
+
 
 def _auth_headers(api_key: str) -> Dict[str, str]:
     headers = {"Content-Type": "application/json"}
@@ -117,25 +125,51 @@ class OpenAIChatClient(LLMClient):
         base_url: str = "",
         max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         timeout_seconds: int = DEFAULT_LLM_TIMEOUT_SECONDS,
+        thinking_enabled: bool = True,
     ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/") if base_url else "https://api.openai.com/v1"
         self.max_tokens = max(0, int(max_tokens or 0))
         self.timeout_seconds = _coerce_timeout_seconds(timeout_seconds)
+        self.thinking_enabled = bool(thinking_enabled)
         self.last_response_info = {}
 
     def chat(self, messages, temperature=0.3):
+        return self._chat(messages, temperature=temperature)
+
+    def chat_json(self, messages, temperature=0.0, max_tokens=4096):
+        try:
+            return self._chat(
+                messages,
+                temperature=temperature,
+                response_format={"type": "json_object"},
+                max_tokens=max(self.max_tokens, int(max_tokens or 0)),
+            )
+        except LLMError as exc:
+            if "LLM API error (400)" not in str(exc) and "LLM API error (422)" not in str(exc):
+                raise
+            return self._chat(
+                messages,
+                temperature=temperature,
+                max_tokens=max(self.max_tokens, int(max_tokens or 0)),
+            )
+
+    def _chat(self, messages, temperature=0.3, response_format=None, max_tokens=None):
         url = f"{self.base_url}/chat/completions"
         started = time.perf_counter()
         kimi_coding_endpoint = self.model == "kimi-for-coding" and "api.kimi.com/coding" in self.base_url
+        deepseek_endpoint = "api.deepseek.com" in self.base_url and self.model.startswith("deepseek-")
         if kimi_coding_endpoint:
             temperature = 0.6
         body = {"model": self.model, "messages": messages, "temperature": temperature}
-        if kimi_coding_endpoint:
+        if not self.thinking_enabled and (kimi_coding_endpoint or deepseek_endpoint):
             body["thinking"] = {"type": "disabled"}
-        if self.max_tokens:
-            body["max_tokens"] = self.max_tokens
+        if response_format:
+            body["response_format"] = response_format
+        output_limit = self.max_tokens if max_tokens is None else max(0, int(max_tokens or 0))
+        if output_limit:
+            body["max_tokens"] = output_limit
         attempts = _api_key_attempts(self.api_key)
         last_error = None
         for attempt_index, api_key in enumerate(attempts, 1):
@@ -163,7 +197,19 @@ class OpenAIChatClient(LLMClient):
                         continue
                     raise last_error
                 try:
-                    return _extract_openai_chat_content(resp.json())
+                    payload = resp.json()
+                    choice = (payload.get("choices") or [{}])[0]
+                    usage = payload.get("usage") or {}
+                    self.last_response_info.update(
+                        {
+                            "finish_reason": choice.get("finish_reason"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                        }
+                    )
+                    return _extract_openai_chat_content(
+                        payload,
+                        allow_reasoning_fallback=not bool(response_format),
+                    )
                 except (KeyError, IndexError, TypeError, ValueError) as e:
                     raise LLMError(f"LLM Chat Completions response did not contain message content: {e}") from e
             except requests.Timeout:
@@ -201,12 +247,14 @@ class OpenAIResponsesClient(LLMClient):
         base_url: str = "",
         max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         timeout_seconds: int = DEFAULT_LLM_TIMEOUT_SECONDS,
+        thinking_enabled: bool = True,
     ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/") if base_url else "https://api.openai.com/v1"
         self.max_tokens = max(0, int(max_tokens or 0))
         self.timeout_seconds = _coerce_timeout_seconds(timeout_seconds)
+        self.thinking_enabled = bool(thinking_enabled)
         self.last_response_info = {}
 
     def chat(self, messages, temperature=0.3):
@@ -298,12 +346,14 @@ class AnthropicClient(LLMClient):
         base_url: str = "",
         max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         timeout_seconds: int = DEFAULT_LLM_TIMEOUT_SECONDS,
+        thinking_enabled: bool = True,
     ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/") if base_url else "https://api.anthropic.com"
         self.max_tokens = max(1, int(max_tokens or DEFAULT_LLM_MAX_TOKENS))
         self.timeout_seconds = _coerce_timeout_seconds(timeout_seconds)
+        self.thinking_enabled = bool(thinking_enabled)
         self.last_response_info = {}
 
     def chat(self, messages, temperature=0.3):
@@ -405,21 +455,43 @@ def create_llm_client(config) -> LLMClient:
     api_type = (getattr(config, "llm_api_type", "") or "").lower()
     max_tokens = getattr(config, "llm_max_tokens", DEFAULT_LLM_MAX_TOKENS)
     timeout_seconds = getattr(config, "llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS)
+    thinking_enabled = bool(getattr(config, "llm_thinking_enabled", True))
     if api_type == "anthropic_messages":
-        return AnthropicClient(config.llm_api_key, config.llm_model, config.llm_base_url, max_tokens=max_tokens, timeout_seconds=timeout_seconds)
+        return AnthropicClient(
+            config.llm_api_key,
+            config.llm_model,
+            config.llm_base_url,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            thinking_enabled=thinking_enabled,
+        )
     if api_type == "openai_responses":
-        return OpenAIResponsesClient(config.llm_api_key, config.llm_model, config.llm_base_url, max_tokens=max_tokens, timeout_seconds=timeout_seconds)
-    return OpenAIChatClient(config.llm_api_key, config.llm_model, config.llm_base_url, max_tokens=max_tokens, timeout_seconds=timeout_seconds)
+        return OpenAIResponsesClient(
+            config.llm_api_key,
+            config.llm_model,
+            config.llm_base_url,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            thinking_enabled=thinking_enabled,
+        )
+    return OpenAIChatClient(
+        config.llm_api_key,
+        config.llm_model,
+        config.llm_base_url,
+        max_tokens=max_tokens,
+        timeout_seconds=timeout_seconds,
+        thinking_enabled=thinking_enabled,
+    )
 
 
-def _extract_openai_chat_content(payload) -> str:
+def _extract_openai_chat_content(payload, allow_reasoning_fallback: bool = True) -> str:
     choice = (payload.get("choices") or [])[0]
     message = choice.get("message") or {}
     content = message.get("content")
     if content:
         return content
     reasoning = message.get("reasoning_content")
-    if reasoning:
+    if allow_reasoning_fallback and reasoning:
         return reasoning
     delta = choice.get("delta") or {}
     if delta.get("content"):

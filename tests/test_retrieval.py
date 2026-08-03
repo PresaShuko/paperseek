@@ -1,8 +1,12 @@
+import json
+import re
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from paperseek_core.agent import PaperSeekAgent
+from paperseek_core.planning import SearchPlan
 from paperseek_core.retrieval import RetrievalLane, document_key, fuse_candidates_rrf
 from paperseek_core.sources.providers import (
     ArxivProvider,
@@ -104,12 +108,54 @@ class RetrievalFusionTest(unittest.TestCase):
             RetrievalLane.IMPACT,
             RetrievalLane.RECENT,
         })
+        self.assertEqual(
+            fused.metadata_by_key[document_key(shared)]["retrieval_source_ranks"],
+            {
+                RetrievalLane.RELEVANCE: 1,
+                RetrievalLane.IMPACT: 2,
+                RetrievalLane.RECENT: 1,
+            },
+        )
+        metadata = fused.metadata_by_key[document_key(shared)]
+        self.assertEqual(metadata["retrieval_rrf_normalized"], 1.0)
+        self.assertEqual(metadata["retrieval_primary_prior"], 1.0)
+
+    def test_normalized_rrf_and_primary_prior_protect_provider_top_result(self):
+        provider_top = record("top", "specialized source result")
+        local_match = record("local", "graph retrieval literature benchmark", "graph retrieval literature")
+
+        fused = fuse_candidates_rrf(
+            "graph retrieval literature",
+            {
+                RetrievalLane.RELEVANCE: [provider_top],
+                "query_view:method": [local_match],
+            },
+            pool_max=2,
+        )
+
+        self.assertEqual(document_key(fused.documents[0]), document_key(provider_top))
+        top_metadata = fused.metadata_by_key[document_key(provider_top)]
+        self.assertEqual(top_metadata["retrieval_primary_prior"], 1.0)
+        self.assertGreater(top_metadata["retrieval_rrf_normalized"], 0.0)
 
     def test_rrf_fusion_dedupes_by_doi(self):
         first = record("A", "First", doi="10.1234/example")
         second = record("B", "Second", doi="https://doi.org/10.1234/example")
         fused = fuse_candidates_rrf("example", {RetrievalLane.RELEVANCE: [first], RetrievalLane.IMPACT: [second]})
         self.assertEqual(len(fused.documents), 1)
+
+    def test_rrf_fusion_dedupes_exact_title_across_different_identifiers(self):
+        first = record("A", "BraveGuard: From Open-World Threats to Safer Computer-Use Agents", doi="10.1/a")
+        second = record("B", "  BraveGuard:   From Open-World Threats to Safer Computer-Use Agents  ", doi="10.1/b")
+
+        fused = fuse_candidates_rrf(
+            "computer-use agent security",
+            {RetrievalLane.RELEVANCE: [first], RetrievalLane.RECENT: [second]},
+        )
+
+        self.assertEqual(len(fused.documents), 1)
+        metadata = fused.metadata_by_key[document_key(first)]
+        self.assertEqual(set(metadata["retrieval_lanes"]), {RetrievalLane.RELEVANCE, RetrievalLane.RECENT})
 
 
 class ProviderLaneTest(unittest.TestCase):
@@ -129,8 +175,8 @@ class ProviderLaneTest(unittest.TestCase):
 
         self.assertEqual(captured["sortBy"], "submittedDate")
         self.assertEqual(captured["url"], "http://export.arxiv.org/api/query")
-        self.assertEqual(captured["timeout"], 20)
-        self.assertEqual(captured["attempts"], 1)
+        self.assertEqual(captured["timeout"], 45)
+        self.assertEqual(captured["attempts"], 3)
 
     def test_semantic_scholar_impact_lane_uses_bulk_citation_sort(self):
         captured = {}
@@ -183,16 +229,173 @@ class ProviderLaneTest(unittest.TestCase):
 
 
 class RetrievalAgentTest(unittest.TestCase):
-    def test_adaptive_iteration_continues_after_configured_limit_when_pool_is_too_large(self):
-        agent = PaperSeekAgent(config(retrieval_pool_max=3000), FakeLLM())
-        self.assertTrue(agent._should_narrow_after_result(5000, 5, 5, 10))
-        self.assertFalse(agent._should_narrow_after_result(2000, 5, 5, 10))
-        self.assertFalse(agent._should_narrow_after_result(500, 1, 5, 10))
+    def test_post_citation_fusion_gives_relevant_neighbor_a_ranking_slot(self):
+        question = "semiconductor supply chain resilience measurement"
+        base_candidates = [
+            record(
+                f"base-{index}",
+                f"General organizational management study {index}",
+                "enterprise routines and operational performance",
+            )
+            for index in range(300)
+        ]
+        citation_neighbor = record(
+            "citation-hit",
+            "Measuring semiconductor supply chain resilience",
+            "A resilience index for the global chip industry chain and its driving factors.",
+        )
+        initial = fuse_candidates_rrf(
+            question,
+            {RetrievalLane.RELEVANCE: base_candidates},
+            pool_max=300,
+        )
+        agent = PaperSeekAgent(config(expand_citations=True, retrieval_pool_max=1000), FakeLLM())
+        agent.retrieval_metadata_by_key = initial.metadata_by_key
+        agent._enqueue_candidate_queue(initial.documents, "retrieval")
+        agent._enqueue_candidate_queue([citation_neighbor], "citation_expansion")
 
-    def test_zero_results_stop_after_configured_iterations(self):
-        agent = PaperSeekAgent(config(retrieval_pool_min=5), FakeLLM())
-        self.assertFalse(agent._should_broaden_after_result(0, 5, 5, 10))
-        self.assertTrue(agent._should_broaden_after_result(3, 5, 5, 10))
+        fused = agent._refuse_candidates_after_citation(
+            question,
+            [*initial.documents, citation_neighbor],
+        )
+        selected = fused[:256]
+        agent._record_candidate_gate(fused, selected, 256)
+
+        neighbor_key = document_key(citation_neighbor)
+        self.assertIn(neighbor_key, {document_key(document) for document in selected})
+        evidence = agent.search_run_state.candidate_queue.ledger[neighbor_key]
+        self.assertEqual(evidence.ranking_gate_label, "selected")
+        self.assertIsNotNone(evidence.retrieval_score)
+        self.assertIn(RetrievalLane.CITATION, evidence.retrieval_lanes)
+        self.assertGreater(evidence.concept_coverage["bm25"], 0.0)
+
+    def test_candidate_ledger_tracks_retrieval_gate_ranking_and_output(self):
+        document = record("W1", "Graph retrieval for literature search", "retrieval benchmark", citations=12)
+        key = document_key(document)
+        agent = PaperSeekAgent(config(expand_citations=False), FakeLLM())
+        agent.retrieval_metadata_by_key = {
+            key: {
+                "source_rank": 2,
+                "retrieval_source_ranks": {"relevance": 2, "impact": 7},
+                "retrieval_lanes": ["relevance", "impact", "query_view:mechanism"],
+                "retrieval_score": 0.73,
+                "retrieval_embedding_score": 0.61,
+                "retrieval_bm25_score": 0.52,
+                "retrieval_term_coverage": 0.4,
+                "retrieval_rrf_score": 0.08,
+                "retrieval_rrf_normalized": 0.9,
+                "retrieval_primary_prior": 0.5,
+                "rerank_score": 3.2,
+            }
+        }
+
+        candidates = agent._prepare_candidates("graph retrieval", [document])
+        agent._record_candidate_gate(candidates, candidates, 256)
+        ranked = [{"document": document, "score": 9, "reasoning": "directly relevant"}]
+        agent._record_candidate_scores(ranked, "llm_scored")
+        agent._record_final_candidates(ranked)
+
+        evidence = agent.search_run_state.candidate_queue.ledger[key]
+        self.assertEqual(evidence.origins, ["retrieval"])
+        self.assertEqual(evidence.query_views, ["mechanism"])
+        self.assertEqual(evidence.retrieval_lanes, ["relevance", "impact", "query_view:mechanism"])
+        self.assertEqual(evidence.source_ranks, {"relevance": 2, "impact": 7})
+        self.assertEqual(evidence.retrieval_score, 0.73)
+        self.assertEqual(evidence.concept_coverage["rrf_normalized"], 0.9)
+        self.assertEqual(evidence.concept_coverage["primary_prior"], 0.5)
+        self.assertEqual(evidence.rerank_score, 3.2)
+        self.assertEqual(evidence.llm_score, 9.0)
+        self.assertEqual(evidence.selector_label, "unseen")
+        self.assertEqual(evidence.ranking_gate_label, "selected")
+        self.assertEqual(
+            [event.action for event in evidence.lifecycle],
+            ["added", "selected_for_llm", "llm_scored", "final_output"],
+        )
+
+    def test_candidate_ledger_keeps_ranking_gate_separate_from_relevance_selector(self):
+        first = record("W1", "First result")
+        second = record("W2", "Second result")
+        agent = PaperSeekAgent(config(expand_citations=False), FakeLLM())
+        candidates = agent._prepare_candidates("result", [first, second])
+
+        agent._record_candidate_gate(candidates, candidates[:1], 1)
+
+        first_evidence = agent.search_run_state.candidate_queue.ledger[document_key(first)]
+        second_evidence = agent.search_run_state.candidate_queue.ledger[document_key(second)]
+        self.assertEqual(first_evidence.selector_label, "unseen")
+        self.assertEqual(second_evidence.selector_label, "unseen")
+        self.assertEqual(first_evidence.ranking_gate_label, "selected")
+        self.assertEqual(second_evidence.ranking_gate_label, "truncated")
+        self.assertIn("ranking_candidate_limit", second_evidence.ranking_gate_reason_codes)
+        self.assertEqual(second_evidence.lifecycle[-1].action, "truncated_before_llm")
+
+    def test_legacy_candidate_preparation_keeps_records_already_in_iteration_ledger(self):
+        remembered = record("W1", "Remembered iteration result")
+        fresh = record("W2", "Fresh retrieval result")
+        agent = PaperSeekAgent(config(expand_citations=False), FakeLLM())
+        agent._enqueue_candidate_queue([remembered], "query_iteration:1")
+
+        candidates = agent._prepare_candidates("result", [remembered, fresh])
+
+        self.assertEqual([document.uid for document in candidates], ["W1", "W2"])
+        remembered_evidence = agent.search_run_state.candidate_queue.ledger[document_key(remembered)]
+        self.assertEqual(remembered_evidence.origins, ["query_iteration:1", "retrieval"])
+
+    def test_selector_include_is_prioritized_before_llm_candidate_limit(self):
+        first = record("W1", "First local result")
+        second = record("W2", "Second local result")
+        selected_by_selector = record("W3", "Positive selector match")
+        agent = PaperSeekAgent(
+            config(expand_citations=False, candidate_selector_enabled=True),
+            FakeLLM(),
+        )
+        agent.search_plan = object()
+        candidates = agent._enqueue_candidate_queue(
+            [first, second, selected_by_selector],
+            "retrieval",
+        )
+        queue = agent.search_run_state.candidate_queue
+        key = document_key(selected_by_selector)
+        ledger = dict(queue.ledger)
+        ledger[key] = ledger[key].model_copy(
+            update={"selector_label": "include", "selector_relevance_score": 0.9}
+        )
+        agent.search_run_state = agent.search_run_state.with_candidate_queue(
+            queue.model_copy(update={"ledger": ledger})
+        )
+
+        prioritized = agent._prioritize_selector_includes(candidates)
+        agent._record_candidate_gate(prioritized, prioritized[:1], 1)
+
+        self.assertEqual([document.uid for document in prioritized], ["W3", "W1", "W2"])
+        evidence = agent.search_run_state.candidate_queue.ledger[key]
+        self.assertEqual(evidence.ranking_gate_label, "selected")
+        self.assertIn("selector_include_priority", evidence.ranking_gate_reason_codes)
+        self.assertEqual(evidence.lifecycle[-1].origin, "candidate_selector")
+
+    def test_search_state_payload_summarizes_and_bounds_candidate_ledger(self):
+        documents = [record(f"W{index}", f"Candidate {index}") for index in range(520)]
+        agent = PaperSeekAgent(config(expand_citations=False), FakeLLM())
+        candidates = agent._prepare_candidates("candidate", documents)
+        agent._record_candidate_gate(candidates, candidates[-2:], 2)
+        ranked = [{"document": document, "score": 8} for document in candidates[-2:]]
+        agent._record_candidate_scores(ranked, "llm_scored")
+        agent._record_final_candidates(ranked[-1:])
+
+        payload = agent._search_state_payload()
+        queue = payload["candidate_queue"]
+        summary = queue["ledger_summary"]
+
+        self.assertEqual(len(agent.search_run_state.candidate_queue.ledger), 520)
+        self.assertEqual(summary["total_candidates"], 520)
+        self.assertEqual(summary["serialized_candidates"], 512)
+        self.assertEqual(summary["omitted_candidates"], 8)
+        self.assertEqual(summary["selector_counts"], {"unseen": 520})
+        self.assertEqual(summary["ranking_gate_counts"], {"truncated": 518, "selected": 2})
+        self.assertEqual(summary["lifecycle_candidate_counts"]["selected_for_llm"], 2)
+        self.assertEqual(summary["lifecycle_candidate_counts"]["final_output"], 1)
+        self.assertIn(document_key(candidates[-1]), queue["ledger"])
+        self.assertIn(document_key(candidates[-2]), queue["ledger"])
 
     def test_retrieve_candidates_uses_provider_capability_lanes(self):
         class Provider:
@@ -208,6 +411,124 @@ class RetrievalAgentTest(unittest.TestCase):
         agent.provider = Provider()
         docs = agent._retrieve_candidates("graph retrieval", "graph retrieval", [])
         self.assertEqual({doc.uid for doc in docs}, {"rel", "recent"})
+
+    def test_retrieve_candidates_runs_provider_lanes_with_bounded_concurrency(self):
+        barrier = threading.Barrier(2, timeout=2)
+
+        class Provider:
+            def retrieval_capabilities(self):
+                return SimpleNamespace(
+                    source="fake",
+                    lanes=(RetrievalLane.RELEVANCE, RetrievalLane.RECENT),
+                    max_lane_limit=10,
+                    lane_concurrency=2,
+                )
+
+            def search(self, query, limit=50, page=1, lane=RetrievalLane.RELEVANCE):
+                barrier.wait()
+                return ProviderSearchResult(
+                    SearchMetadata(total=1, page=page, limit=limit),
+                    [record(lane, f"{lane} result")],
+                )
+
+        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
+        agent.provider = Provider()
+
+        docs = agent._retrieve_candidates("graph retrieval", "graph retrieval", [])
+
+        self.assertEqual([doc.uid for doc in docs], [RetrievalLane.RELEVANCE, RetrievalLane.RECENT])
+
+    def test_effective_lane_limit_does_not_page_beyond_llm_gate(self):
+        agent = PaperSeekAgent(
+            config(retrieval_lane_limit=1000, retrieval_pool_max=3000, ranking_candidate_limit=256),
+            FakeLLM(),
+        )
+        capabilities = SimpleNamespace(max_lane_limit=1000)
+
+        self.assertEqual(agent._effective_lane_limit(capabilities), 256)
+        self.assertEqual(agent._effective_lane_limit(capabilities, RetrievalLane.RECENT), 100)
+
+    def test_semantic_lane_uses_original_question_not_compiled_query(self):
+        class Provider:
+            def __init__(self):
+                self.calls = []
+
+            def retrieval_capabilities(self):
+                return SimpleNamespace(
+                    source="fake",
+                    lanes=(RetrievalLane.RELEVANCE, RetrievalLane.SEMANTIC),
+                    max_lane_limit=10,
+                )
+
+            def search(self, query, limit=50, page=1, lane=RetrievalLane.RELEVANCE):
+                self.calls.append((lane, query))
+                return ProviderSearchResult(
+                    SearchMetadata(total=1, page=1, limit=limit),
+                    [record(lane, f"{lane} result")],
+                )
+
+        provider = Provider()
+        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
+        agent.provider = provider
+
+        agent._retrieve_candidates("natural language research question", "compiled boolean query", [])
+
+        self.assertEqual(
+            provider.calls,
+            [
+                (RetrievalLane.RELEVANCE, "compiled boolean query"),
+                (RetrievalLane.SEMANTIC, "natural language research question"),
+            ],
+        )
+
+    def test_relevance_lane_reuses_primary_page_before_fetching_next_page(self):
+        primary = [record(f"primary-{index}", f"Primary {index}") for index in range(100)]
+
+        class Provider:
+            def __init__(self):
+                self.calls = []
+
+            def retrieval_capabilities(self):
+                return SimpleNamespace(source="fake", lanes=(RetrievalLane.RELEVANCE,), max_lane_limit=150)
+
+            def search(self, query, limit=50, page=1, lane=RetrievalLane.RELEVANCE):
+                self.calls.append((lane, page, limit))
+                hits = [record(f"page-2-{index}", f"Page 2 {index}") for index in range(50)]
+                return ProviderSearchResult(SearchMetadata(total=150, page=page, limit=limit), hits)
+
+        provider = Provider()
+        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=150, retrieval_pool_max=150), FakeLLM())
+        agent.provider = provider
+
+        docs = agent._retrieve_candidates("question", "compiled query", primary)
+
+        self.assertEqual(provider.calls, [(RetrievalLane.RELEVANCE, 2, 50)])
+        self.assertEqual(len(docs), 150)
+        self.assertIn("primary-0", {doc.uid for doc in docs})
+        self.assertIn("page-2-49", {doc.uid for doc in docs})
+
+    def test_retrieval_lane_keeps_completed_pages_when_later_page_fails(self):
+        primary = [record(f"primary-{index}", f"Primary {index}") for index in range(100)]
+
+        class Provider:
+            def search(self, query, limit=50, page=1, lane=RetrievalLane.RELEVANCE):
+                raise RuntimeError("temporary page failure")
+
+        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=150, retrieval_pool_max=150), FakeLLM())
+        agent.provider = Provider()
+        events = []
+        agent.event_handler = events.append
+
+        docs = agent._collect_retrieval_lane(
+            "compiled query",
+            RetrievalLane.RELEVANCE,
+            150,
+            initial_hits=primary,
+        )
+
+        self.assertEqual(len(docs), 100)
+        messages = "\n".join(str(event.get("message") or "") for event in events)
+        self.assertIn("retained 100 candidates after page 2 failed", messages)
 
     def test_llm_ranking_candidate_limit_is_separate_from_retrieval_pool(self):
         agent = PaperSeekAgent(config(retrieval_pool_max=3000, target_max=50), FakeLLM())
@@ -249,6 +570,79 @@ class RetrievalAgentTest(unittest.TestCase):
     def test_ranking_batch_size_does_not_expand_for_large_candidate_sets(self):
         agent = PaperSeekAgent(config(ranking_batch_size=8), FakeLLM())
         self.assertEqual(agent._ranking_batch_size(100), 8)
+
+    def test_ranking_batch_prefers_structured_json_mode(self):
+        class StructuredRankingLLM:
+            def __init__(self):
+                self.calls = []
+
+            def chat_json(self, messages, temperature=0.3, max_tokens=None):
+                self.calls.append((messages, temperature, max_tokens))
+                return '{"scores":[{"uid":"a","score":9,"reasoning":"Direct match."}]}'
+
+            def chat(self, messages, temperature=0.3):
+                raise AssertionError("plain chat must not be used when chat_json is available")
+
+        llm = StructuredRankingLLM()
+        agent = PaperSeekAgent(config(), llm)
+
+        scores = agent._score_ranking_batch("graph retrieval", [record("a", "Graph retrieval")], llm)
+
+        self.assertEqual(scores, [{"uid": "a", "score": 9, "reasoning": "Direct match."}])
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(llm.calls[0][1:], (0.0, 4096))
+
+    def test_ranking_batch_retries_only_candidates_missing_from_partial_output(self):
+        class PartialRankingLLM:
+            def __init__(self):
+                self.requests = []
+
+            def chat_json(self, messages, temperature=0.0, max_tokens=None):
+                prompt = messages[-1]["content"]
+                uids = re.findall(r"UID: ([^\n]+)", prompt)
+                self.requests.append(uids)
+                selected = uids[:-1] if len(self.requests) == 1 else uids
+                return json.dumps({
+                    "scores": [
+                        {"uid": uid, "score": 8, "reasoning": "Relevant."}
+                        for uid in selected
+                    ]
+                })
+
+        llm = PartialRankingLLM()
+        documents = [record(f"W{index}", f"Paper {index}") for index in range(16)]
+        agent = PaperSeekAgent(config(), llm)
+
+        scores = agent._score_ranking_batch("graph retrieval", documents, llm)
+
+        self.assertEqual(len(scores), 16)
+        self.assertEqual(len(llm.requests), 2)
+        self.assertEqual(llm.requests[1], ["W15"])
+
+    def test_ranking_batch_receives_stable_search_plan_context(self):
+        class StructuredRankingLLM:
+            def __init__(self):
+                self.messages = []
+
+            def chat_json(self, messages, temperature=0.0, max_tokens=None):
+                self.messages = messages
+                return '{"scores":[{"uid":"a","score":8,"reasoning":"Relevant."}]}'
+
+        llm = StructuredRankingLLM()
+        agent = PaperSeekAgent(config(), llm)
+        agent.search_plan = SearchPlan(
+            intent="Find methods that extend Global Descent",
+            question_type="specific_relation",
+            core_concepts=["Global Descent", "deep learning"],
+            boundaries=["Exclude unrelated optimization domains"],
+        )
+
+        agent._score_ranking_batch("Which works extend Global Descent?", [record("a", "A paper")], llm)
+
+        prompt = llm.messages[-1]["content"]
+        self.assertIn("Stable SearchPlan", prompt)
+        self.assertIn("Find methods that extend Global Descent", prompt)
+        self.assertIn("Exclude unrelated optimization domains", prompt)
 
     def test_external_embedding_uses_openai_compatible_endpoint(self):
         agent = PaperSeekAgent(

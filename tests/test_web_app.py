@@ -1,11 +1,22 @@
+import json
+import socket
+import tempfile
+import time
 import unittest
+from pathlib import Path
+from threading import Event, Thread
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+import requests
+import uvicorn
 
+from paperseek.search_agent import SearchCancelled
+from paperseek.history import HistoryStore
+from paperseek.llm_client import LLMError
 from paperseek.web_app import app
-from paperseek.web_app import SearchRequest, _config_from_payload
-from tests.helpers import CONFIG_ENV_KEYS, temporary_env
+from paperseek.web_app import SearchRequest, _config_from_payload, _register_cancel_event, _unregister_cancel_event
+from tests.helpers import CONFIG_ENV_KEYS, fake_harness_search_result, temporary_env
 
 
 SOURCE_IDS = ["openalex", "arxiv", "semanticscholar", "pubmed", "googlescholar", "paperhub", "crossref", "wos"]
@@ -95,18 +106,7 @@ class WebAppTest(unittest.TestCase):
                 self.llm = llm
 
             def search(self, question, verbose=False, event_handler=None):
-                return {
-                    "question": question,
-                    "source": self.config.data_source,
-                    "final_query": "graph neural networks",
-                    "db": self.config.data_source.upper(),
-                    "field": "",
-                    "total": 0,
-                    "iterations": 1,
-                    "history": [],
-                    "citation_map": {},
-                    "ranked": [],
-                }
+                return fake_harness_search_result(question, self.config.data_source)
 
         with patch("paperseek.web_app.create_llm_client", return_value=object()), patch(
             "paperseek.web_app.PaperSeekAgent", FakeAgent
@@ -127,7 +127,219 @@ class WebAppTest(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["source"], "arxiv")
+        payload = response.json()
+        self.assertEqual(payload["source"], "arxiv")
+        self.assertEqual(payload["search_loop"]["backend_used"], "native")
+        self.assertEqual(payload["search_state"]["candidate_queue"]["origin_counts"]["retrieval"], 1)
+        self.assertEqual(payload["ranking_steps"][0]["id"], "llm_ranking")
+
+    def test_stream_search_result_preserves_harness_payload(self):
+        cancel_checks = []
+
+        class FakeAgent:
+            def __init__(self, config, llm):
+                self.config = config
+                self.llm = llm
+
+            def search(self, question, verbose=False, event_handler=None, cancel_check=None):
+                cancel_checks.append(cancel_check)
+                if event_handler:
+                    event_handler({"type": "log", "message": "fake progress"})
+                return fake_harness_search_result(question, self.config.data_source)
+
+        with temporary_env({"PAPERSEEK_HISTORY_ENABLED": "false"}, clear=("PAPERSEEK_HISTORY_ENABLED",)):
+            with patch("paperseek.web_app.create_llm_client", return_value=object()), patch(
+                "paperseek.web_app.PaperSeekAgent", FakeAgent
+            ):
+                response = self.client.post(
+                    "/api/search/stream",
+                    json={
+                        "question": "graph neural networks",
+                        "data_source": "arxiv",
+                        "llm_provider": "ollama",
+                        "llm_api_type": "openai_chat",
+                        "llm_model": "qwen3:8b",
+                        "llm_base_url": "http://127.0.0.1:11434/v1",
+                        "target_min": 0,
+                        "target_max": 5,
+                        "max_iterations": 1,
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        events = [
+            json.loads(line)
+            for line in response.text.splitlines()
+            if line.strip() and line.strip().startswith("{")
+        ]
+        result_events = [event for event in events if event.get("type") == "result"]
+        self.assertEqual(len(result_events), 1)
+        payload = result_events[0]["data"]
+        self.assertEqual(payload["search_loop"]["backend_used"], "native")
+        self.assertEqual(payload["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
+        self.assertEqual(payload["ranking_steps"][0]["status"], "complete")
+        self.assertTrue(callable(cancel_checks[0]))
+
+    def test_stream_failure_saves_partial_harness_payload(self):
+        class FailingAgent:
+            def __init__(self, config, llm):
+                self.config = config
+                self.llm = llm
+
+            def search(self, question, verbose=False, event_handler=None, cancel_check=None):
+                if event_handler:
+                    event_handler({"type": "log", "message": "fake failure after state update"})
+                raise LLMError("ranking timeout")
+
+            def partial_result_payload(self, question=""):
+                payload = fake_harness_search_result(question, self.config.data_source)
+                payload["total"] = 1200
+                payload["iterations"] = 3
+                payload["history"] = [{"iteration": 3, "total": 1200, "action": "narrow"}]
+                payload["ranking_steps"] = [{"id": "llm_ranking", "status": "processing"}]
+                payload["ranked"] = []
+                return payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "paperseek.db")
+            with temporary_env(
+                {"PAPERSEEK_HISTORY_ENABLED": "true", "PAPERSEEK_HISTORY_DB": db_path},
+                clear=("PAPERSEEK_HISTORY_ENABLED", "PAPERSEEK_HISTORY_DB"),
+            ):
+                with patch("paperseek.web_app.create_llm_client", return_value=object()), patch(
+                    "paperseek.web_app.PaperSeekAgent", FailingAgent
+                ):
+                    response = self.client.post(
+                        "/api/search/stream",
+                        json={
+                            "question": "graph neural networks",
+                            "data_source": "arxiv",
+                            "llm_provider": "ollama",
+                            "llm_api_type": "openai_chat",
+                            "llm_model": "qwen3:8b",
+                            "llm_base_url": "http://127.0.0.1:11434/v1",
+                            "target_min": 0,
+                            "target_max": 5,
+                            "max_iterations": 1,
+                        },
+                    )
+
+                events = [
+                    json.loads(line)
+                    for line in response.text.splitlines()
+                    if line.strip() and line.strip().startswith("{")
+                ]
+                run_id = next(event["run_id"] for event in events if event.get("type") == "run")
+                detail = HistoryStore(db_path=db_path, enabled=True).get_run(run_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["status"], "error")
+        self.assertEqual(detail["error_message"], "ranking timeout")
+        self.assertEqual(detail["history"][0]["action"], "narrow")
+        self.assertEqual(detail["search_loop"]["backend_used"], "native")
+        self.assertEqual(detail["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
+        self.assertEqual(detail["ranking_steps"][0]["status"], "processing")
+
+    def test_cancel_endpoint_sets_active_run_event(self):
+        cancel_event = Event()
+        _register_cancel_event("run_cancel_test", cancel_event)
+        try:
+            response = self.client.post("/api/search/run_cancel_test/cancel")
+        finally:
+            _unregister_cancel_event("run_cancel_test", cancel_event)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(cancel_event.is_set())
+
+    def test_cancel_endpoint_rejects_inactive_run(self):
+        response = self.client.post("/api/search/run_not_active/cancel")
+        self.assertEqual(response.status_code, 404)
+
+    def test_stream_cancel_endpoint_interrupts_active_search(self):
+        cancel_seen = Event()
+
+        class BlockingAgent:
+            def __init__(self, config, llm):
+                self.config = config
+                self.llm = llm
+
+            def search(self, question, verbose=False, event_handler=None, cancel_check=None):
+                if event_handler:
+                    event_handler({"type": "log", "message": "blocking fake search started"})
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if cancel_check and cancel_check():
+                        cancel_seen.set()
+                        raise SearchCancelled("Search cancelled by user.")
+                    time.sleep(0.01)
+                raise AssertionError("stream search was not cancelled")
+
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+        thread = Thread(target=server.run, daemon=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            with temporary_env(
+                {
+                    "PAPERSEEK_HISTORY_ENABLED": "true",
+                    "PAPERSEEK_HISTORY_DB": str(Path(tmp) / "paperseek.db"),
+                },
+                clear=("PAPERSEEK_HISTORY_ENABLED", "PAPERSEEK_HISTORY_DB"),
+            ):
+                with patch("paperseek.web_app.create_llm_client", return_value=object()), patch(
+                    "paperseek.web_app.PaperSeekAgent", BlockingAgent
+                ):
+                    thread.start()
+                    deadline = time.monotonic() + 5
+                    while not server.started and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(server.started)
+                    events = []
+                    run_id = ""
+                    try:
+                        with requests.post(
+                            f"http://127.0.0.1:{port}/api/search/stream",
+                            json={
+                                "question": "graph neural networks",
+                                "data_source": "arxiv",
+                                "llm_provider": "ollama",
+                                "llm_api_type": "openai_chat",
+                                "llm_model": "qwen3:8b",
+                                "llm_base_url": "http://127.0.0.1:11434/v1",
+                                "target_min": 0,
+                                "target_max": 5,
+                                "max_iterations": 1,
+                            },
+                            stream=True,
+                            timeout=(3, 10),
+                        ) as response:
+                            self.assertEqual(response.status_code, 200)
+                            for raw_line in response.iter_lines(chunk_size=1, decode_unicode=True):
+                                if not raw_line:
+                                    continue
+                                event = json.loads(raw_line)
+                                events.append(event)
+                                if event.get("type") == "run":
+                                    run_id = event["run_id"]
+                                    cancel_response = requests.post(
+                                        f"http://127.0.0.1:{port}/api/search/{run_id}/cancel",
+                                        timeout=3,
+                                    )
+                                    self.assertEqual(cancel_response.status_code, 200)
+                                if event.get("type") == "cancelled":
+                                    break
+                    finally:
+                        server.should_exit = True
+                        thread.join(timeout=5)
+
+        self.assertTrue(cancel_seen.is_set())
+        self.assertTrue(run_id)
+        self.assertEqual(events[-1]["type"], "cancelled")
+        self.assertIn("cancelled", events[-1]["message"].lower())
 
     def test_config_from_payload_preserves_environment_credentials_when_form_keys_are_blank(self):
         with temporary_env({
@@ -156,6 +368,74 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(config.llm_provider, "deepseek")
             self.assertEqual(config.llm_model, "deepseek-test")
             self.assertEqual(config.discipline_fields, ("17", "14"))
+            self.assertEqual(config.search_loop_backend, "auto")
+
+    def test_config_from_payload_applies_search_loop_backend(self):
+        payload = SearchRequest(
+            question="open innovation",
+            data_source="openalex",
+            llm_provider="ollama",
+            llm_api_type="openai_chat",
+            search_loop_backend="native",
+        )
+        config = _config_from_payload(payload)
+        self.assertEqual(config.search_loop_backend, "native")
+
+    def test_default_search_budget_is_fast(self):
+        payload = SearchRequest(question="open innovation")
+        config = _config_from_payload(payload)
+
+        self.assertEqual(payload.search_budget, "fast")
+        self.assertEqual(config.search_budget, "fast")
+        self.assertEqual(payload.retrieval_lane_limit, 500)
+        self.assertEqual(config.retrieval_lane_limit, 500)
+        self.assertEqual(config.retrieval_pool_max, 3000)
+        self.assertEqual(config.ranking_candidate_limit, 256)
+        self.assertEqual(config.citation_seed_count, 3)
+        self.assertEqual(config.citation_max_records, 40)
+        self.assertFalse(config.llm_thinking_enabled)
+
+    def test_fast_search_budget_uses_minimum_request_limits(self):
+        config = _config_from_payload(SearchRequest(question="open innovation", search_budget="fast"))
+
+        self.assertEqual(config.max_iterations, 5)
+        self.assertEqual(config.query_portfolio_max, 3)
+        self.assertEqual(config.retrieval_lane_limit, 500)
+        self.assertEqual(config.retrieval_pool_max, 3000)
+        self.assertEqual(config.ranking_candidate_limit, 256)
+        self.assertEqual(config.citation_seed_count, 3)
+        self.assertEqual(config.citation_max_records, 40)
+        self.assertFalse(config.llm_thinking_enabled)
+
+    def test_matching_web_budget_preserves_granular_environment_overrides(self):
+        with temporary_env(
+            {
+                "SEARCH_BUDGET": "high",
+                "RANKING_CANDIDATE_LIMIT": "333",
+                "RETRIEVAL_POOL_MAX": "6000",
+            },
+            clear=CONFIG_ENV_KEYS,
+        ):
+            config = _config_from_payload(
+                SearchRequest(question="open innovation", search_budget="high")
+            )
+
+        self.assertEqual(config.search_budget, "high")
+        self.assertEqual(config.ranking_candidate_limit, 333)
+        self.assertEqual(config.retrieval_pool_max, 6000)
+
+    def test_config_from_payload_applies_query_portfolio_budget(self):
+        payload = SearchRequest(
+            question="image retrieval",
+            data_source="openalex",
+            query_portfolio_enabled=False,
+            query_portfolio_max=1,
+            query_portfolio_limit=40,
+        )
+        config = _config_from_payload(payload)
+        self.assertFalse(config.query_portfolio_enabled)
+        self.assertEqual(config.query_portfolio_max, 1)
+        self.assertEqual(config.query_portfolio_limit, 40)
 
     def test_config_from_payload_uses_text_hint_for_sources_without_native_filter(self):
         payload = SearchRequest(
@@ -185,6 +465,11 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["llm_provider"], "deepseek")
+            self.assertEqual(payload["search_loop_backend"], "auto")
+            self.assertEqual(payload["search_budget"], "fast")
+            self.assertTrue(payload["query_portfolio_enabled"])
+            self.assertEqual(payload["query_portfolio_max"], 3)
+            self.assertEqual(payload["query_portfolio_limit"], 100)
             self.assertTrue(payload["has_llm_api_key"])
             self.assertTrue(payload["has_openalex_api_key"])
             self.assertNotIn("sk-env-test", response.text)

@@ -137,6 +137,46 @@ class SkillLauncherTest(unittest.TestCase):
         self.assertEqual(records[0]["title"], "Recovered Scholar Result")
         self.assertEqual(records[0]["authors"], [])
 
+    def test_standalone_paperhub_matches_required_boolean_groups_and_metadata(self):
+        runtime = self._load_runtime()
+        runtime.PAPERHUB_CACHE = [
+            {"id": "a", "title": "Graph Neural Retrieval", "abstract": "retrieval benchmark", "conference": "ICLR", "year": 2026},
+            {"id": "b", "title": "Graph Neural Networks Survey", "abstract": "retrieval benchmark", "conference": "ICLR", "year": 2026},
+            {"id": "c", "title": "Graph Neural Retrieval", "abstract": "retrieval benchmark", "conference": "NeurIPS", "year": 2026},
+            {"id": "d", "title": "Graph Generation", "abstract": "generation benchmark", "conference": "ICLR", "year": 2026},
+        ]
+
+        records, total, _ = runtime.fetch_paperhub(
+            '"graph neural" OR GNN retrieval -survey conference:ICLR year:2026',
+            10,
+            {},
+        )
+
+        self.assertEqual(total, 1)
+        self.assertEqual([record["id"] for record in records], ["a"])
+
+    def test_standalone_paperhub_does_not_cache_partial_manifest(self):
+        runtime = self._load_runtime()
+        runtime.PAPERHUB_CACHE = None
+
+        def fake_http_json(url, method="GET", headers=None, payload=None):
+            if url.endswith("manifest.json"):
+                return {
+                    "shards": [
+                        {"count": 1, "file": "shards/good.fake.json"},
+                        {"count": 1, "file": "shards/broken.fake.json"},
+                    ]
+                }
+            if url.endswith("good.fake.json"):
+                return {"papers": [{"id": "good", "title": "Good"}]}
+            raise RuntimeError("shard unavailable")
+
+        runtime.http_json = fake_http_json
+        with self.assertRaisesRegex(RuntimeError, "shard unavailable"):
+            runtime.load_paperhub_papers()
+
+        self.assertIsNone(runtime.PAPERHUB_CACHE)
+
     def test_standalone_google_scholar_cleans_summary_metadata(self):
         runtime = self._load_runtime()
 

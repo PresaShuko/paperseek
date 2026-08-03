@@ -21,13 +21,12 @@ Configuration is read from environment variables or ``.env``,
 identical to the CLI and Web UI.
 """
 
-from __future__ import annotations
 
 import json
 import re
-import sys
 from typing import Any, Dict, List, Optional
 
+from paperseek_core.budgets import apply_search_budget
 from paperseek.config import AgentConfig
 from paperseek.config_store import load_user_config_into_env
 from paperseek.diagnostics import run_doctor, smoke_source
@@ -96,12 +95,14 @@ def _build_search_config(
     target_min: int = 0,
     target_max: int = 0,
     max_iterations: int = 0,
+    search_loop_backend: str = "",
     retrieval_pool_max: int = 0,
     retrieval_lane_limit: int = 0,
     ranking_candidate_limit: int = 0,
     retrieval_embedding_provider: str = "",
     expand_citations: Optional[bool] = None,
     fetch_abstracts: Optional[bool] = None,
+    search_budget: str = "",
 ) -> AgentConfig:
     """Build an :class:`AgentConfig` from the environment with optional overrides.
 
@@ -111,6 +112,8 @@ def _build_search_config(
     forces the corresponding config field.
     """
     config = AgentConfig.from_env()
+    if search_budget:
+        apply_search_budget(config, search_budget)
     if source:
         config.data_source = source
     if field:
@@ -123,6 +126,11 @@ def _build_search_config(
         config.target_max = target_max
     if max_iterations > 0:
         config.max_iterations = max_iterations
+    if search_loop_backend:
+        backend = search_loop_backend.strip().lower()
+        if backend not in {"auto", "langgraph", "native"}:
+            raise ValueError("search_loop_backend must be one of auto, langgraph, native")
+        config.search_loop_backend = backend
     if retrieval_pool_max > 0:
         config.retrieval_pool_max = retrieval_pool_max
     if retrieval_lane_limit > 0:
@@ -146,12 +154,14 @@ def search_papers_logic(
     target_min: int = 0,
     target_max: int = 0,
     max_iterations: int = 0,
+    search_loop_backend: str = "",
     retrieval_pool_max: int = 0,
     retrieval_lane_limit: int = 0,
     ranking_candidate_limit: int = 0,
     retrieval_embedding_provider: str = "",
     expand_citations: Optional[bool] = None,
     fetch_abstracts: Optional[bool] = None,
+    search_budget: str = "",
 ) -> Dict[str, Any]:
     """Execute a literature search and return a structured result dict.
 
@@ -166,11 +176,13 @@ def search_papers_logic(
 
     config = _build_search_config(
         source=source,
+        search_budget=search_budget,
         field=field,
         discipline_fields=discipline_fields,
         target_min=target_min,
         target_max=target_max,
         max_iterations=max_iterations,
+        search_loop_backend=search_loop_backend,
         retrieval_pool_max=retrieval_pool_max,
         retrieval_lane_limit=retrieval_lane_limit,
         ranking_candidate_limit=ranking_candidate_limit,
@@ -246,32 +258,29 @@ def get_history_run_logic(run_id: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# MCP server — requires the optional ``mcp`` package and Python 3.10+.
+# MCP server — requires the optional ``mcp`` package.
 # ---------------------------------------------------------------------------
 
 
 def create_server():
-    """Create and return the ``FastMCP`` server instance.
+    """Create and return the MCP server instance.
 
     Requires the ``mcp`` package::
 
         pip install paperseek[mcp]
     """
-    if sys.version_info < (3, 10):
-        raise RuntimeError(
-            "PaperSeek MCP server requires Python 3.10 or later. "
-            f"Current: {sys.version}"
-        )
-
     try:
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.fastmcp import FastMCP as MCPServer
     except ImportError:
-        raise ImportError(
-            "The 'mcp' package is required for the MCP server. "
-            "Install it with: pip install paperseek[mcp]"
-        )
+        try:
+            from mcp.server.mcpserver import MCPServer
+        except ImportError as exc:
+            raise ImportError(
+                "The 'mcp' package is required for the MCP server. "
+                "Install it with: pip install paperseek[mcp]"
+            ) from exc
 
-    mcp = FastMCP("paperseek")
+    mcp = MCPServer("paperseek")
 
     @mcp.tool()
     def search_papers(
@@ -282,12 +291,14 @@ def create_server():
         target_min: int = 0,
         target_max: int = 0,
         max_iterations: int = 0,
+        search_loop_backend: str = "",
         retrieval_pool_max: int = 0,
         retrieval_lane_limit: int = 0,
         ranking_candidate_limit: int = 0,
         retrieval_embedding_provider: str = "",
         expand_citations: bool | None = None,
         fetch_abstracts: bool | None = None,
+        search_budget: str = "",
     ) -> str:
         """Search academic literature for a research question.
 
@@ -301,11 +312,18 @@ def create_server():
             question: Research question in natural language (required).
             source: Data source: "openalex" (default), "arxiv",
                 "semanticscholar", "pubmed", "googlescholar", "paperhub", "crossref", or "wos".
+            search_budget: Search breadth preset: "fast", "medium", "high", or
+                "max". Omit to use ``SEARCH_BUDGET`` (default: "fast").
             field: Optional discipline or field hint for query generation.
             discipline_fields: OpenAlex Field IDs or labels, e.g. ["Computer Science", "17"].
             target_min: Minimum target results (default from env: 5).
             target_max: Maximum target results (default from env: 50).
-            max_iterations: Max query refinement cycles (default from env: 5).
+            max_iterations: Optional explicit query-refinement override; the
+                fast search budget uses 5 before adaptive recovery.
+            search_loop_backend: Search loop controller backend: "auto",
+                "native", or "langgraph". "auto" and "native" use the
+                built-in controller; "langgraph" enables the LangGraph state
+                machine. Omit to use env/default config.
             retrieval_pool_max: Maximum fused candidates before LLM ranking.
             retrieval_lane_limit: Maximum records fetched per retrieval lane.
             ranking_candidate_limit: Maximum pre-ranked candidates sent to LLM scoring.
@@ -322,11 +340,13 @@ def create_server():
         result = search_papers_logic(
             question=question,
             source=source,
+            search_budget=search_budget,
             field=field,
             discipline_fields=discipline_fields,
             target_min=target_min,
             target_max=target_max,
             max_iterations=max_iterations,
+            search_loop_backend=search_loop_backend,
             retrieval_pool_max=retrieval_pool_max,
             retrieval_lane_limit=retrieval_lane_limit,
             ranking_candidate_limit=ranking_candidate_limit,

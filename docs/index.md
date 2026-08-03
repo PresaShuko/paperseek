@@ -16,6 +16,9 @@ hero:
       text: 阅读开源版手册
       link: /user-manual
     - theme: alt
+      text: v0.3.0 更新说明
+      link: /v0.3.0
+    - theme: alt
       text: 在线体验版说明
       link: /online-demo
     - theme: alt
@@ -40,6 +43,8 @@ features:
 ---
 
 ## 选择你的入口
+
+当前社区版为 `v0.3.0`，新增结构化检索计划、互补查询视角、可恢复检索循环和渐进式过程审计。升级前请先阅读 [v0.3.0 更新说明](v0.3.0.md)。
 
 PaperSeek 的社区文档分为两个主要入口：
 

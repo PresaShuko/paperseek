@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
@@ -188,7 +187,7 @@ SOURCE_METADATA: Dict[str, SourceMetadata] = {
         id="paperhub",
         display_name="Computer science top conferences",
         status="supported",
-        description="Computer science top-conference paper index, currently covering selected ICLR, ICML, NeurIPS, AAAI, and NDSS proceedings.",
+        description="Manifest-driven computer science top-conference index from paper-hub, covering selected ICLR, ICML, NeurIPS, AAAI, and NDSS proceedings.",
         api_key="not_required",
         supports_abstracts=True,
         supports_citations=False,
@@ -201,7 +200,7 @@ SOURCE_METADATA: Dict[str, SourceMetadata] = {
             "max_iterations",
         ] + RETRIEVAL_PARAMETERS,
         notes=[
-            "Downloads and caches computer science top-conference index shards at runtime.",
+            "Reads the current paper-hub manifest and downloads its content-addressed index shards at runtime.",
             "Best for top ML/security conference discovery rather than exhaustive bibliographic coverage.",
             "Computer-science field/context hints are used only to help the LLM choose better query terms.",
         ],

@@ -1,13 +1,13 @@
-from __future__ import annotations
 
 from pathlib import Path
+import inspect
 import json
 import logging
 from queue import Empty, Queue
 import re
 import time
-from threading import Thread
-from typing import List, Optional
+from threading import Event, Lock, Thread
+from typing import Any, List, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -16,6 +16,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from paperseek_core.budgets import (
+    DEFAULT_SEARCH_BUDGET,
+    apply_search_budget,
+    normalize_search_budget,
+    search_budget_preset,
+)
 from paperseek.client import ApiException
 from paperseek.config import AgentConfig, default_api_type, default_base_url, default_model
 from paperseek.diagnostics import run_doctor, smoke_source
@@ -30,7 +36,7 @@ from paperseek.env_loader import load_env_file
 from paperseek.history import HistoryStore, result_payload_from_search_result, safe_search_params_from_config
 from paperseek.llm_client import LLMError, create_llm_client
 from paperseek.providers import ProviderError
-from paperseek.search_agent import PaperSeekAgent
+from paperseek.search_agent import PaperSeekAgent, SearchCancelled
 from paperseek.source_metadata import list_source_metadata, supported_source_ids
 
 
@@ -43,6 +49,9 @@ load_env_file()
 app = FastAPI(title="PaperSeek", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 logger = logging.getLogger("paperseek.web_app")
+_CANCEL_LOCK = Lock()
+_CANCEL_EVENTS: dict[str, Event] = {}
+_DEFAULT_WEB_BUDGET = search_budget_preset(DEFAULT_SEARCH_BUDGET)
 
 
 FIELD_LABELS = {
@@ -64,12 +73,22 @@ FIELD_LABELS = {
     "target_min": "Min Results",
     "target_max": "Max Results",
     "max_iterations": "Iterations",
+    "search_budget": "Search Budget",
+    "search_loop_backend": "Search Loop Backend",
 }
+
+
+def _clean_search_loop_backend(value: str) -> str:
+    value = (value or "auto").strip().lower() or "auto"
+    if value not in {"auto", "langgraph", "native"}:
+        raise ValueError("must be one of auto, langgraph, native")
+    return value
 
 
 class SearchRequest(BaseModel):
     question: str = Field(min_length=1)
     data_source: str = "openalex"
+    search_budget: str = DEFAULT_SEARCH_BUDGET
     wos_api_key: Optional[str] = ""
     openalex_api_key: Optional[str] = ""
     openalex_email: Optional[str] = ""
@@ -94,11 +113,15 @@ class SearchRequest(BaseModel):
     expand_citations: bool = True
     target_min: int = Field(default=5, ge=0, le=50)
     target_max: int = Field(default=50, ge=1, le=50)
-    max_iterations: int = Field(default=5, ge=1, le=10)
-    retrieval_pool_max: int = Field(default=3000, ge=1, le=3000)
+    max_iterations: int = Field(default=_DEFAULT_WEB_BUDGET.max_iterations, ge=1, le=36)
+    search_loop_backend: str = "auto"
+    retrieval_pool_max: int = Field(default=_DEFAULT_WEB_BUDGET.retrieval_pool_max, ge=1, le=10000)
     retrieval_pool_min: int = Field(default=5, ge=0, le=50)
-    retrieval_lane_limit: int = Field(default=1000, ge=1, le=1000)
+    retrieval_lane_limit: int = Field(default=_DEFAULT_WEB_BUDGET.retrieval_lane_limit, ge=1, le=1000)
     retrieval_rrf_k: int = Field(default=60, ge=1, le=1000)
+    query_portfolio_enabled: bool = True
+    query_portfolio_max: int = Field(default=_DEFAULT_WEB_BUDGET.query_portfolio_max, ge=1, le=6)
+    query_portfolio_limit: int = Field(default=_DEFAULT_WEB_BUDGET.query_portfolio_limit, ge=1, le=100)
     retrieval_embedding_provider: Optional[str] = ""
     retrieval_embedding_model: Optional[str] = ""
     retrieval_embedding_base_url: Optional[str] = ""
@@ -108,6 +131,7 @@ class SearchRequest(BaseModel):
     retrieval_reranker_base_url: Optional[str] = ""
     retrieval_reranker_api_key: Optional[str] = ""
     retrieval_crossref_enrichment: bool = False
+    resume_run_id: Optional[str] = ""
 
     @field_validator("question")
     @classmethod
@@ -126,6 +150,16 @@ class SearchRequest(BaseModel):
     @classmethod
     def clean_api_type(cls, value: str) -> str:
         return (value or "").strip().lower()
+
+    @field_validator("search_loop_backend")
+    @classmethod
+    def clean_search_loop_backend(cls, value: str) -> str:
+        return _clean_search_loop_backend(value)
+
+    @field_validator("search_budget")
+    @classmethod
+    def clean_search_budget(cls, value: str) -> str:
+        return normalize_search_budget(value)
 
     @field_validator("data_source")
     @classmethod
@@ -153,6 +187,7 @@ class SearchRequest(BaseModel):
 class DiagnosticRequest(BaseModel):
     question: Optional[str] = "machine learning"
     data_source: str = "openalex"
+    search_budget: str = DEFAULT_SEARCH_BUDGET
     wos_api_key: Optional[str] = ""
     openalex_api_key: Optional[str] = ""
     openalex_email: Optional[str] = ""
@@ -177,10 +212,11 @@ class DiagnosticRequest(BaseModel):
     expand_citations: bool = True
     target_min: int = Field(default=5, ge=0, le=50)
     target_max: int = Field(default=50, ge=1, le=50)
-    max_iterations: int = Field(default=5, ge=1, le=10)
-    retrieval_pool_max: int = Field(default=3000, ge=1, le=3000)
+    max_iterations: int = Field(default=_DEFAULT_WEB_BUDGET.max_iterations, ge=1, le=36)
+    search_loop_backend: str = "auto"
+    retrieval_pool_max: int = Field(default=_DEFAULT_WEB_BUDGET.retrieval_pool_max, ge=1, le=10000)
     retrieval_pool_min: int = Field(default=5, ge=0, le=50)
-    retrieval_lane_limit: int = Field(default=1000, ge=1, le=1000)
+    retrieval_lane_limit: int = Field(default=_DEFAULT_WEB_BUDGET.retrieval_lane_limit, ge=1, le=1000)
     retrieval_rrf_k: int = Field(default=60, ge=1, le=1000)
     retrieval_embedding_provider: Optional[str] = ""
     retrieval_embedding_model: Optional[str] = ""
@@ -201,6 +237,16 @@ class DiagnosticRequest(BaseModel):
     @classmethod
     def clean_api_type(cls, value: str) -> str:
         return (value or "").strip().lower()
+
+    @field_validator("search_loop_backend")
+    @classmethod
+    def clean_search_loop_backend(cls, value: str) -> str:
+        return _clean_search_loop_backend(value)
+
+    @field_validator("search_budget")
+    @classmethod
+    def clean_search_budget(cls, value: str) -> str:
+        return normalize_search_budget(value)
 
     @field_validator("data_source")
     @classmethod
@@ -321,6 +367,7 @@ def config_defaults():
     config = AgentConfig.from_env()
     return {
         "data_source": config.data_source,
+        "search_budget": config.search_budget,
         "llm_provider": config.llm_provider,
         "llm_api_type": config.llm_api_type,
         "llm_model": config.llm_model,
@@ -329,6 +376,10 @@ def config_defaults():
         "target_min": config.target_min,
         "target_max": config.target_max,
         "max_iterations": config.max_iterations,
+        "search_loop_backend": config.search_loop_backend,
+        "query_portfolio_enabled": config.query_portfolio_enabled,
+        "query_portfolio_max": config.query_portfolio_max,
+        "query_portfolio_limit": config.query_portfolio_limit,
         "discipline_fields": list(getattr(config, "discipline_fields", ()) or []),
         "expand_citations": config.expand_citations,
         "fetch_abstracts": config.fetch_abstracts,
@@ -354,6 +405,9 @@ def _validate_payload(payload: SearchRequest):
 
 def _config_from_payload(payload: SearchRequest) -> AgentConfig:
     config = AgentConfig.from_env()
+    if payload.search_budget != config.search_budget:
+        apply_search_budget(config, payload.search_budget)
+    explicit_fields = payload.model_fields_set
     env_provider = config.llm_provider
     payload_provider = payload.llm_provider or config.llm_provider
     provider_changed = bool(payload.llm_provider and payload_provider != env_provider)
@@ -390,11 +444,22 @@ def _config_from_payload(payload: SearchRequest) -> AgentConfig:
     config.expand_citations = payload.expand_citations
     config.target_min = payload.target_min
     config.target_max = payload.target_max
-    config.max_iterations = payload.max_iterations
-    config.retrieval_pool_max = payload.retrieval_pool_max
+    if "max_iterations" in explicit_fields:
+        config.max_iterations = payload.max_iterations
+    config.search_loop_backend = _clean_search_loop_backend(getattr(payload, "search_loop_backend", "auto"))
+    if "retrieval_pool_max" in explicit_fields:
+        config.retrieval_pool_max = payload.retrieval_pool_max
     config.retrieval_pool_min = payload.retrieval_pool_min
-    config.retrieval_lane_limit = payload.retrieval_lane_limit
+    if "retrieval_lane_limit" in explicit_fields:
+        config.retrieval_lane_limit = payload.retrieval_lane_limit
     config.retrieval_rrf_k = payload.retrieval_rrf_k
+    config.query_portfolio_enabled = bool(
+        getattr(payload, "query_portfolio_enabled", config.query_portfolio_enabled)
+    )
+    if "query_portfolio_max" in explicit_fields:
+        config.query_portfolio_max = int(payload.query_portfolio_max)
+    if "query_portfolio_limit" in explicit_fields:
+        config.query_portfolio_limit = int(payload.query_portfolio_limit)
     config.retrieval_embedding_provider = (payload.retrieval_embedding_provider or config.retrieval_embedding_provider or "local").strip().lower()
     config.retrieval_embedding_model = payload.retrieval_embedding_model or config.retrieval_embedding_model
     config.retrieval_embedding_base_url = payload.retrieval_embedding_base_url or config.retrieval_embedding_base_url
@@ -431,8 +496,74 @@ def _response_payload(result: dict, source: str) -> dict:
     return result_payload_from_search_result(result, source)
 
 
-def _record_failure(store: HistoryStore, run_id: str, message: str) -> None:
-    store.fail_run(run_id, message)
+def _partial_payload_from_agent(agent: Any, question: str, source: str) -> Optional[dict]:
+    if agent is None or not hasattr(agent, "partial_result_payload"):
+        return None
+    try:
+        return _response_payload(agent.partial_result_payload(question), source)
+    except Exception:
+        return None
+
+
+def _record_failure(store: HistoryStore, run_id: str, message: str, agent: Any = None, question: str = "", source: str = "") -> None:
+    store.fail_run(run_id, message, payload=_partial_payload_from_agent(agent, question, source))
+
+
+def _resume_checkpoint(store: HistoryStore, payload: SearchRequest) -> Optional[dict[str, Any]]:
+    resume_run_id = str(payload.resume_run_id or "").strip()
+    if not resume_run_id:
+        return None
+    checkpoint = store.latest_checkpoint(resume_run_id)
+    if checkpoint is None:
+        raise ValueError("The selected search run has no recoverable checkpoint.")
+    return checkpoint["payload"]
+
+
+def _search_with_runtime_hooks(
+    agent: Any,
+    question: str,
+    *,
+    event_handler: Optional[Any] = None,
+    cancel_check: Optional[Any] = None,
+    checkpoint_handler: Optional[Any] = None,
+    resume_checkpoint: Optional[dict[str, Any]] = None,
+):
+    parameters = inspect.signature(agent.search).parameters
+    kwargs = {"verbose": False}
+    if "event_handler" in parameters and event_handler is not None:
+        kwargs["event_handler"] = event_handler
+    if "cancel_check" in parameters and cancel_check is not None:
+        kwargs["cancel_check"] = cancel_check
+    if "checkpoint_handler" in parameters and checkpoint_handler is not None:
+        kwargs["checkpoint_handler"] = checkpoint_handler
+    if "resume_checkpoint" in parameters and resume_checkpoint is not None:
+        kwargs["resume_checkpoint"] = resume_checkpoint
+    return agent.search(question, **kwargs)
+
+
+def _register_cancel_event(run_id: str, cancel_event: Event) -> None:
+    if not run_id:
+        return
+    with _CANCEL_LOCK:
+        _CANCEL_EVENTS[run_id] = cancel_event
+
+
+def _unregister_cancel_event(run_id: str, cancel_event: Event) -> None:
+    if not run_id:
+        return
+    with _CANCEL_LOCK:
+        if _CANCEL_EVENTS.get(run_id) is cancel_event:
+            _CANCEL_EVENTS.pop(run_id, None)
+
+
+@app.post("/api/search/{run_id}/cancel")
+def cancel_search(run_id: str):
+    with _CANCEL_LOCK:
+        cancel_event = _CANCEL_EVENTS.get(run_id)
+    if cancel_event is None:
+        raise HTTPException(status_code=404, detail="Search run is not active.")
+    cancel_event.set()
+    return {"cancelled": run_id}
 
 
 @app.get("/api/history/status")
@@ -479,13 +610,23 @@ def search(payload: SearchRequest):
     _validate_payload(payload)
     config = _config_from_payload(payload)
     store = _history_store_from_payload(payload)
-    run_id = store.create_run(payload.question, safe_search_params_from_config(config))
+    params = safe_search_params_from_config(config)
+    if payload.resume_run_id:
+        params["resume_from_run_id"] = payload.resume_run_id
+    run_id = store.create_run(payload.question, params)
+    agent = None
 
     try:
         config.validate()
         llm = create_llm_client(config)
         agent = PaperSeekAgent(config, llm)
-        result = agent.search(payload.question, verbose=False)
+        resume_checkpoint = _resume_checkpoint(store, payload)
+        result = _search_with_runtime_hooks(
+            agent,
+            payload.question,
+            checkpoint_handler=lambda checkpoint: store.save_checkpoint(run_id, checkpoint),
+            resume_checkpoint=resume_checkpoint,
+        )
         response = _response_payload(result, payload.data_source)
         if run_id:
             response["run_id"] = run_id
@@ -494,20 +635,20 @@ def search(payload: SearchRequest):
         _record_failure(store, run_id, str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LLMError as exc:
-        _record_failure(store, run_id, str(exc))
+        _record_failure(store, run_id, str(exc), agent, payload.question, payload.data_source)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ApiException as exc:
         message = _friendly_api_error(exc)
-        _record_failure(store, run_id, message)
+        _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
         raise HTTPException(status_code=502, detail=message) from exc
     except ProviderError as exc:
         message = _friendly_provider_error(exc)
-        _record_failure(store, run_id, message)
+        _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
         raise HTTPException(status_code=502, detail=message) from exc
     except Exception as exc:
         message = "Search failed. Check the local server logs for details."
         logger.exception("Unhandled search failure.")
-        _record_failure(store, run_id, message)
+        _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
         raise HTTPException(status_code=500, detail=message) from exc
 
     return response
@@ -524,6 +665,7 @@ def search_stream(payload: SearchRequest):
         events: Queue = Queue()
         store = _history_store_from_payload(payload)
         run_id = ""
+        cancel_event = Event()
 
         def send(event: dict):
             if event.get("type") != "result":
@@ -532,9 +674,14 @@ def search_stream(payload: SearchRequest):
 
         def worker():
             nonlocal run_id
+            agent = None
             try:
                 config = _config_from_payload(payload)
-                run_id = store.create_run(payload.question, safe_search_params_from_config(config))
+                params = safe_search_params_from_config(config)
+                if payload.resume_run_id:
+                    params["resume_from_run_id"] = payload.resume_run_id
+                run_id = store.create_run(payload.question, params)
+                _register_cancel_event(run_id, cancel_event)
                 if run_id:
                     send({"type": "run", "run_id": run_id})
                 send({"type": "log", "message": "Backend request accepted: POST /api/search/stream -> HTTP 200 OK."})
@@ -543,7 +690,7 @@ def search_stream(payload: SearchRequest):
                     "message": (
                         f"Runtime config: source={config.data_source}; llm_provider={config.llm_provider}; "
                         f"api_type={config.llm_api_type}; model={config.llm_model}; target={config.target_min}-{config.target_max}; "
-                        f"iterations={config.max_iterations}."
+                        f"iterations={config.max_iterations}; search_budget={config.search_budget}."
                     ),
                 })
                 config.validate()
@@ -551,7 +698,15 @@ def search_stream(payload: SearchRequest):
                 llm = create_llm_client(config)
                 send({"type": "log", "message": "Initializing source adapter."})
                 agent = PaperSeekAgent(config, llm)
-                result = agent.search(payload.question, verbose=False, event_handler=send)
+                resume_checkpoint = _resume_checkpoint(store, payload)
+                result = _search_with_runtime_hooks(
+                    agent,
+                    payload.question,
+                    event_handler=send,
+                    cancel_check=cancel_event.is_set,
+                    checkpoint_handler=lambda checkpoint: store.save_checkpoint(run_id, checkpoint),
+                    resume_checkpoint=resume_checkpoint,
+                )
                 response = _response_payload(result, payload.data_source)
                 if run_id:
                     response["run_id"] = run_id
@@ -564,22 +719,27 @@ def search_stream(payload: SearchRequest):
                 send({"type": "error", "message": message})
             except LLMError as exc:
                 message = str(exc)
-                _record_failure(store, run_id, message)
+                _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
                 send({"type": "error", "message": message})
             except ApiException as exc:
                 message = _friendly_api_error(exc)
-                _record_failure(store, run_id, message)
+                _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
                 send({"type": "error", "message": message})
             except ProviderError as exc:
                 message = _friendly_provider_error(exc)
-                _record_failure(store, run_id, message)
+                _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
                 send({"type": "error", "message": message})
+            except SearchCancelled as exc:
+                message = str(exc) or "Search cancelled by user."
+                _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
+                send({"type": "cancelled", "message": message})
             except Exception:
                 message = "Search failed. Check the local server logs for details."
                 logger.exception("Unhandled streaming search failure.")
-                _record_failure(store, run_id, message)
+                _record_failure(store, run_id, message, agent, payload.question, payload.data_source)
                 send({"type": "error", "message": message})
             finally:
+                _unregister_cancel_event(run_id, cancel_event)
                 events.put(None)
 
         Thread(target=worker, daemon=True).start()

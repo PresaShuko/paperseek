@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://pypi.org/project/paperseek/"><img alt="PyPI" src="https://img.shields.io/pypi/v/paperseek?color=3775A9&label=PyPI"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
   <a href="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml/badge.svg"></a>
@@ -48,6 +48,17 @@
 
 ## Release Notes
 
+### v0.3.0 - Search Planning, Recoverable Loops, and Progressive Audit
+
+- Added a structured SearchPlan that identifies core concepts, required and optional facets, relation constraints, and ambiguities before compiling a source-specific query. Query generation and revision now use validated JSON contracts and retry malformed or source-invalid output before contacting a provider.
+- Added a bounded Query Portfolio and candidate ledger. PaperSeek plans at least three complementary views, selects useful non-duplicate views within the active budget, and records candidate provenance, deduplication, and recovery decisions.
+- Reworked the search loop as an explicit state machine with a native runner and an optional LangGraph backend. Stops, failures, and transient network errors preserve partial results and checkpoints so a run can resume from the latest safe stage.
+- Added `fast`, `medium`, `high`, and `max` search budgets. The default `fast` mode disables optional model thinking and limits requests, while higher budgets expand query, retrieval, ranking, and citation capacity together.
+- Reworked the Web UI into a progressive audit view: the active stage opens automatically, completed stages collapse to useful summaries, and error or recovery details remain available on demand. Completed searches stay on the workflow page until the user opens Results or Citation Map.
+- This refactor draws on PASA's Crawler/Selector split and candidate queue, PydanticAI's structured-output validation, LangGraph's explicit state graphs, and ARIS's checkpoint and recovery audit patterns. The computer-science conference source continues to use the PaperHub integration with the author's permission. See [Third-party notices](THIRD_PARTY_NOTICES.md) for full acknowledgements.
+- Replaced the WoS Starter client with a lightweight independent adapter that keeps the request, error, and response-model interfaces PaperSeek needs, with tests for authentication headers, parameters, parsing, and HTTP errors.
+- The minimum supported Python version is now 3.10. See the [v0.3.0 release notes](docs/v0.3.0.md) for upgrade steps, configuration changes, and compatibility boundaries.
+
 ### v0.2.1 - Hosted Service and Model Routing
 
 - Hosted PaperSeek Service now exposes Semantic Scholar, PubMed, and Crossref. Crossref does not require an API key.
@@ -64,7 +75,7 @@
 ### v0.1.1 - Language, History, and Discipline Filters
 
 - The Web UI supports `EN` / `中文` language switching, with the selected language saved in the current browser. See [#10](https://github.com/MingfengHong/paperseek/issues/10).
-- Added local history persistence for search runs, log events, generated queries, and results, making it easier to revisit runs and laying groundwork for future stage-level resume support. See [#2](https://github.com/MingfengHong/paperseek/issues/2).
+- Added local history persistence for search runs, log events, generated queries, and results, making it easier to revisit runs and restore result views. See [#2](https://github.com/MingfengHong/paperseek/issues/2).
 - Improved CSV and log export filenames by using the research-question theme and local timestamp for easier identification. See [#3](https://github.com/MingfengHong/paperseek/issues/3).
 - Added OpenAlex Field discipline filtering and passed the selected fields into citation expansion so the candidate pool stays closer to the selected domain.
 
@@ -77,12 +88,13 @@ PaperSeek focuses on first-pass paper discovery and metadata organization, helpi
 ## What PaperSeek Does
 
 - **Understands research questions**: generate source-specific queries for OpenAlex, arXiv, Semantic Scholar, PubMed, Google Scholar through Serper, computer science top conferences, Crossref, or WoS Starter from Chinese or English input.
-- **Calibrates search strings**: broaden or narrow queries according to target result counts. The default starts with 5 refinement rounds, then uses a limited adaptive extension when the pool is still empty, too small, or far above the pre-ranking safety pool.
+- **Plans complementary query views**: turn the question into an auditable SearchPlan, then execute a complementary Query Portfolio within a bounded request budget to reduce naming-system misses.
+- **Calibrates search strings**: revise queries from both hit counts and whether leading titles match the research intent. The default `fast` search budget uses a 5-round soft limit; only repeated empty or too-small pools receive a bounded extension, while broad on-intent results proceed to bounded multi-lane retrieval.
 - **Builds structured candidate sets**: normalize title, authors, venue, year, DOI, abstract, citation count, keywords, and links.
 - **Ranks with reasons**: ask an LLM to score candidates and explain each score briefly.
 - **Expands citation networks**: add references and citing works from high-matching OpenAlex records, then inspect them in Citation Map.
 - **Limits by source-native filters**: choose the data source under the research question, then use OpenAlex Fields, WoS Categories, or arXiv categories where native filtering is reliable; other sources use a field/context hint to guide query generation.
-- **Keeps the process reviewable**: inspect workflow stages, ranked results, citation maps, local history, and CSV exports in the Web UI.
+- **Keeps the process reviewable**: inspect intent, query views, candidate provenance, ranking stages, citation maps, and local history; resume stopped or failed runs from the latest checkpoint and export CSV.
 
 ## Choose Your Path
 
@@ -247,14 +259,14 @@ The Web UI has four main workspaces:
 
 | View | Purpose |
 | --- | --- |
-| Search | Enter the research question, choose Discipline Fields, configure data source, LLM, iterations, and target result range; watch workflow stages and system logs. |
+| Search | Enter the research question, choose the data source, search budget, and discipline filters, configure the LLM, and watch workflow stages and system logs. |
 | Results | Review ranked papers, search, filter, sort, select, and export paper CSV. |
 | Citation Map | Explore OpenAlex citation expansion as a directed graph. |
-| History | Review locally saved runs, final queries, ranked records, and run events. |
+| History | Review locally saved runs, SearchPlans, final queries, ranked records, and run events; resume stopped or failed runs from the latest checkpoint. |
 
 ![PaperSeek web interface](docs/assets/paperseek-web.png)
 
-If API keys are already configured through system environment variables or `.env`, the Web UI shows that the environment is configured without sending secret values to the browser. API keys, base URLs, and run parameters entered in the Web UI are used only for the current browser session and are not written to local config files by PaperSeek. Local history saves run summaries, queries, events, and results, but never raw API keys.
+If API keys are already configured through system environment variables or `.env`, the Web UI shows that the environment is configured without sending secret values to the browser. API keys, base URLs, and run parameters entered in the Web UI are used only for the current browser session and are not written to local config files by PaperSeek. Local history saves run summaries, SearchPlans, query views, audit state, events, checkpoints, and results, but never raw API keys. Temporary checkpoints are removed after a successful run.
 
 CSV files exported from Results use the research-question theme and local date in the filename.
 
@@ -348,12 +360,12 @@ paperseek search "open innovation and digital platforms" --source openalex
 
 | Source | Default status | API key | Best for | Notes |
 | --- | --- | --- | --- | --- |
-| OpenAlex | Default | Recommended | Precise search, abstracts, citation counts, citation expansion, citation maps | Open scholarly metadata source for broad discovery and citation exploration. |
+| OpenAlex | Default | Recommended | Keyword and semantic retrieval, abstracts, citation counts, citation expansion, citation maps | Open scholarly metadata source for broad discovery and citation exploration. Supplying an API key enables the semantic retrieval lane. |
 | arXiv | Supported | Not required | Preprints, computer science, physics, mathematics, statistics, and adjacent quantitative fields | Uses the public arXiv Atom API and returns abstracts, categories, and PDF links. |
 | Semantic Scholar | Supported | Optional | Broad scholarly graph search, citation counts, and open PDF clues | Anonymous access is useful for light tests; an API key improves rate limits. |
 | PubMed | Supported | Optional | Medicine, biomedical, and life-science literature | Uses NCBI E-utilities; set email/tool metadata for responsible usage. |
 | Google Scholar | Supported | Required | Google Scholar results, citation-count clues, and open PDF clues | Uses Serper `/scholar`; set `SERPER_API_KEY` or `SERPER_API_KEYS`. |
-| Computer science top conferences | Supported | Not required | Top CS conference papers from ICLR, ICML, NeurIPS, AAAI, and NDSS | Searches computer science top-conference records and needs no source key. |
+| Computer science top conferences | Supported | Not required | Top CS conference papers from ICLR, ICML, NeurIPS, AAAI, and NDSS | Reads the latest paper-hub manifest at runtime and needs no source key. The current upstream snapshot includes ICLR 2025/2026, ICML 2025/2026, NeurIPS 2025, AAAI 2026, and NDSS 2026. |
 | Crossref | Supported | Usually not required | DOI checks, publication metadata, journal and publisher validation | DOI and metadata registry; useful for metadata verification and DOI completion. |
 | Web of Science Starter | Adapter retained | Required | Users with approved Clarivate API access | Commercial database API; availability and returned fields depend on subscription and institutional entitlement. |
 
@@ -427,16 +439,29 @@ A search usually has four stages:
 
 1. **Query Generation**: the LLM creates an initial query from the research question, optional field/context hint, and source-specific filters.
 2. **Source Search**: PaperSeek requests the selected source (OpenAlex, arXiv, Semantic Scholar, PubMed, Google Scholar, computer science top conferences, Crossref, or WoS Starter) and logs HTTP status and hit counts.
-3. **Query Refinement**: if the hit count is too low or too high, the LLM adjusts the query and continues.
+3. **Query Refinement**: broaden when results are too sparse and redirect when leading titles visibly drift from the intent. Broad but relevant results are not repeatedly narrowed just to chase a smaller hit count.
 4. **Ranking & Results**: the candidate pool is scored by the LLM, and the top records are returned.
 
-When OpenAlex citation expansion is enabled, PaperSeek selects up to 30 seed papers across relevance, impact, and recency lanes. High-relevance seeds expand both references and citing works; highly cited seeds focus on references; recent seeds focus on citing works. The expanded records are merged into the same candidate pool before pre-ranking and LLM scoring.
+When OpenAlex citation expansion is enabled, PaperSeek reuses the fused candidate order to select seeds across relevance, impact, and recency lanes instead of running a second full LLM scoring pass; the default `fast` budget uses up to 3 seeds. High-relevance seeds expand both references and citing works; highly cited seeds focus on references; recent seeds focus on citing works. OpenAlex reference IDs are fetched in batches, forward and backward requests for one seed use bounded concurrency, and the record budget is shared across seed plans. Expanded records are merged into the same pool and locally re-fused with BM25, sparse-vector similarity, and RRF before candidate truncation and LLM scoring.
 
-Large candidate pools are ranked in concurrent LLM batches. The default batch size is `8` and default concurrency is `16`; above 16 candidates, PaperSeek adapts the batch size to keep the total batch count near the concurrency level. If one or more ranking batches fail, PaperSeek retries those batches with lower concurrency in the `16 -> 8 -> 4` sequence. If the endpoint still fails at concurrency `4`, only the failed batch falls back to zero-score source order instead of failing the whole search. Ranking batches use `RANKING_LLM_TIMEOUT_SECONDS=60` by default and fall back to local pre-ranking on timeout, so a slow endpoint does not break the full run. Advanced users can still set `RANKING_CONCURRENCY=32`, which uses the `32 -> 16 -> 8 -> 4` fallback sequence.
+Large candidate pools are ranked in fixed-size concurrent LLM batches. The default batch size is `8` and default concurrency is `16`; measured larger batches did not consistently reduce wall-clock time and were more likely to omit individual candidates. PaperSeek retries only missing candidates after a partial model response. If one or more batches fail, it retries them with lower concurrency in the `16 -> 8 -> 4` sequence. If the endpoint still fails at concurrency `4`, only the failed batch falls back to zero-score source order instead of failing the whole search. Ranking batches use `RANKING_LLM_TIMEOUT_SECONDS=60` by default and fall back to local pre-ranking on timeout. Advanced users can still set `RANKING_CONCURRENCY=32`, which uses the `32 -> 16 -> 8 -> 4` fallback sequence.
 
-Before LLM scoring, PaperSeek now runs lightweight multi-lane pre-ranking across the selected source's supported signals: relevance, impact/citation when available, recency, and local quality for the computer science top-conference index. It deduplicates candidates, fuses retrieval ranks with RRF, and adds pure-Python hashing cosine plus BM25/term coverage. The default fused pool limit is `3000`; community installs use the local pure-Python embedding path unless you explicitly configure an external embedding endpoint. The Web UI advanced settings include embedding provider choices for Local Python, CSTCloud, OpenAI, Alibaba Cloud Bailian, SiliconFlow, OpenRouter, NVIDIA NIM, Zhipu AI, Volcano Ark, ModelScope, and Custom endpoints. ModelScope API-Inference uses only `Qwen/Qwen3-Embedding-8B` and `Qwen/Qwen3-Embedding-4B` for embedding. Optional external embedding/reranking can use models such as `qwen3-embedding:8b`, `bge-large-zh:latest`, OpenRouter embedding/rerank models, or NVIDIA NIM `nvidia/nv-embedqa-e5-v5` and `nv-rerank-qa-mistral-4b:1`; comma-separated model lists are tried in order and failures fall back to the local RRF order.
+Before LLM scoring, PaperSeek runs lightweight multi-lane pre-ranking across the selected source's supported signals: relevance, impact/citation when available, recency, and local quality for the computer science top-conference index. It deduplicates candidates, fuses retrieval ranks with RRF, and adds pure-Python hashing cosine plus BM25/term coverage. Sources that declare safe lane concurrency execute independent lanes in parallel. Runtime keeps a deeper relevance lane while limiting diversity lanes to the useful depth that can still enter the final LLM candidate gate, avoiding long-tail requests that cannot affect the ranking. The default `fast` budget allows a fused pool of up to `3000`; community installs use the local pure-Python embedding path unless you explicitly configure an external embedding endpoint. The Web UI advanced settings include embedding provider choices for Local Python, CSTCloud, OpenAI, Alibaba Cloud Bailian, SiliconFlow, OpenRouter, NVIDIA NIM, Zhipu AI, Volcano Ark, ModelScope, and Custom endpoints. ModelScope API-Inference uses only `Qwen/Qwen3-Embedding-8B` and `Qwen/Qwen3-Embedding-4B` for embedding. Optional external embedding/reranking can use models such as `qwen3-embedding:8b`, `bge-large-zh:latest`, OpenRouter embedding/rerank models, or NVIDIA NIM `nvidia/nv-embedqa-e5-v5` and `nv-rerank-qa-mistral-4b:1`; comma-separated model lists are tried in order and failures fall back to the local RRF order.
 
-`TARGET_MAX` guides query refinement; it is not a hard display cap. LLM scoring receives at most `RANKING_CANDIDATE_LIMIT` candidates, default `256`. Results show all candidates when the scored pool is under 50, otherwise at least the top 50; if more than 50 candidates score `5` or above, all of those high-scoring candidates are shown.
+`TARGET_MIN` identifies pools that are too small for reliable ranking. `TARGET_MAX` is a user-facing target and ranking reference; a large database-wide hit count alone does not trigger repeated narrowing, and it is not a hard display cap. Under the default `fast` budget, LLM scoring receives at most `256` candidates. Results show all candidates when the scored pool is under 50, otherwise at least the top 50; if more than 50 candidates score `5` or above, all of those high-scoring candidates are shown.
+
+### Search Budget
+
+The Web UI, CLI, API, and MCP expose `fast`, `medium`, `high`, and `max` search budgets; `fast` is the default. `fast` uses the fewest requests and disables model thinking when the endpoint exposes an explicit switch. Higher budgets widen query views, multi-lane recall, LLM candidates, and citation expansion together instead of only adding query-revision rounds.
+
+| Budget | Model thinking | Query soft limit | Query views | Per-lane configured cap | Fused pool | LLM candidates | Citation expansion (seeds / per seed / total / depth) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `fast` | Off when supported | 5 | 3 | 500 | 3000 | 256 | 3 / 4 / 40 / 2 |
+| `medium` | Service default | 7 | 3 | 750 | 4500 | 384 | 8 / 6 / 80 / 2 |
+| `high` | Service default | 9 | 4 | 1000 | 7000 | 512 | 16 / 8 / 160 / 3 |
+| `max` | Service default | 12 | 6 | 1000 | 10000 | 1024 | 30 / 10 / 320 / 3 |
+
+Source-specific pagination, rate, and result limits still apply. Per-lane values in the table are configured caps; runtime also clips useful lane depth against the final LLM candidate gate, retaining a deeper relevance lane and a smaller top slice from diversity lanes. `high` and `max` can substantially increase API calls, LLM cost, and latency, so reserve them for difficult topics or higher-recall searches. Granular environment variables and CLI flags override individual preset values.
 
 ## Citation Map
 
@@ -482,17 +507,20 @@ Most parameters already have code defaults. After copying `.env.example`, a norm
 | --- | --- | --- |
 | `SEARCH_FIELD` | empty | Free-text discipline or field hint. |
 | `DISCIPLINE_FIELDS` | empty | Source-native filter values for OpenAlex Fields, WoS Categories, or arXiv categories; use semicolons for multiple values. Other sources use `SEARCH_FIELD` as a text hint. |
-| `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | Target result count range. |
-| `MAX_ITERATIONS` | `5` | Maximum query refinement iterations. |
+| `SEARCH_BUDGET` | `fast` | Unified search budget: `fast`, `medium`, `high`, or `max`. |
+| `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | User-facing target range; the minimum drives sparse-result recovery, while the maximum is not a forced narrowing or display cap. |
+| `MAX_ITERATIONS` | `5` | Query-revision soft limit for `fast`; an explicit value overrides the preset. |
+| `SEARCH_LOOP_BACKEND` | `auto` | Query-loop controller backend: `auto` uses the stable built-in controller; `native` explicitly uses the built-in controller; `langgraph` explicitly enables the LangGraph state machine. |
 | `EXPAND_CITATIONS` | `true` | Enable OpenAlex citation expansion. |
 | `FETCH_ABSTRACTS` | `false` | Try external DOI metadata for abstracts. |
-| `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `30` / `4` / `160` | Citation expansion size controls. |
+| `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | Citation expansion size for `fast`; explicit values override the preset. |
 | `CITATION_DEPTH` | `2` | OpenAlex citation traversal depth. |
 | `RANKING_BATCH_SIZE` / `RANKING_CONCURRENCY` | `8` / `16` | LLM ranking batch size and concurrency. |
 | `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | `2048` / `180` | LLM output length and regular per-request timeout. |
 | `RANKING_LLM_TIMEOUT_SECONDS` | `60` | Timeout only for LLM ranking batches; timed-out ranking falls back to local pre-ranking. |
-| `RETRIEVAL_POOL_MAX` / `RETRIEVAL_POOL_MIN` | `3000` / `5` | Fused candidate pool range before LLM ranking. |
-| `RETRIEVAL_LANE_LIMIT` / `RETRIEVAL_RRF_K` | `1000` / `60` | Retrieval lane cap and RRF fusion constant. |
+| `RANKING_CANDIDATE_LIMIT` | `256` | Candidate cap sent to LLM scoring under the default `fast` budget. |
+| `RETRIEVAL_POOL_MAX` / `RETRIEVAL_POOL_MIN` | `3000` / `5` | Fused candidate pool range under the default `fast` budget. |
+| `RETRIEVAL_LANE_LIMIT` / `RETRIEVAL_RRF_K` | `500` / `60` | Configured per-lane cap under the default `fast` budget and the RRF constant; runtime may use a smaller effective lane depth. |
 | `RETRIEVAL_EMBEDDING_PROVIDER` | `local` | Community edition uses local pure-Python pre-ranking by default; set an OpenAI-compatible embedding provider if needed. |
 | `RETRIEVAL_EMBEDDING_MODEL` | `qwen3-embedding:8b,bge-large-zh:latest` | External embedding model list. |
 | `RETRIEVAL_RERANKER_PROVIDER` / `RETRIEVAL_RERANKER_MODEL` | empty / `qwen3-reranker:8b` | Optional external reranker after RRF. |
@@ -505,7 +533,7 @@ Most parameters already have code defaults. After copying `.env.example`, a norm
 
 ### OpenAlex
 
-OpenAlex supports anonymous access, but a free API key is recommended:
+OpenAlex supports anonymous access to basic endpoints, but a free API key is recommended. PaperSeek only uses the OpenAlex semantic retrieval lane when a key is configured:
 
 1. Open [OpenAlex](https://openalex.org/) and create an account.
 2. Visit [OpenAlex API settings](https://openalex.org/settings/api).
@@ -554,7 +582,7 @@ For higher quotas, priority support, or production SLA, consider Crossref Metada
 ### arXiv and computer science top conferences
 
 - arXiv does not require an API key and is best for preprints and arXiv-covered disciplines.
-- Computer science top-conference search does not require an API key.
+- Computer science top-conference search does not require an API key. PaperSeek reads the [paper-hub](https://github.com/Yupu-Wang/paper-hub) manifest and content-addressed shards at runtime; its 2026-07-20 snapshot contains 26,579 papers, and later upstream shards require no PaperSeek query-interface change.
 
 ### Web of Science Starter API
 
@@ -674,10 +702,14 @@ PaperSeek takes inspiration from the following open-source projects:
 
 - [dr-dumpling/paper-search-cli](https://github.com/dr-dumpling/paper-search-cli/): CLI usage patterns and literature-search workflow design.
 - [666ghj/MiroFish](https://github.com/666ghj/MiroFish): split-pane Web UI layout and workflow presentation style.
-- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client): Web of Science Starter API client usage.
+- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client): WoS Starter endpoint behavior and response schema; PaperSeek uses an independent lightweight adapter.
 - [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub): integrated with the author's permission to provide computer science top-conference search support.
 - [Lloyd-Jahn/openclaw-paper-search](https://github.com/Lloyd-Jahn/openclaw-paper-search): organization of paper-search tooling.
+- [bytedance/pasa](https://github.com/bytedance/pasa): crawler/selector separation, candidate queues, and citation-expansion scheduling.
+- [pydantic/pydantic](https://github.com/pydantic/pydantic) and [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai): typed data contracts and bounded structured-output retries through an optional adapter.
+- [langchain-ai/langchain](https://github.com/langchain-ai/langchain) and [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph): an optional state-graph backend used through their public Python APIs; PaperSeek's native runner remains the default.
+- [wanshuiyin/Auto-claude-code-research-in-sleep](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep): explicit state, checkpoints, budgets, and recovery audit for long-running workflows.
 
 ## License
 
-PaperSeek is licensed under the [Apache License 2.0](LICENSE).
+PaperSeek is licensed under the [Apache License 2.0](LICENSE). See [Third-party notices](THIRD_PARTY_NOTICES.md) for dependency information and project acknowledgements.

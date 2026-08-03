@@ -17,7 +17,8 @@ from paperseek_core.disciplines import (
     source_filter_mode,
     wos_category_clause,
 )
-from paperseek_core.sources.providers import CitationSeedPlan, OpenAlexProvider, PaperIdentifiers, PaperRecord, ProviderSearchResult, SearchMetadata
+from paperseek_core.planning import parse_search_plan
+from paperseek_core.sources.providers import CitationSeedPlan, OpenAlexProvider, PaperIdentifiers, PaperRecord, ProviderError, ProviderSearchResult, SearchMetadata
 
 
 class FakeResponse:
@@ -237,6 +238,8 @@ class DisciplineMappingTest(unittest.TestCase):
         self.assertEqual(captured["field_ids"], ("17", "14"))
         self.assertEqual(captured["depth"], 2)
         self.assertEqual(len(captured["seed_plans"]), 1)
+        self.assertEqual(agent.search_run_state.citation_planning_decisions[0].seed_limit, 1)
+        self.assertEqual(agent.search_run_state.citation_planning_decisions[0].depth, 2)
 
     def test_agent_builds_multi_lane_citation_seed_plans(self):
         captured = {}
@@ -285,11 +288,16 @@ class DisciplineMappingTest(unittest.TestCase):
         self.assertIn("relevance", roles_by_uid["https://openalex.org/Wseed1"])
         self.assertIn("impact", roles_by_uid["https://openalex.org/Wseed2"])
         self.assertIn("recent", roles_by_uid["https://openalex.org/Wseed5"])
+        first_three_roles = {role for plan in plans[:3] for role in plan.role.split("+")}
+        self.assertTrue({"relevance", "impact", "recent"}.issubset(first_three_roles))
         directions = {plan.role: set(plan.directions) for plan in plans}
         self.assertIn("backward", directions["relevance"])
         self.assertIn("forward", directions["relevance"])
+        planning = agent.search_run_state.citation_planning_decisions[0]
+        self.assertEqual(planning.seed_limit, 6)
+        self.assertEqual((planning.relevance_quota, planning.impact_quota, planning.recent_quota), (3, 1, 2))
 
-    def test_agent_limits_citation_seed_ranking_candidate_count(self):
+    def test_agent_selects_bounded_citation_seed_pool_without_llm_ranking(self):
         captured = {}
 
         class FakeOpenAlexProvider(OpenAlexProvider):
@@ -323,16 +331,214 @@ class DisciplineMappingTest(unittest.TestCase):
         ]
         agent.provider = FakeOpenAlexProvider()
 
-        def fake_rank(question, candidates, **_):
-            captured["rank_candidate_count"] = len(candidates)
-            return [{"document": doc, "score": 10} for doc in candidates]
-
-        agent._rank_results = fake_rank
+        agent._rank_results = lambda *args, **kwargs: self.fail("citation seed selection must not call the LLM ranker")
 
         agent._prepare_candidates("open innovation", records)
 
-        self.assertEqual(captured["rank_candidate_count"], 120)
         self.assertEqual(len(captured["seed_plans"]), 30)
+        self.assertEqual(agent.search_run_state.citation_planning_decisions[0].seed_ranking_count, 120)
+
+    def test_citation_seed_pool_preserves_successor_view_candidates(self):
+        config = SimpleNamespace(
+            data_source="openalex",
+            discipline_fields=(),
+            expand_citations=True,
+            citation_seed_count=30,
+            ranking_candidate_limit=256,
+            target_max=50,
+            retrieval_pool_max=3000,
+            openalex_api_key="",
+            openalex_email="",
+        )
+        agent = PaperSeekAgent(config, object())
+        agent.search_plan = parse_search_plan(
+            """
+            {
+              "intent": "Survey image retrieval.",
+              "question_type": "broad_landscape",
+              "query_views": [
+                {
+                  "view_id": "successor",
+                  "view_type": "successor_paradigm",
+                  "purpose": "Modern successor terminology",
+                  "concept_groups": [{"label": "successor", "terms": ["vision-language pretraining"]}]
+                }
+              ]
+            }
+            """,
+            "What works are related to image retrieval?",
+        )
+        global_candidates = [PaperRecord(uid=f"W{index}", title=f"Global {index}") for index in range(200)]
+        successor_candidates = global_candidates[140:180]
+        agent.query_portfolio_lane_results = {"successor": successor_candidates}
+
+        pool = agent._citation_seed_candidate_pool(global_candidates, 120)
+
+        self.assertEqual(len(pool), 120)
+        self.assertTrue(all(document in pool for document in successor_candidates))
+
+    def test_agent_records_candidate_queue_for_citation_expansion_dedupe(self):
+        class FakeOpenAlexProvider(OpenAlexProvider):
+            def citation_neighbors_with_graph(self, seeds, per_seed=4, max_records=40, field_ids=None, seed_plans=None, depth=1):
+                duplicate = PaperRecord(
+                    uid="https://openalex.org/Wseed",
+                    title="Seed duplicate",
+                    identifiers=PaperIdentifiers(openalex="https://openalex.org/Wseed"),
+                    raw={"referenced_works": []},
+                )
+                new_neighbor = PaperRecord(
+                    uid="https://openalex.org/Wnew",
+                    title="New neighbor",
+                    identifiers=PaperIdentifiers(openalex="https://openalex.org/Wnew"),
+                    raw={"referenced_works": []},
+                )
+                return {
+                    "records": [duplicate, new_neighbor],
+                    "nodes": [],
+                    "edges": [
+                        {
+                            "source": "https://openalex.org/Wseed",
+                            "target": "https://openalex.org/Wnew",
+                            "type": "references",
+                            "seed": "https://openalex.org/Wseed",
+                            "layer": "1",
+                        }
+                    ],
+                }
+
+        config = SimpleNamespace(
+            data_source="openalex",
+            discipline_fields=(),
+            expand_citations=True,
+            citation_seed_count=1,
+            citation_per_seed=2,
+            citation_max_records=10,
+            citation_depth=1,
+            target_max=5,
+            openalex_api_key="",
+            openalex_email="",
+        )
+        seed = PaperRecord(
+            uid="https://openalex.org/Wseed",
+            title="Seed",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/Wseed"),
+            raw={"referenced_works": []},
+        )
+        agent = PaperSeekAgent(config, object())
+        agent.provider = FakeOpenAlexProvider()
+        agent._rank_results = lambda question, candidates, **_: [{"document": seed, "score": 10}]
+
+        candidates = agent._prepare_candidates("open innovation", [seed])
+
+        self.assertEqual(
+            {document.uid for document in candidates},
+            {"https://openalex.org/Wseed", "https://openalex.org/Wnew"},
+        )
+        self.assertEqual(agent.citation_map["added_candidates"], 1)
+        queue = agent.search_run_state.candidate_queue
+        self.assertEqual(queue.origin_counts["retrieval"], 1)
+        self.assertEqual(queue.origin_counts["citation_expansion"], 1)
+        self.assertEqual(queue.duplicate_count, 1)
+        self.assertEqual(queue.events[1].duplicates, 1)
+        neighbor = queue.ledger["openalex:https://openalex.org/wnew"]
+        self.assertEqual(neighbor.origins, ["citation_expansion"])
+        self.assertEqual(len(neighbor.citation_paths), 1)
+        self.assertEqual(neighbor.citation_paths[0].seed_id, "https://openalex.org/Wseed")
+        self.assertEqual(neighbor.citation_paths[0].direction, "backward")
+        self.assertEqual(neighbor.citation_paths[0].depth, 1)
+        self.assertIsNotNone(neighbor.retrieval_score)
+        self.assertIn("citation_expansion", neighbor.retrieval_lanes)
+
+    def test_agent_retries_citation_expansion_with_reduced_budget(self):
+        captured = {"calls": []}
+
+        class FlakyOpenAlexProvider(OpenAlexProvider):
+            def citation_neighbors_with_graph(self, seeds, per_seed=4, max_records=40, field_ids=None, seed_plans=None, depth=1):
+                captured["calls"].append((per_seed, max_records, depth))
+                if len(captured["calls"]) == 1:
+                    raise ProviderError("openalex", "temporary citation failure", status=503)
+                neighbor = PaperRecord(
+                    uid="https://openalex.org/Wneighbor",
+                    title="Recovered neighbor",
+                    identifiers=PaperIdentifiers(openalex="https://openalex.org/Wneighbor"),
+                    raw={"referenced_works": []},
+                )
+                return {"records": [neighbor], "nodes": [], "edges": []}
+
+        config = SimpleNamespace(
+            data_source="openalex",
+            discipline_fields=(),
+            expand_citations=True,
+            citation_seed_count=1,
+            citation_per_seed=4,
+            citation_max_records=20,
+            citation_depth=2,
+            target_max=5,
+            openalex_api_key="",
+            openalex_email="",
+        )
+        seed = PaperRecord(
+            uid="https://openalex.org/Wseed",
+            title="Seed",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/Wseed"),
+            raw={"referenced_works": []},
+        )
+        agent = PaperSeekAgent(config, object())
+        agent.provider = FlakyOpenAlexProvider()
+        agent._rank_results = lambda question, candidates, **_: [{"document": seed, "score": 10}]
+
+        candidates = agent._prepare_candidates("open innovation", [seed])
+
+        self.assertEqual(captured["calls"], [(4, 20, 2), (2, 10, 1)])
+        self.assertEqual(
+            {document.uid for document in candidates},
+            {"https://openalex.org/Wseed", "https://openalex.org/Wneighbor"},
+        )
+        self.assertEqual(agent.citation_map["status"], "complete")
+        self.assertEqual(agent.citation_map["citation_depth"], 1)
+        state = agent.search_run_state
+        self.assertEqual(state.citation_traversal_observations[0].status, "error")
+        self.assertEqual(state.citation_recovery_decisions[0].action, "retry_reduced")
+        self.assertEqual(state.citation_traversal_observations[1].status, "complete")
+
+    def test_agent_skips_citation_expansion_after_reduced_retry_fails(self):
+        captured = {"calls": []}
+
+        class FailingOpenAlexProvider(OpenAlexProvider):
+            def citation_neighbors_with_graph(self, seeds, per_seed=4, max_records=40, field_ids=None, seed_plans=None, depth=1):
+                captured["calls"].append((per_seed, max_records, depth))
+                raise ProviderError("openalex", "persistent citation failure", status=503)
+
+        config = SimpleNamespace(
+            data_source="openalex",
+            discipline_fields=(),
+            expand_citations=True,
+            citation_seed_count=1,
+            citation_per_seed=4,
+            citation_max_records=20,
+            citation_depth=2,
+            target_max=5,
+            openalex_api_key="",
+            openalex_email="",
+        )
+        seed = PaperRecord(
+            uid="https://openalex.org/Wseed",
+            title="Seed",
+            identifiers=PaperIdentifiers(openalex="https://openalex.org/Wseed"),
+            raw={"referenced_works": []},
+        )
+        agent = PaperSeekAgent(config, object())
+        agent.provider = FailingOpenAlexProvider()
+        agent._rank_results = lambda question, candidates, **_: [{"document": seed, "score": 10}]
+
+        candidates = agent._prepare_candidates("open innovation", [seed])
+
+        self.assertEqual(captured["calls"], [(4, 20, 2), (2, 10, 1)])
+        self.assertEqual([document.uid for document in candidates], ["https://openalex.org/Wseed"])
+        self.assertEqual(agent.citation_map["status"], "error")
+        state = agent.search_run_state
+        self.assertEqual([item.status for item in state.citation_traversal_observations], ["error", "error"])
+        self.assertEqual([item.action for item in state.citation_recovery_decisions], ["retry_reduced", "skip_citation_expansion"])
 
     def test_agent_ranks_large_candidate_sets_in_parallel_batches(self):
         calls = []
@@ -599,11 +805,14 @@ class DisciplineMappingTest(unittest.TestCase):
         captured = {}
 
         def fake_get(_, url, *, params=None, headers=None, timeout=30, query="", attempts=3):
-            if url.endswith("/Wback_in"):
-                return FakeResponse(openalex_work("Wback_in", "17")), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
-            if url.endswith("/Wback_out"):
-                return FakeResponse(openalex_work("Wback_out", "14")), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
-            captured["forward_filter"] = (params or {}).get("filter", "")
+            request_filter = (params or {}).get("filter", "")
+            if request_filter.startswith("openalex:"):
+                captured["backward_filter"] = request_filter
+                return FakeResponse({
+                    "meta": {"count": 2, "page": 1, "per_page": 2},
+                    "results": [openalex_work("Wback_in", "17"), openalex_work("Wback_out", "14")],
+                }), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            captured["forward_filter"] = request_filter
             return FakeResponse({
                 "meta": {"count": 2, "page": 1, "per_page": 2},
                 "results": [openalex_work("Wforward_in", "17"), openalex_work("Wforward_out", "14")],
@@ -629,6 +838,7 @@ class DisciplineMappingTest(unittest.TestCase):
                 field_ids=("17",),
             )
 
+        self.assertEqual(captured["backward_filter"], "openalex:Wback_in|Wback_out")
         self.assertEqual(captured["forward_filter"], "cites:Wseed,primary_topic.field.id:17")
         record_ids = {record.uid for record in citation_data["records"]}
         self.assertIn("https://openalex.org/Wback_in", record_ids)
@@ -651,16 +861,17 @@ class DisciplineMappingTest(unittest.TestCase):
 
         def fake_get(_, url, *, params=None, headers=None, timeout=30, query="", attempts=3):
             calls.append((url, params or {}, query))
-            if (params or {}).get("filter", "").startswith("cites:"):
+            request_filter = (params or {}).get("filter", "")
+            if request_filter.startswith("cites:"):
                 return FakeResponse({
                     "meta": {"count": 1, "page": 1, "per_page": 1},
                     "results": [work("Wforward_should_not_be_called")],
                 }), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
-            if url.rstrip("/").endswith("/Wback1"):
-                return FakeResponse(work("Wback1", ["https://openalex.org/Wback2"])), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
-            if url.rstrip("/").endswith("/Wback2"):
-                return FakeResponse(work("Wback2")), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
-            return FakeResponse(work("Wunknown")), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            if request_filter == "openalex:Wback1":
+                return FakeResponse({"results": [work("Wback1", ["https://openalex.org/Wback2"])]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            if request_filter == "openalex:Wback2":
+                return FakeResponse({"results": [work("Wback2")]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+            return FakeResponse({"results": []}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
         seed = PaperRecord(
             uid="https://openalex.org/Wseed",

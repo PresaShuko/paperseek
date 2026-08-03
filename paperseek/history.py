@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import json
 import os
@@ -9,18 +8,19 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional, Union
+from zoneinfo import ZoneInfo
 
 from paperseek.config import AgentConfig
-
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # Python 3.8 without backports
-    ZoneInfo = None
 
 
 DISABLED_VALUES = {"0", "false", "no", "off"}
 SECRET_KEY_NAMES = {"api_key", "apikey", "authorization", "auth_token", "access_token", "secret", "password"}
 SECRET_KEY_PARTS = ("authorization", "token", "secret", "password")
+SECRET_VALUE_PATTERNS = (
+    re.compile(r"(?i)bearer\s+([A-Za-z0-9._\-+/=]{8,})"),
+    re.compile(r"\bsk-[A-Za-z0-9._\-]{8,}\b"),
+    re.compile(r"\b(?:ghp|github_pat|hf|ms)-[A-Za-z0-9._\-]{12,}\b", re.IGNORECASE),
+)
 DEFAULT_TIMEZONE_NAME = "Asia/Shanghai"
 DEFAULT_UTC_OFFSET_MINUTES = 8 * 60
 
@@ -140,6 +140,13 @@ def _is_secret_key(key: str) -> bool:
     )
 
 
+def _redact_secret_text(text: str) -> str:
+    value = str(text or "")
+    for pattern in SECRET_VALUE_PATTERNS:
+        value = pattern.sub("[redacted]", value)
+    return value
+
+
 def redact_secrets(value: Any) -> Any:
     """Return a JSON-safe copy with obvious credential fields removed."""
     if isinstance(value, dict):
@@ -151,6 +158,8 @@ def redact_secrets(value: Any) -> Any:
         return [redact_secrets(item) for item in value]
     if isinstance(value, tuple):
         return [redact_secrets(item) for item in value]
+    if isinstance(value, str):
+        return _redact_secret_text(value)
     return value
 
 
@@ -158,6 +167,8 @@ def safe_search_params_from_config(config: AgentConfig) -> dict[str, Any]:
     """Persist only run-shaping settings, never raw user credentials."""
     return {
         "data_source": config.data_source,
+        "search_budget": getattr(config, "search_budget", "fast"),
+        "llm_thinking_enabled": bool(getattr(config, "llm_thinking_enabled", True)),
         "llm_provider": config.llm_provider,
         "llm_api_type": config.llm_api_type,
         "llm_model": config.llm_model,
@@ -176,7 +187,7 @@ def safe_search_params_from_config(config: AgentConfig) -> dict[str, Any]:
         "max_iterations": config.max_iterations,
         "retrieval_pool_max": getattr(config, "retrieval_pool_max", 3000),
         "retrieval_pool_min": getattr(config, "retrieval_pool_min", 5),
-        "retrieval_lane_limit": getattr(config, "retrieval_lane_limit", 1000),
+        "retrieval_lane_limit": getattr(config, "retrieval_lane_limit", 500),
         "ranking_candidate_limit": getattr(config, "ranking_candidate_limit", 256),
         "retrieval_rrf_k": getattr(config, "retrieval_rrf_k", 60),
         "retrieval_embedding_provider": getattr(config, "retrieval_embedding_provider", "local"),
@@ -184,6 +195,13 @@ def safe_search_params_from_config(config: AgentConfig) -> dict[str, Any]:
         "retrieval_reranker_provider": getattr(config, "retrieval_reranker_provider", ""),
         "retrieval_reranker_model": getattr(config, "retrieval_reranker_model", ""),
         "retrieval_crossref_enrichment": getattr(config, "retrieval_crossref_enrichment", False),
+        "query_portfolio_enabled": getattr(config, "query_portfolio_enabled", True),
+        "query_portfolio_max": getattr(config, "query_portfolio_max", 3),
+        "query_portfolio_limit": getattr(config, "query_portfolio_limit", 100),
+        "search_loop_backend": getattr(config, "search_loop_backend", "auto"),
+        "crawler_enabled": getattr(config, "crawler_enabled", False),
+        "candidate_selector_enabled": getattr(config, "candidate_selector_enabled", False),
+        "citation_feedback_enabled": getattr(config, "citation_feedback_enabled", False),
         "has_wos_api_key": bool(config.wos_api_key),
         "has_openalex_api_key": bool(config.openalex_api_key),
         "has_openalex_email": bool(config.openalex_email),
@@ -198,6 +216,9 @@ def result_payload_from_search_result(result: dict[str, Any], source: str) -> di
     return {
         "question": result["question"],
         "search_intent": result.get("search_intent", ""),
+        "search_plan": result.get("search_plan", {}),
+        "query_view_selection": result.get("query_view_selection", []),
+        "query_portfolio": result.get("query_portfolio", []),
         "source": result.get("source", source),
         "final_query": result["final_query"],
         "db": result["db"],
@@ -205,7 +226,10 @@ def result_payload_from_search_result(result: dict[str, Any], source: str) -> di
         "total": result["total"],
         "iterations": result["iterations"],
         "history": result.get("history", []),
+        "search_loop": result.get("search_loop", {}),
+        "search_state": result.get("search_state", {}),
         "citation_map": result.get("citation_map", {}),
+        "ranking_steps": result.get("ranking_steps", []),
         "ranked": ranked_items_to_dict(result["ranked"]),
     }
 
@@ -249,6 +273,7 @@ class HistoryStore:
         self._timezone_name = timezone_name
         self._utc_offset_minutes = utc_offset_minutes
         self._schema_ready = False
+        self._checkpoint_schema_available = False
 
     @property
     def enabled(self) -> bool:
@@ -271,9 +296,23 @@ class HistoryStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         if not self._schema_ready:
-            self._ensure_schema(conn)
+            try:
+                self._ensure_schema(conn)
+            except sqlite3.OperationalError as exc:
+                if "readonly" not in str(exc).lower() and "read-only" not in str(exc).lower():
+                    conn.close()
+                    raise
+            self._checkpoint_schema_available = self._table_exists(conn, "search_checkpoints")
             self._schema_ready = True
         return conn
+
+    @staticmethod
+    def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            (table,),
+        ).fetchone()
+        return row is not None
 
     @contextmanager
     def _connection(self):
@@ -341,12 +380,27 @@ class HistoryStore:
                 FOREIGN KEY(run_id) REFERENCES search_runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS search_checkpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                stage TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES search_runs(id) ON DELETE CASCADE,
+                UNIQUE(run_id, sequence)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_search_runs_created_at ON search_runs(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_search_events_run_id ON search_events(run_id);
             CREATE INDEX IF NOT EXISTS idx_search_results_run_id ON search_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_search_checkpoints_run_id ON search_checkpoints(run_id, sequence DESC);
             """
         )
         self._ensure_column(conn, "search_runs", "history_json", "TEXT")
+        self._ensure_column(conn, "search_runs", "search_loop_json", "TEXT")
+        self._ensure_column(conn, "search_runs", "search_state_json", "TEXT")
+        self._ensure_column(conn, "search_runs", "ranking_steps_json", "TEXT")
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         if not re.match(r"^[a-zA-Z0-9_]+$", table):
@@ -404,6 +458,77 @@ class HistoryStore:
         except Exception:
             return
 
+    def save_checkpoint(self, run_id: str, checkpoint: dict[str, Any]) -> None:
+        if not self.enabled or not run_id:
+            return
+        safe_checkpoint = redact_secrets(checkpoint or {})
+        try:
+            sequence = max(0, int(safe_checkpoint.get("sequence") or 0))
+            stage = str(safe_checkpoint.get("stage") or "").strip()
+        except (TypeError, ValueError):
+            return
+        if not stage:
+            return
+        try:
+            with self._connection() as conn:
+                if not self._checkpoint_schema_available:
+                    return
+                conn.execute(
+                    """
+                    INSERT INTO search_checkpoints (run_id, sequence, stage, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id, sequence) DO UPDATE SET
+                        stage = excluded.stage,
+                        payload_json = excluded.payload_json,
+                        created_at = excluded.created_at
+                    """,
+                    (run_id, sequence, stage, _json_dumps(safe_checkpoint), self._now()),
+                )
+        except Exception:
+            return
+
+    def latest_checkpoint(self, run_id: str) -> Optional[dict[str, Any]]:
+        if not self.enabled or not run_id:
+            return None
+        try:
+            with self._connection() as conn:
+                if not self._checkpoint_schema_available:
+                    return None
+                row = conn.execute(
+                    """
+                    SELECT sequence, stage, payload_json, created_at
+                    FROM search_checkpoints
+                    WHERE run_id = ?
+                    ORDER BY sequence DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (run_id,),
+                ).fetchone()
+        except Exception:
+            return None
+        if row is None:
+            return None
+        payload = _json_loads(row["payload_json"], None)
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "sequence": row["sequence"],
+            "stage": row["stage"],
+            "created_at": row["created_at"],
+            "payload": payload,
+        }
+
+    def clear_checkpoints(self, run_id: str) -> None:
+        if not self.enabled or not run_id:
+            return
+        try:
+            with self._connection() as conn:
+                if not self._checkpoint_schema_available:
+                    return
+                conn.execute("DELETE FROM search_checkpoints WHERE run_id = ?", (run_id,))
+        except Exception:
+            return
+
     def complete_run(self, run_id: str, payload: dict[str, Any]) -> None:
         if not self.enabled or not run_id:
             return
@@ -416,7 +541,8 @@ class HistoryStore:
                     """
                     UPDATE search_runs
                     SET source = ?, final_query = ?, db = ?, field = ?, total = ?, iterations = ?,
-                        status = ?, error_message = NULL, history_json = ?, citation_map_json = ?, finished_at = ?
+                        status = ?, error_message = NULL, history_json = ?, search_loop_json = ?,
+                        search_state_json = ?, citation_map_json = ?, ranking_steps_json = ?, finished_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -428,27 +554,62 @@ class HistoryStore:
                         _as_int(safe_payload.get("iterations")),
                         "success",
                         _json_dumps(safe_payload.get("history") or []),
+                        _json_dumps(safe_payload.get("search_loop") or {}),
+                        _json_dumps(safe_payload.get("search_state") or {}),
                         _json_dumps(safe_payload.get("citation_map") or {}),
+                        _json_dumps(safe_payload.get("ranking_steps") or []),
                         self._now(),
                         run_id,
                     ),
                 )
                 self._insert_results(conn, run_id, ranked)
+                if self._checkpoint_schema_available:
+                    conn.execute("DELETE FROM search_checkpoints WHERE run_id = ?", (run_id,))
         except Exception:
             return
 
-    def fail_run(self, run_id: str, error_message: str) -> None:
+    def fail_run(self, run_id: str, error_message: str, payload: Optional[dict[str, Any]] = None) -> None:
         if not self.enabled or not run_id:
             return
+        safe_payload = redact_secrets(payload or {})
         try:
             with self._connection() as conn:
                 conn.execute(
                     """
                     UPDATE search_runs
-                    SET status = ?, error_message = ?, finished_at = ?
+                    SET source = COALESCE(NULLIF(?, ''), source),
+                        final_query = COALESCE(NULLIF(?, ''), final_query),
+                        db = COALESCE(NULLIF(?, ''), db),
+                        field = COALESCE(NULLIF(?, ''), field),
+                        total = COALESCE(?, total),
+                        iterations = COALESCE(?, iterations),
+                        status = ?,
+                        error_message = ?,
+                        history_json = COALESCE(?, history_json),
+                        search_loop_json = COALESCE(?, search_loop_json),
+                        search_state_json = COALESCE(?, search_state_json),
+                        citation_map_json = COALESCE(?, citation_map_json),
+                        ranking_steps_json = COALESCE(?, ranking_steps_json),
+                        finished_at = ?
                     WHERE id = ?
                     """,
-                    ("error", str(error_message or ""), self._now(), run_id),
+                    (
+                        safe_payload.get("source", ""),
+                        safe_payload.get("final_query", ""),
+                        safe_payload.get("db", ""),
+                        safe_payload.get("field", ""),
+                        _as_int(safe_payload.get("total")),
+                        _as_int(safe_payload.get("iterations")),
+                        "error",
+                        str(error_message or ""),
+                        _json_dumps(safe_payload.get("history")) if "history" in safe_payload else None,
+                        _json_dumps(safe_payload.get("search_loop")) if "search_loop" in safe_payload else None,
+                        _json_dumps(safe_payload.get("search_state")) if "search_state" in safe_payload else None,
+                        _json_dumps(safe_payload.get("citation_map")) if "citation_map" in safe_payload else None,
+                        _json_dumps(safe_payload.get("ranking_steps")) if "ranking_steps" in safe_payload else None,
+                        self._now(),
+                        run_id,
+                    ),
                 )
         except Exception:
             return
@@ -459,11 +620,18 @@ class HistoryStore:
         limit = max(1, min(int(limit or 50), 200))
         offset = max(0, int(offset or 0))
         with self._connection() as conn:
+            checkpoint_columns = (
+                "(SELECT COUNT(*) FROM search_checkpoints sc WHERE sc.run_id = r.id) AS checkpoint_count, "
+                "(SELECT sc.stage FROM search_checkpoints sc WHERE sc.run_id = r.id ORDER BY sc.sequence DESC, sc.id DESC LIMIT 1) AS checkpoint_stage"
+                if self._checkpoint_schema_available
+                else "0 AS checkpoint_count, '' AS checkpoint_stage"
+            )
             rows = conn.execute(
-                """
+                f"""
                 SELECT r.*,
                        (SELECT COUNT(*) FROM search_results sr WHERE sr.run_id = r.id) AS result_count,
-                       (SELECT COUNT(*) FROM search_events se WHERE se.run_id = r.id) AS event_count
+                       (SELECT COUNT(*) FROM search_events se WHERE se.run_id = r.id) AS event_count,
+                       {checkpoint_columns}
                 FROM search_runs r
                 ORDER BY r.created_at DESC
                 LIMIT ? OFFSET ?
@@ -476,11 +644,18 @@ class HistoryStore:
         if not self.enabled:
             return None
         with self._connection() as conn:
+            checkpoint_columns = (
+                "(SELECT COUNT(*) FROM search_checkpoints sc WHERE sc.run_id = r.id) AS checkpoint_count, "
+                "(SELECT sc.stage FROM search_checkpoints sc WHERE sc.run_id = r.id ORDER BY sc.sequence DESC, sc.id DESC LIMIT 1) AS checkpoint_stage"
+                if self._checkpoint_schema_available
+                else "0 AS checkpoint_count, '' AS checkpoint_stage"
+            )
             row = conn.execute(
-                """
+                f"""
                 SELECT r.*,
                        (SELECT COUNT(*) FROM search_results sr WHERE sr.run_id = r.id) AS result_count,
-                       (SELECT COUNT(*) FROM search_events se WHERE se.run_id = r.id) AS event_count
+                       (SELECT COUNT(*) FROM search_events se WHERE se.run_id = r.id) AS event_count,
+                       {checkpoint_columns}
                 FROM search_runs r
                 WHERE r.id = ?
                 """,
@@ -499,6 +674,7 @@ class HistoryStore:
         data = self._run_row_to_dict(row, include_payload=True)
         data["events"] = [self._event_row_to_dict(event) for event in events]
         data["ranked"] = [self._result_row_to_dict(result) for result in results]
+        data["checkpoint"] = self.latest_checkpoint(run_id)
         return data
 
     def delete_run(self, run_id: str) -> bool:
@@ -566,11 +742,17 @@ class HistoryStore:
             "finished_at": row["finished_at"] or "",
             "result_count": row["result_count"],
             "event_count": row["event_count"],
+            "checkpoint_count": row["checkpoint_count"],
+            "checkpoint_stage": row["checkpoint_stage"] or "",
+            "resumable": bool(row["checkpoint_count"] and row["status"] != "success"),
         }
         if include_payload:
             data["params"] = _json_loads(row["params_json"], {})
             data["history"] = _json_loads(row["history_json"], [])
+            data["search_loop"] = _json_loads(row["search_loop_json"], {})
+            data["search_state"] = _json_loads(row["search_state_json"], {})
             data["citation_map"] = _json_loads(row["citation_map_json"], {})
+            data["ranking_steps"] = _json_loads(row["ranking_steps_json"], [])
         return data
 
     def _event_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:

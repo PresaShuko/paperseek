@@ -1,8 +1,9 @@
-from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html import unescape
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+import math
 import re
 import requests
 import threading
@@ -201,6 +202,8 @@ def _retry_delay(response: requests.Response, attempt: int, source: str = "") ->
     except (TypeError, ValueError):
         if response.status_code == 429 and (source or "").lower() == "arxiv":
             return min(5.0 * attempt, 20.0)
+        if response.status_code == 429 and (source or "").lower() == "semanticscholar":
+            return min(2.0 * attempt, 8.0)
         return 0.7 * attempt
 
 
@@ -213,9 +216,14 @@ class OpenAlexProvider:
         self.last_response_info: Dict[str, Any] = {}
 
     def retrieval_capabilities(self) -> ProviderRetrievalCapabilities:
+        lanes = [RetrievalLane.RELEVANCE]
+        if self.api_key:
+            lanes.append(RetrievalLane.SEMANTIC)
+        lanes.extend((RetrievalLane.IMPACT, RetrievalLane.RECENT))
         return ProviderRetrievalCapabilities(
             source="openalex",
-            lanes=(RetrievalLane.RELEVANCE, RetrievalLane.IMPACT, RetrievalLane.RECENT),
+            lanes=tuple(lanes),
+            lane_concurrency=2,
         )
 
     def search(
@@ -229,10 +237,12 @@ class OpenAlexProvider:
         query = (query or "").strip()
         if not query:
             raise ProviderError("openalex", "OpenAlex search query is empty.")
+        if lane == RetrievalLane.SEMANTIC and not self.api_key:
+            raise ProviderError("openalex", "OpenAlex semantic search requires an API key.", query=query)
 
-        page_size = max(1, min(int(limit or 10), 100))
+        page_limit = 50 if lane == RetrievalLane.SEMANTIC else 100
+        page_size = max(1, min(int(limit or 10), page_limit))
         params = {
-            "search": query,
             "per-page": page_size,
             "page": max(1, int(page or 1)),
             "select": ",".join([
@@ -256,6 +266,10 @@ class OpenAlexProvider:
                 "referenced_works",
             ]),
         }
+        if lane == RetrievalLane.SEMANTIC:
+            params["search.semantic"] = query
+        else:
+            params["search"] = query
         normalized_field_ids = self._normalize_field_ids(field_ids)
         if normalized_field_ids:
             params["filter"] = self._field_filter_clause(normalized_field_ids)
@@ -327,17 +341,44 @@ class OpenAlexProvider:
         field_ids: Optional[Sequence[str]] = None,
         seed_plans: Optional[Sequence[Any]] = None,
         depth: int = 1,
+        cancel_check: Optional[Callable[[], None]] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        request_attempts: int = 3,
+        request_timeout: int = 30,
     ) -> Dict[str, Any]:
         """Fetch forward and backward citation neighbors for seed OpenAlex works."""
         per_seed = max(1, min(int(per_seed or 4), 10))
         max_records = max(1, min(int(max_records or 40), 500))
         depth = max(1, min(int(depth or 1), 3))
+        request_attempts = max(1, min(int(request_attempts or 3), 3))
+        request_timeout = max(5, min(int(request_timeout or 30), 30))
         normalized_field_ids = self._normalize_field_ids(field_ids)
         output: List[PaperRecord] = []
         nodes: Dict[str, Dict[str, Any]] = {}
         edges: List[Dict[str, str]] = []
         seen = set()
         expanded = set()
+        direction_budget = max(1, int(math.ceil(max_records * 0.7)))
+        request_budget = max(1, max_records)
+        direction_stats = {
+            direction: {"budget": direction_budget, "requests": 0, "fetched": 0, "added": 0, "duplicates": 0, "filtered": 0}
+            for direction in ("backward", "forward")
+        }
+        depth_stats: Dict[str, Dict[str, int]] = {}
+        processed_plans = 0
+        consecutive_empty_plans = 0
+        stop_reason = ""
+
+        def request_count() -> int:
+            return sum(stats["requests"] for stats in direction_stats.values())
+
+        def check_cancelled() -> None:
+            if cancel_check:
+                cancel_check()
+
+        def emit_progress(**payload: Any) -> None:
+            if progress_callback:
+                progress_callback(payload)
 
         def add_node(record: PaperRecord, role: str, seed_uid: str = ""):
             node_id = record.uid or (record.identifiers.openalex if record.identifiers else "") or record.title
@@ -362,16 +403,17 @@ class OpenAlexProvider:
                 "seed_uids": [seed_uid] if seed_uid else [],
             }
 
-        def add_record(record: Optional[PaperRecord]):
+        def add_record(record: Optional[PaperRecord]) -> bool:
             if not record:
-                return
+                return False
             key = (record.uid or "").lower()
             doi = ((record.identifiers.doi if record.identifiers else "") or "").lower()
             dedupe = key or doi
             if not dedupe or dedupe in seen:
-                return
+                return False
             seen.add(dedupe)
             output.append(record)
+            return True
 
         def normalize_seed_plans() -> List[CitationSeedPlan]:
             plans: List[CitationSeedPlan] = []
@@ -413,12 +455,20 @@ class OpenAlexProvider:
             layer: int,
             next_frontier: List[PaperRecord],
             frontier_seen: set,
-        ):
-            if not record or not self._record_matches_field_ids(record, normalized_field_ids):
-                return
+        ) -> bool:
+            if not record:
+                return False
+            if not self._record_matches_field_ids(record, normalized_field_ids):
+                direction_stats[direction]["filtered"] += 1
+                layer_stats = depth_stats.setdefault(
+                    str(layer),
+                    {"expanded_items": 0, "fetched": 0, "added": 0, "duplicates": 0, "filtered": 0},
+                )
+                layer_stats["filtered"] += 1
+                return False
             record_uid = record.uid or (record.identifiers.openalex if record.identifiers else "") or record.title
             if not record_uid:
-                return
+                return False
             role = "backward" if direction == "backward" else "forward"
             add_node(record, role, seed_uid)
             if direction == "backward":
@@ -438,80 +488,190 @@ class OpenAlexProvider:
                     "layer": str(layer),
                 }
             edges.append(edge)
-            add_record(record)
+            added = add_record(record)
+            layer_stats = depth_stats.setdefault(
+                str(layer),
+                {"expanded_items": 0, "fetched": 0, "added": 0, "duplicates": 0, "filtered": 0},
+            )
+            if added:
+                direction_stats[direction]["added"] += 1
+                layer_stats["added"] += 1
+            else:
+                direction_stats[direction]["duplicates"] += 1
+                layer_stats["duplicates"] += 1
             if layer < depth and record_uid not in frontier_seen:
                 frontier_seen.add(record_uid)
                 next_frontier.append(record)
+            return added
 
-        for plan in normalize_seed_plans():
+        plans = normalize_seed_plans()
+        role_count = len({role for plan in plans for role in str(plan.role or "relevance").split("+")})
+        minimum_plans_before_yield_stop = min(len(plans), max(6, role_count * 2))
+        emit_progress(event="start", current=0, total=len(plans), records=0, edges=0)
+        for plan_index, plan in enumerate(plans, 1):
+            check_cancelled()
             if len(output) >= max_records:
+                stop_reason = "max_records"
+                break
+            if request_count() >= request_budget:
+                stop_reason = "request_budget"
                 break
             seed = plan.record
             seed_id = self._openalex_work_id(seed)
             if not seed_id:
                 continue
+            plan_output_before = len(output)
+            remaining_plans = max(1, len(plans) - plan_index + 1)
+            plan_record_budget = max(1, int(math.ceil((max_records - len(output)) / remaining_plans)))
             seed_uid = seed.uid or (seed.identifiers.openalex if seed.identifiers else "") or seed_id
             add_node(seed, "seed")
             add_node(seed, f"seed_{plan.role}", seed_uid)
             frontier = [seed]
             frontier_seen = {seed_uid}
             for layer in range(1, max(1, min(plan.depth, depth)) + 1):
+                check_cancelled()
                 next_frontier: List[PaperRecord] = []
+                layer_output_before = len(output)
+                layer_stats = depth_stats.setdefault(
+                    str(layer),
+                    {"expanded_items": 0, "fetched": 0, "added": 0, "duplicates": 0, "filtered": 0},
+                )
                 for current in frontier:
-                    if len(output) >= max_records:
+                    check_cancelled()
+                    if (
+                        len(output) >= max_records
+                        or len(output) - plan_output_before >= plan_record_budget
+                        or request_count() >= request_budget
+                    ):
                         break
                     current_id = self._openalex_work_id(current)
                     if not current_id:
                         continue
+                    layer_stats["expanded_items"] += 1
                     current_uid = current.uid or (current.identifiers.openalex if current.identifiers else "") or current_id
-                    if "backward" in plan.directions:
-                        expand_key = (current_id, "backward", layer)
-                        if expand_key not in expanded:
-                            expanded.add(expand_key)
-                            for ref_url in (current.raw.get("referenced_works") or [])[:per_seed]:
-                                if len(output) >= max_records:
-                                    break
+                    direction_jobs: Dict[str, Any] = {}
+                    references = list(((getattr(current, "raw", None) or {}).get("referenced_works") or [])[:per_seed])
+                    backward_key = (current_id, "backward", layer)
+                    if (
+                        references
+                        and "backward" in plan.directions
+                        and direction_stats["backward"]["added"] < direction_budget
+                        and request_count() < request_budget
+                        and backward_key not in expanded
+                    ):
+                        expanded.add(backward_key)
+                        direction_jobs["backward"] = references
+
+                    forward_key = (current_id, "forward", layer)
+                    if (
+                        "forward" in plan.directions
+                        and direction_stats["forward"]["added"] < direction_budget
+                        and request_count() + len(direction_jobs) < request_budget
+                        and forward_key not in expanded
+                    ):
+                        expanded.add(forward_key)
+                        direction_jobs["forward"] = current_id
+
+                    direction_records: Dict[str, List[PaperRecord]] = {}
+                    if direction_jobs:
+                        workers = min(2, len(direction_jobs))
+                        with ThreadPoolExecutor(max_workers=workers) as executor:
+                            future_to_direction = {}
+                            if "backward" in direction_jobs:
+                                direction_stats["backward"]["requests"] += 1
+                                future_to_direction[
+                                    executor.submit(
+                                        self._fetch_works,
+                                        direction_jobs["backward"],
+                                        attempts=request_attempts,
+                                        timeout=request_timeout,
+                                    )
+                                ] = "backward"
+                            if "forward" in direction_jobs:
+                                direction_stats["forward"]["requests"] += 1
+                                future_to_direction[
+                                    executor.submit(
+                                        self._fetch_forward_citations,
+                                        direction_jobs["forward"],
+                                        per_seed,
+                                        field_ids=normalized_field_ids,
+                                        attempts=request_attempts,
+                                        timeout=request_timeout,
+                                    )
+                                ] = "forward"
+                            for future, direction in future_to_direction.items():
+                                check_cancelled()
                                 try:
-                                    record = self._fetch_work(ref_url)
+                                    direction_records[direction] = list(future.result() or [])
                                 except ProviderError:
-                                    continue
-                                append_neighbor(
-                                    seed_uid=seed_uid,
-                                    parent_uid=current_uid,
-                                    record=record,
-                                    direction="backward",
-                                    layer=layer,
-                                    next_frontier=next_frontier,
-                                    frontier_seen=frontier_seen,
-                                )
-                    if len(output) >= max_records:
-                        break
-                    if "forward" in plan.directions:
-                        expand_key = (current_id, "forward", layer)
-                        if expand_key in expanded:
-                            continue
-                        expanded.add(expand_key)
-                        try:
-                            records = self._fetch_forward_citations(current_id, per_seed, field_ids=normalized_field_ids)
-                        except ProviderError:
-                            continue
+                                    direction_records[direction] = []
+
+                    for direction in ("backward", "forward"):
+                        records = direction_records.get(direction, [])
+                        direction_stats[direction]["fetched"] += len(records)
+                        layer_stats["fetched"] += len(records)
                         for record in records:
-                            if len(output) >= max_records:
+                            check_cancelled()
+                            if (
+                                len(output) >= max_records
+                                or len(output) - plan_output_before >= plan_record_budget
+                                or direction_stats[direction]["added"] >= direction_budget
+                            ):
                                 break
                             append_neighbor(
                                 seed_uid=seed_uid,
                                 parent_uid=current_uid,
                                 record=record,
-                                direction="forward",
+                                direction=direction,
                                 layer=layer,
                                 next_frontier=next_frontier,
                                 frontier_seen=frontier_seen,
                             )
+                    if len(output) >= max_records or len(output) - plan_output_before >= plan_record_budget:
+                        break
                 frontier = next_frontier
-                if not frontier or len(output) >= max_records:
+                layer_added = len(output) - layer_output_before
+                if layer_added == 0 and layer < max(1, min(plan.depth, depth)):
                     break
+                if (
+                    not frontier
+                    or len(output) >= max_records
+                    or len(output) - plan_output_before >= plan_record_budget
+                ):
+                    break
+            processed_plans += 1
+            plan_added = len(output) - plan_output_before
+            consecutive_empty_plans = consecutive_empty_plans + 1 if plan_added == 0 else 0
+            emit_progress(event="seed_complete", current=plan_index, total=len(plans), records=len(output), edges=len(edges))
 
-        return {"records": output, "nodes": list(nodes.values()), "edges": edges}
+            if len(output) >= max_records:
+                stop_reason = "max_records"
+                break
+            if request_count() >= request_budget:
+                stop_reason = "request_budget"
+                break
+            if (
+                processed_plans >= minimum_plans_before_yield_stop
+                and consecutive_empty_plans >= 3
+                and plan_index < len(plans)
+            ):
+                stop_reason = "low_yield"
+                break
+
+        if not stop_reason:
+            stop_reason = "completed"
+        frontier_state = {
+            "planned_items": len(plans),
+            "processed_items": processed_plans,
+            "skipped_items": max(0, len(plans) - processed_plans),
+            "request_count": request_count(),
+            "request_budget": request_budget,
+            "stop_reason": stop_reason,
+            "direction_stats": direction_stats,
+            "depth_stats": depth_stats,
+        }
+
+        return {"records": output, "nodes": list(nodes.values()), "edges": edges, "frontier": frontier_state}
 
     @classmethod
     def _normalize_field_ids(cls, field_ids: Optional[Sequence[str]]) -> List[str]:
@@ -545,14 +705,22 @@ class OpenAlexProvider:
             params["mailto"] = self.email
         return params
 
-    def _fetch_work(self, openalex_id: str) -> Optional[PaperRecord]:
+    def _fetch_work(self, openalex_id: str, *, attempts: int = 3, timeout: int = 30) -> Optional[PaperRecord]:
         identifier = self._normalize_openalex_id(openalex_id)
         if not identifier:
             return None
         url = f"{self.BASE_URL}/{identifier}"
         headers = {"Accept": "application/json", "User-Agent": self._user_agent()}
         try:
-            response, info = get_with_retries("openalex", url, params=self._base_params(), headers=headers, timeout=30, query=identifier)
+            response, info = get_with_retries(
+                "openalex",
+                url,
+                params=self._base_params(),
+                headers=headers,
+                timeout=timeout,
+                query=identifier,
+                attempts=attempts,
+            )
             self.last_response_info = info
         except ProviderError as exc:
             self.last_response_info = {"method": "GET", "url": url, "status": "request_error", "elapsed_ms": None}
@@ -566,7 +734,104 @@ class OpenAlexProvider:
             raise ProviderError("openalex", "OpenAlex returned a non-JSON citation response.", body=response.text[:1000], query=identifier) from exc
         return self._to_record(work) if isinstance(work, dict) else None
 
-    def _fetch_forward_citations(self, seed_id: str, limit: int, field_ids: Optional[Sequence[str]] = None) -> List[PaperRecord]:
+    def _fetch_works(
+        self,
+        openalex_ids: Sequence[str],
+        *,
+        attempts: int = 3,
+        timeout: int = 30,
+    ) -> List[PaperRecord]:
+        identifiers: List[str] = []
+        for value in openalex_ids or []:
+            identifier = self._normalize_openalex_id(str(value or ""))
+            if identifier and identifier not in identifiers:
+                identifiers.append(identifier)
+            if len(identifiers) >= 100:
+                break
+        if not identifiers:
+            return []
+
+        params = self._base_params()
+        params.update({
+            "filter": "openalex:" + "|".join(identifiers),
+            "per-page": len(identifiers),
+            "select": ",".join([
+                "id",
+                "doi",
+                "title",
+                "display_name",
+                "publication_year",
+                "publication_date",
+                "type",
+                "type_crossref",
+                "authorships",
+                "primary_location",
+                "cited_by_count",
+                "abstract_inverted_index",
+                "open_access",
+                "keywords",
+                "concepts",
+                "ids",
+                "primary_topic",
+                "referenced_works",
+            ]),
+        })
+        headers = {"Accept": "application/json", "User-Agent": self._user_agent()}
+        query = "|".join(identifiers)
+        try:
+            response, info = get_with_retries(
+                "openalex",
+                self.BASE_URL,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+                query=query,
+                attempts=attempts,
+            )
+            self.last_response_info = info
+        except ProviderError as exc:
+            self.last_response_info = {
+                "method": "GET",
+                "url": self.BASE_URL,
+                "status": "request_error",
+                "elapsed_ms": None,
+            }
+            raise exc
+
+        if response.status_code >= 400:
+            raise ProviderError(
+                "openalex",
+                f"OpenAlex returned HTTP {response.status_code}.",
+                status=response.status_code,
+                body=response.text[:1000],
+                query=query,
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProviderError(
+                "openalex",
+                "OpenAlex returned a non-JSON batched citation response.",
+                body=response.text[:1000],
+                query=query,
+            ) from exc
+        records = [
+            self._to_record(work)
+            for work in ((payload or {}).get("results") or [])
+            if isinstance(work, dict)
+        ]
+        records_by_id = {self._openalex_work_id(record): record for record in records}
+        return [records_by_id[identifier] for identifier in identifiers if identifier in records_by_id]
+
+    def _fetch_forward_citations(
+        self,
+        seed_id: str,
+        limit: int,
+        field_ids: Optional[Sequence[str]] = None,
+        *,
+        attempts: int = 3,
+        timeout: int = 30,
+    ) -> List[PaperRecord]:
         params = self._base_params()
         filter_parts = [f"cites:{seed_id}"]
         field_clause = self._field_filter_clause(self._normalize_field_ids(field_ids))
@@ -599,7 +864,15 @@ class OpenAlexProvider:
         })
         headers = {"Accept": "application/json", "User-Agent": self._user_agent()}
         try:
-            response, info = get_with_retries("openalex", self.BASE_URL, params=params, headers=headers, timeout=30, query=seed_id)
+            response, info = get_with_retries(
+                "openalex",
+                self.BASE_URL,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+                query=seed_id,
+                attempts=attempts,
+            )
             self.last_response_info = info
         except ProviderError as exc:
             self.last_response_info = {"method": "GET", "url": self.BASE_URL, "status": "request_error", "elapsed_ms": None}
@@ -620,17 +893,17 @@ class OpenAlexProvider:
 
     def _to_record(self, work: Dict[str, Any]) -> PaperRecord:
         openalex_id = work.get("id") or ""
-        title = work.get("title") or work.get("display_name") or ""
+        title = self._clean_metadata_text(work.get("title") or work.get("display_name") or "")
         primary_location = work.get("primary_location") or {}
         source_obj = primary_location.get("source") or {}
-        source_title = source_obj.get("display_name") or ""
+        source_title = self._clean_metadata_text(source_obj.get("display_name") or "")
         landing_page = primary_location.get("landing_page_url") or ""
         pdf_url = (primary_location.get("pdf_url") or "")
 
         authors = []
         for authorship in work.get("authorships") or []:
             author_obj = authorship.get("author") or {}
-            display = author_obj.get("display_name") or ""
+            display = self._clean_metadata_text(author_obj.get("display_name") or "")
             if display:
                 authors.append(PaperAuthor(display_name=display, wos_standard=display))
 
@@ -665,6 +938,12 @@ class OpenAlexProvider:
             provider="openalex",
             raw=work,
         )
+
+    @staticmethod
+    def _clean_metadata_text(value: Any) -> str:
+        text = unescape(str(value or ""))
+        text = re.sub(r"\\[nrt]", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
     def _normalize_openalex_id(value: str) -> str:
@@ -706,6 +985,7 @@ class CrossrefProvider:
         return ProviderRetrievalCapabilities(
             source="crossref",
             lanes=(RetrievalLane.RELEVANCE, RetrievalLane.IMPACT, RetrievalLane.RECENT),
+            lane_concurrency=2,
         )
 
     def search(self, query: str, limit: int = 50, page: int = 1, lane: str = RetrievalLane.RELEVANCE) -> ProviderSearchResult:
@@ -1244,7 +1524,7 @@ class ArxivProvider:
         headers = {"Accept": "application/atom+xml", "User-Agent": "paperseek/1.0"}
         try:
             self._throttle()
-            response, info = get_with_retries("arxiv", self.BASE_URL, params=params, headers=headers, timeout=20, query=query, attempts=1)
+            response, info = get_with_retries("arxiv", self.BASE_URL, params=params, headers=headers, timeout=45, query=query, attempts=3)
             self.last_response_info = info
         except ProviderError as exc:
             self.last_response_info = {"method": "GET", "url": self.BASE_URL, "status": "request_error", "elapsed_ms": None}
@@ -1351,6 +1631,9 @@ class ArxivProvider:
 class SemanticScholarProvider:
     BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
     BULK_URL = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
+    _lock = threading.Lock()
+    _last_request_at = 0.0
+    _minimum_request_interval = 1.2
     FULL_FIELDS = (
         "paperId",
         "corpusId",
@@ -1410,6 +1693,7 @@ class SemanticScholarProvider:
         if self.api_key:
             headers["x-api-key"] = self.api_key
         try:
+            self._throttle()
             response, info = get_with_retries("semanticscholar", self.BASE_URL, params=params, headers=headers, timeout=45, query=query)
             self.last_response_info = info
         except ProviderError as exc:
@@ -1418,6 +1702,7 @@ class SemanticScholarProvider:
         if response.status_code >= 500:
             fallback_params = dict(params)
             fallback_params["fields"] = ",".join(self.FALLBACK_FIELDS)
+            self._throttle()
             response, fallback_info = get_with_retries(
                 "semanticscholar",
                 self.BASE_URL,
@@ -1461,6 +1746,7 @@ class SemanticScholarProvider:
         if self.api_key:
             headers["x-api-key"] = self.api_key
         try:
+            self._throttle()
             response, info = get_with_retries("semanticscholar", self.BULK_URL, params=params, headers=headers, timeout=45, query=query)
             self.last_response_info = info
         except ProviderError as exc:
@@ -1469,6 +1755,7 @@ class SemanticScholarProvider:
         if response.status_code >= 500:
             fallback_params = dict(params)
             fallback_params["fields"] = ",".join(self.FALLBACK_FIELDS)
+            self._throttle()
             response, fallback_info = get_with_retries(
                 "semanticscholar",
                 self.BULK_URL,
@@ -1495,6 +1782,14 @@ class SemanticScholarProvider:
         records = [self._to_record(item) for item in papers if isinstance(item, dict)]
         total = int(payload.get("total") or len(records))
         return ProviderSearchResult(metadata=SearchMetadata(total=total, page=1, limit=page_size), hits=records)
+
+    @classmethod
+    def _throttle(cls) -> None:
+        with cls._lock:
+            elapsed = time.monotonic() - cls._last_request_at
+            if elapsed < cls._minimum_request_interval:
+                time.sleep(cls._minimum_request_interval - elapsed)
+            cls._last_request_at = time.monotonic()
 
     def _to_record(self, item: Dict[str, Any]) -> PaperRecord:
         external = item.get("externalIds") or {}
@@ -1704,8 +1999,19 @@ class PaperHubQuery:
 class PaperHubProvider:
     MANIFEST_URL = "https://raw.githubusercontent.com/Yupu-Wang/paper-hub/main/data/manifest.json"
     RAW_BASE_URL = "https://raw.githubusercontent.com/Yupu-Wang/paper-hub/main/data"
+    CACHE_TTL_SECONDS = 3600
+    MAX_DOWNLOAD_WORKERS = 8
     _lock = threading.Lock()
     _paper_cache: Optional[List[Dict[str, Any]]] = None
+    _paper_cache_loaded_at = 0.0
+    _paper_cache_manifest_version = ""
+
+    @classmethod
+    def reset_cache(cls) -> None:
+        with cls._lock:
+            cls._paper_cache = None
+            cls._paper_cache_loaded_at = 0.0
+            cls._paper_cache_manifest_version = ""
 
     def __init__(self):
         self.last_response_info: Dict[str, Any] = {}
@@ -1743,38 +2049,160 @@ class PaperHubProvider:
         )
 
     def _load_papers(self, query: str) -> List[Dict[str, Any]]:
-        if PaperHubProvider._paper_cache is not None:
+        now = time.monotonic()
+        if (
+            PaperHubProvider._paper_cache is not None
+            and now - PaperHubProvider._paper_cache_loaded_at < self.CACHE_TTL_SECONDS
+        ):
             return PaperHubProvider._paper_cache
         with PaperHubProvider._lock:
-            if PaperHubProvider._paper_cache is not None:
+            now = time.monotonic()
+            if (
+                PaperHubProvider._paper_cache is not None
+                and now - PaperHubProvider._paper_cache_loaded_at < self.CACHE_TTL_SECONDS
+            ):
                 return PaperHubProvider._paper_cache
-            response, info = get_with_retries("paperhub", self.MANIFEST_URL, headers={"Accept": "application/json"}, timeout=45, query=query)
-            self.last_response_info = info
-            if response.status_code >= 400:
-                raise ProviderError("paperhub", f"Paper Hub manifest returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+
+            stale_cache = PaperHubProvider._paper_cache
             try:
-                manifest = response.json()
-            except ValueError as exc:
-                raise ProviderError("paperhub", "Paper Hub manifest returned non-JSON content.", body=response.text[:1000], query=query) from exc
-            papers: List[Dict[str, Any]] = []
-            for shard in manifest.get("shards") or []:
-                file_name = shard.get("file") if isinstance(shard, dict) else ""
-                if not file_name:
-                    continue
-                url = f"{self.RAW_BASE_URL}/{file_name}"
-                shard_response, shard_info = get_with_retries("paperhub", url, headers={"Accept": "application/json"}, timeout=60, query=query)
-                self.last_response_info = shard_info
-                if shard_response.status_code >= 400:
-                    continue
+                response, info = get_with_retries(
+                    "paperhub",
+                    self.MANIFEST_URL,
+                    headers={"Accept": "application/json"},
+                    timeout=45,
+                    query=query,
+                )
+                if response.status_code >= 400:
+                    raise ProviderError(
+                        "paperhub",
+                        f"Paper Hub manifest returned HTTP {response.status_code}.",
+                        status=response.status_code,
+                        body=response.text[:1000],
+                        query=query,
+                    )
                 try:
-                    payload = shard_response.json()
-                except ValueError:
-                    continue
-                for paper in payload.get("papers") or []:
-                    if isinstance(paper, dict):
-                        papers.append(paper)
+                    manifest = response.json()
+                except ValueError as exc:
+                    raise ProviderError(
+                        "paperhub",
+                        "Paper Hub manifest returned non-JSON content.",
+                        body=response.text[:1000],
+                        query=query,
+                    ) from exc
+
+                shards = self._manifest_shards(manifest, query)
+                manifest_version = self._manifest_version(manifest, shards)
+                if stale_cache is not None and manifest_version == PaperHubProvider._paper_cache_manifest_version:
+                    PaperHubProvider._paper_cache_loaded_at = now
+                    self.last_response_info = {
+                        **info,
+                        "manifest_version": manifest_version,
+                        "shards": len(shards),
+                        "papers": len(stale_cache),
+                        "cache_revalidated": True,
+                    }
+                    return stale_cache
+
+                workers = min(self.MAX_DOWNLOAD_WORKERS, len(shards))
+                with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="paperhub") as executor:
+                    futures = [executor.submit(self._download_shard, shard, query) for shard in shards]
+                    chunks = [future.result() for future in futures]
+
+                papers = [paper for chunk in chunks for paper in chunk]
+                expected_total = sum(int(shard.get("count") or 0) for shard in shards)
+                if expected_total and len(papers) != expected_total:
+                    raise ProviderError(
+                        "paperhub",
+                        f"Paper Hub snapshot count mismatch: expected {expected_total}, received {len(papers)}.",
+                        query=query,
+                    )
+            except Exception as exc:
+                if stale_cache is not None:
+                    self.last_response_info = {
+                        "method": "GET",
+                        "url": self.MANIFEST_URL,
+                        "status": "stale_cache",
+                        "papers": len(stale_cache),
+                        "refresh_error": str(exc),
+                    }
+                    PaperHubProvider._paper_cache_loaded_at = now
+                    return stale_cache
+                if isinstance(exc, ProviderError):
+                    raise
+                raise ProviderError("paperhub", f"Paper Hub snapshot loading failed: {exc}", query=query) from exc
+
             PaperHubProvider._paper_cache = papers
+            PaperHubProvider._paper_cache_loaded_at = now
+            PaperHubProvider._paper_cache_manifest_version = manifest_version
+            self.last_response_info = {
+                **info,
+                "manifest_version": manifest_version,
+                "shards": len(shards),
+                "papers": len(papers),
+                "download_workers": workers,
+            }
             return papers
+
+    @staticmethod
+    def _manifest_shards(manifest: Any, query: str) -> List[Dict[str, Any]]:
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("shards"), list):
+            raise ProviderError("paperhub", "Paper Hub manifest did not contain a shard list.", query=query)
+        shards: List[Dict[str, Any]] = []
+        for shard in manifest["shards"]:
+            if not isinstance(shard, dict):
+                raise ProviderError("paperhub", "Paper Hub manifest contained an invalid shard entry.", query=query)
+            file_name = str(shard.get("file") or "").strip().replace("\\", "/")
+            if not file_name or file_name.startswith("/") or ".." in file_name.split("/"):
+                raise ProviderError("paperhub", "Paper Hub manifest contained an unsafe shard path.", query=query)
+            shards.append({**shard, "file": file_name})
+        if not shards:
+            raise ProviderError("paperhub", "Paper Hub manifest did not list any data shards.", query=query)
+        return shards
+
+    @staticmethod
+    def _manifest_version(manifest: Dict[str, Any], shards: Sequence[Dict[str, Any]]) -> str:
+        built_at = str(manifest.get("built_at") or "").strip()
+        shard_signature = "|".join(str(shard.get("file") or "") for shard in shards)
+        return f"{built_at}|{shard_signature}"
+
+    def _download_shard(self, shard: Dict[str, Any], query: str) -> List[Dict[str, Any]]:
+        file_name = str(shard["file"])
+        url = f"{self.RAW_BASE_URL}/{file_name}"
+        response, _ = get_with_retries(
+            "paperhub",
+            url,
+            headers={"Accept": "application/json"},
+            timeout=90,
+            query=query,
+        )
+        if response.status_code >= 400:
+            raise ProviderError(
+                "paperhub",
+                f"Paper Hub shard {file_name} returned HTTP {response.status_code}.",
+                status=response.status_code,
+                body=response.text[:1000],
+                query=query,
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProviderError(
+                "paperhub",
+                f"Paper Hub shard {file_name} returned non-JSON content.",
+                body=response.text[:1000],
+                query=query,
+            ) from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("papers"), list):
+            raise ProviderError("paperhub", f"Paper Hub shard {file_name} did not contain a paper list.", query=query)
+        papers = [paper for paper in payload["papers"] if isinstance(paper, dict)]
+        expected_count = int(shard.get("count") or 0)
+        if expected_count and len(papers) != expected_count:
+            raise ProviderError(
+                "paperhub",
+                f"Paper Hub shard {file_name} count mismatch: expected {expected_count}, received {len(papers)}.",
+                query=query,
+            )
+        return papers
 
     @classmethod
     def _parse_query(cls, query: str) -> PaperHubQuery:

@@ -1,0 +1,8 @@
+include LICENSE
+include README.md
+include THIRD_PARTY_NOTICES.md
+
+prune benchmarks
+exclude tests/test_benchmark_runner.py
+exclude tests/test_candidate_selector_replay.py
+exclude tests/test_pasa_selector_endpoint.py

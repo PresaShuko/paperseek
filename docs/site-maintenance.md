@@ -55,6 +55,11 @@ PYPI_API_TOKEN
 
 - `pyproject.toml` 中的 `project.version`
 - `paperseek/__init__.py` 中的 `__version__`
+- `paperseek_core/__init__.py` 中的 `__version__`
+- `tests/test_packaging.py` 中的版本断言
+- `README.md`、`README.en.md` 和对应版本更新说明
+
+版本提交合并后，先确认 Python CI、文档构建、wheel/sdist 构建和 `twine check` 全部通过，再创建与包版本一致的 GitHub Release 和 tag。GitHub Release 会触发 PyPI 工作流；同一版本的上传产物不能覆盖。
 
 PyPI 不允许覆盖同一版本号。若上传失败提示文件已存在，应升高版本号后重新构建发布。
 
