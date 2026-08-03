@@ -55,8 +55,8 @@
 - 检索循环改为显式状态机，支持原生执行器和可选 LangGraph 后端；停止、失败和网络波动会保留部分结果与检查点，允许从最近阶段恢复，而不是重新开始整个检索。
 - 新增 `fast`、`medium`、`high`、`max` 检索预算。默认 `fast` 关闭可选模型思考并控制请求量；更高预算会同步扩大查询、召回、排序和引用扩展容量。
 - Web UI 改为渐进式过程展示：当前阶段自动展开，已完成阶段折叠为摘要，错误和恢复审计按需展开；检索完成后仍停留在流程页，由用户决定何时查看结果或引用图谱。
-- 本次重构参考了 PASA 的 Crawler / Selector 分工与候选队列、PydanticAI 的结构化输出校验、LangGraph 的显式状态图，以及 ARIS 的检查点与恢复审计；计算机顶会数据源继续基于经作者同意的 PaperHub 集成。完整致谢见 [第三方声明](THIRD_PARTY_NOTICES.md)。
-- WoS Starter 客户端改为轻量独立适配层，保留 PaperSeek 所需的请求、错误和响应模型接口，并增加鉴权头、参数、解析与错误传播测试。
+- 检索流程设计参考 PASA 的 Crawler / Selector 分工与候选队列；结构化数据契约和可选状态图由 Pydantic、PydanticAI 与 LangGraph 支持；计算机顶会数据源继续基于经作者同意的 PaperHub 集成。
+- WoS Starter 改用更轻量的适配层，现有调用方式保持兼容，并提供更清晰的鉴权、查询参数和上游错误提示。
 - Python 最低版本调整为 3.10。升级、配置变化和兼容边界见 [v0.3.0 更新说明](docs/v0.3.0.md)。
 
 ### v0.2.1 - 在线服务与模型路由更新
@@ -698,18 +698,13 @@ PaperSeek 当前处于 alpha 阶段。CLI、Web UI、OpenAlex、arXiv、Semantic
 
 ## 致谢
 
-PaperSeek 的设计和实现参考了以下开源项目：
+感谢以下开源项目为 PaperSeek 的公开功能提供支持或设计参考：
 
-- [dr-dumpling/paper-search-cli](https://github.com/dr-dumpling/paper-search-cli/)：参考 CLI 使用方式与文献检索工作流设计。
-- [666ghj/MiroFish](https://github.com/666ghj/MiroFish)：参考 Web 前端界面的左右分栏和工作流展示风格。
-- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client)：参考 Web of Science Starter API 的接口行为和响应结构；PaperSeek 使用独立的轻量适配层。
 - [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub)：经作者同意后集成，用于提供计算机顶会检索支持。
-- [Lloyd-Jahn/openclaw-paper-search](https://github.com/Lloyd-Jahn/openclaw-paper-search)：参考文献搜索工具的组织方式。
 - [bytedance/pasa](https://github.com/bytedance/pasa)：参考 Crawler / Selector 分工、候选队列和引用扩展调度。
 - [pydantic/pydantic](https://github.com/pydantic/pydantic) 与 [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai)：用于类型化数据契约，并通过可选适配器提供有界结构化输出重试。
 - [langchain-ai/langchain](https://github.com/langchain-ai/langchain) 与 [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)：通过公开 Python API 提供可选状态图执行后端；默认仍使用 PaperSeek 原生执行器。
-- [wanshuiyin/Auto-claude-code-research-in-sleep](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep)：参考长流程中的显式状态、检查点、预算和恢复审计设计。
 
 ## 开源协议
 
-PaperSeek 使用 [Apache License 2.0](LICENSE) 开源。依赖和参考项目致谢见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+PaperSeek 使用 [Apache License 2.0](LICENSE) 开源。第三方依赖与计算机顶会数据源说明见 [第三方声明](THIRD_PARTY_NOTICES.md)。

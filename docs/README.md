@@ -6,7 +6,7 @@
 
 - [文档站首页](index.md)：VitePress 首页。
 - [v0.3.0 更新说明](v0.3.0.md)：检索规划、可恢复循环、预算、界面变化和升级步骤。
-- [第三方声明](https://github.com/MingfengHong/paperseek/blob/main/THIRD_PARTY_NOTICES.md)：v0.3.0 参考项目、依赖许可证与源码复用边界。
+- [第三方声明](https://github.com/MingfengHong/paperseek/blob/main/THIRD_PARTY_NOTICES.md)：第三方运行依赖与计算机顶会数据源说明。
 - [英文 README](https://github.com/MingfengHong/paperseek/blob/main/README.en.md)：面向国际社区的项目介绍和快速开始。
 - [在线体验版使用说明](online-demo.md)：说明主站在线体验的 PaperSeek Service、Third-party Service（ModelScope、OpenRouter、Hugging Face）、Bring your own Key / BYOK、Source Filter、登录权限、第三方推理额度、历史记录和与自托管版的区别。
 - [用户手册](user-manual.md)：从安装、快速开始、配置、模型、数据源、Discipline Fields、CLI、Web UI、中英文界面、导出、Skill、MCP Server 到排错的完整说明。

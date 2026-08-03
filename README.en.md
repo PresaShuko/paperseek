@@ -55,8 +55,8 @@
 - Reworked the search loop as an explicit state machine with a native runner and an optional LangGraph backend. Stops, failures, and transient network errors preserve partial results and checkpoints so a run can resume from the latest safe stage.
 - Added `fast`, `medium`, `high`, and `max` search budgets. The default `fast` mode disables optional model thinking and limits requests, while higher budgets expand query, retrieval, ranking, and citation capacity together.
 - Reworked the Web UI into a progressive audit view: the active stage opens automatically, completed stages collapse to useful summaries, and error or recovery details remain available on demand. Completed searches stay on the workflow page until the user opens Results or Citation Map.
-- This refactor draws on PASA's Crawler/Selector split and candidate queue, PydanticAI's structured-output validation, LangGraph's explicit state graphs, and ARIS's checkpoint and recovery audit patterns. The computer-science conference source continues to use the PaperHub integration with the author's permission. See [Third-party notices](THIRD_PARTY_NOTICES.md) for full acknowledgements.
-- Replaced the WoS Starter client with a lightweight independent adapter that keeps the request, error, and response-model interfaces PaperSeek needs, with tests for authentication headers, parameters, parsing, and HTTP errors.
+- The retrieval workflow draws on PASA's Crawler/Selector split and candidate queue. Pydantic, PydanticAI, and LangGraph support the typed contracts and optional state-graph backend, while the computer-science conference source continues to use the PaperHub integration with the author's permission.
+- WoS Starter now uses a lighter adapter while keeping existing usage compatible and reporting authentication, query-parameter, and upstream errors more clearly.
 - The minimum supported Python version is now 3.10. See the [v0.3.0 release notes](docs/v0.3.0.md) for upgrade steps, configuration changes, and compatibility boundaries.
 
 ### v0.2.1 - Hosted Service and Model Routing
@@ -698,18 +698,13 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. Report security iss
 
 ## Acknowledgements
 
-PaperSeek takes inspiration from the following open-source projects:
+Thanks to the following open-source projects for supporting or informing PaperSeek's public features:
 
-- [dr-dumpling/paper-search-cli](https://github.com/dr-dumpling/paper-search-cli/): CLI usage patterns and literature-search workflow design.
-- [666ghj/MiroFish](https://github.com/666ghj/MiroFish): split-pane Web UI layout and workflow presentation style.
-- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client): WoS Starter endpoint behavior and response schema; PaperSeek uses an independent lightweight adapter.
 - [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub): integrated with the author's permission to provide computer science top-conference search support.
-- [Lloyd-Jahn/openclaw-paper-search](https://github.com/Lloyd-Jahn/openclaw-paper-search): organization of paper-search tooling.
 - [bytedance/pasa](https://github.com/bytedance/pasa): crawler/selector separation, candidate queues, and citation-expansion scheduling.
 - [pydantic/pydantic](https://github.com/pydantic/pydantic) and [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai): typed data contracts and bounded structured-output retries through an optional adapter.
 - [langchain-ai/langchain](https://github.com/langchain-ai/langchain) and [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph): an optional state-graph backend used through their public Python APIs; PaperSeek's native runner remains the default.
-- [wanshuiyin/Auto-claude-code-research-in-sleep](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep): explicit state, checkpoints, budgets, and recovery audit for long-running workflows.
 
 ## License
 
-PaperSeek is licensed under the [Apache License 2.0](LICENSE). See [Third-party notices](THIRD_PARTY_NOTICES.md) for dependency information and project acknowledgements.
+PaperSeek is licensed under the [Apache License 2.0](LICENSE). See [Third-party notices](THIRD_PARTY_NOTICES.md) for dependency and computer-science conference source information.

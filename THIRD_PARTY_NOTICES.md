@@ -1,8 +1,8 @@
 # Third-party notices / 第三方声明
 
-PaperSeek is distributed under the Apache License 2.0. This page records the open-source dependencies and projects that directly informed the product.
+PaperSeek is distributed under the Apache License 2.0. This page lists the third-party packages used by PaperSeek and the external data source integrated for computer-science conference search.
 
-PaperSeek 使用 Apache License 2.0 发布。本页记录项目使用的开源依赖和直接提供设计启发的项目。
+PaperSeek 使用 Apache License 2.0 发布。本页列出 PaperSeek 使用的第三方软件包，以及计算机顶会检索所接入的外部数据源。
 
 ## Runtime dependencies / 运行依赖
 
@@ -17,17 +17,8 @@ These packages are installed as separate Python distributions and retain their o
 
 上述项目作为独立 Python 包安装，并保留各自的许可证和版权声明。
 
-## Acknowledged references / 参考项目致谢
-
-- [dr-dumpling/paper-search-cli](https://github.com/dr-dumpling/paper-search-cli): CLI interaction and literature-search workflow organization.
-- [666ghj/MiroFish](https://github.com/666ghj/MiroFish): split-pane layout and visible workflow presentation.
-- [clarivate/wosstarter_python_client](https://github.com/clarivate/wosstarter_python_client): WoS Starter endpoint behavior and response schema. PaperSeek uses its own lightweight adapter.
-- [Lloyd-Jahn/openclaw-paper-search](https://github.com/Lloyd-Jahn/openclaw-paper-search): organization of paper-search tooling.
-- [bytedance/pasa](https://github.com/bytedance/pasa): Crawler/Selector responsibility separation, candidate queues, and planned citation traversal.
-- [wanshuiyin/Auto-claude-code-research-in-sleep](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep): explicit state, budgets, checkpoints, and recovery for long-running workflows.
-
 ## PaperHub integration / PaperHub 集成
 
-[Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub) provides the manifest and content-addressed shards used by the computer-science top-conference source. PaperSeek integrates this source with the author's permission, implements its own query/provider layer, and reads the published index at runtime.
+[Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub) provides the manifest and content-addressed shards used by the computer-science top-conference source. PaperSeek integrates this source with the author's permission and reads the published index at runtime.
 
-[Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub) 为计算机顶会数据源提供 manifest 和内容哈希 shard。PaperSeek 经作者同意集成该数据源，自行实现查询和 provider 层，并在运行时读取公开索引。
+[Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub) 为计算机顶会数据源提供 manifest 和内容哈希 shard。PaperSeek 经作者同意集成该数据源，并在运行时读取公开索引。
