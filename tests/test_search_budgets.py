@@ -76,7 +76,7 @@ class SearchBudgetTest(unittest.TestCase):
         self.assertEqual(core.search_budget, "fast")
         self.assertTrue(agent.llm_thinking_enabled)
         self.assertTrue(core.llm_thinking_enabled)
-        self.assertEqual(agent.ranking_batch_size, 8)
+        self.assertEqual(agent.ranking_batch_size, 256)
         self.assertEqual(agent.retrieval_pool_max, fast.retrieval_pool_max)
         self.assertEqual(core.ranking_candidate_limit, fast.ranking_candidate_limit)
 

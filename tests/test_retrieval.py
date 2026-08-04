@@ -571,6 +571,59 @@ class RetrievalAgentTest(unittest.TestCase):
         agent = PaperSeekAgent(config(ranking_batch_size=8), FakeLLM())
         self.assertEqual(agent._ranking_batch_size(100), 8)
 
+    def test_default_ranking_batch_scores_full_candidate_limit_in_one_request(self):
+        agent = PaperSeekAgent(config(), FakeLLM())
+        self.assertEqual(agent._ranking_batch_size(256), 256)
+
+    def test_specific_intent_requires_all_explicit_facets(self):
+        agent = PaperSeekAgent(config(), FakeLLM())
+        agent.search_intent = "Find how platform governance affects user innovation."
+        agent.search_plan = SearchPlan(
+            intent=agent.search_intent,
+            question_type="specific_relation",
+            core_concepts=["platform governance", "user innovation"],
+            must_have_facets=["platform governance", "user innovation"],
+            required_relation="effects of platform governance on user innovation",
+        )
+
+        context = agent._intent_context()
+
+        self.assertIn("Every must_have_facet must remain a mandatory concept group", context)
+        self.assertIn("join distinct required concepts and the required relation with AND", context)
+
+    def test_broad_intent_retains_high_recall_policy(self):
+        agent = PaperSeekAgent(config(), FakeLLM())
+        agent.search_intent = "Survey research on platform governance."
+        agent.search_plan = SearchPlan(
+            intent=agent.search_intent,
+            question_type="broad_landscape",
+            core_concepts=["platform governance"],
+            must_have_facets=["platform governance"],
+        )
+
+        context = agent._intent_context()
+
+        self.assertIn("Build a high-recall candidate query around the central subject", context)
+        self.assertNotIn("Every must_have_facet must remain a mandatory concept group", context)
+
+    def test_global_ranking_batch_reserves_output_for_all_candidate_reasons(self):
+        class StructuredRankingLLM:
+            def __init__(self):
+                self.max_tokens = None
+
+            def chat_json(self, messages, temperature=0.0, max_tokens=None):
+                self.max_tokens = max_tokens
+                return '{"scores":[]}'
+
+        llm = StructuredRankingLLM()
+        agent = PaperSeekAgent(config(), llm)
+        agent._request_ranking_scores(
+            "graph retrieval",
+            [record(f"r{index}", f"Paper {index}") for index in range(256)],
+            llm,
+        )
+        self.assertEqual(llm.max_tokens, 32768)
+
     def test_ranking_batch_prefers_structured_json_mode(self):
         class StructuredRankingLLM:
             def __init__(self):
@@ -592,22 +645,28 @@ class RetrievalAgentTest(unittest.TestCase):
         self.assertEqual(len(llm.calls), 1)
         self.assertEqual(llm.calls[0][1:], (0.0, 4096))
 
-    def test_ranking_batch_retries_only_candidates_missing_from_partial_output(self):
+    def test_partial_global_ranking_falls_back_to_compact_scores_and_retained_reasons(self):
         class PartialRankingLLM:
             def __init__(self):
                 self.requests = []
 
             def chat_json(self, messages, temperature=0.0, max_tokens=None):
+                system = messages[0]["content"]
                 prompt = messages[-1]["content"]
+                if "do not generate reasons" in system:
+                    indexes = [int(value) for value in re.findall(r"^(\d+)\.$", prompt, re.MULTILINE)]
+                    self.requests.append(("scores", indexes))
+                    return json.dumps({"scores": [[index, 8] for index in indexes]})
+                if "Explain the supplied relevance scores" in system:
+                    indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", prompt, re.MULTILINE)]
+                    self.requests.append(("reasons", indexes))
+                    return json.dumps({"reasons": [[index, "Relevant."] for index in indexes]})
                 uids = re.findall(r"UID: ([^\n]+)", prompt)
-                self.requests.append(uids)
-                selected = uids[:-1] if len(self.requests) == 1 else uids
-                return json.dumps({
-                    "scores": [
-                        {"uid": uid, "score": 8, "reasoning": "Relevant."}
-                        for uid in selected
-                    ]
-                })
+                self.requests.append(("full", uids))
+                return json.dumps({"scores": [
+                    {"uid": uid, "score": 8, "reasoning": "Relevant."}
+                    for uid in uids[:-1]
+                ]})
 
         llm = PartialRankingLLM()
         documents = [record(f"W{index}", f"Paper {index}") for index in range(16)]
@@ -616,8 +675,22 @@ class RetrievalAgentTest(unittest.TestCase):
         scores = agent._score_ranking_batch("graph retrieval", documents, llm)
 
         self.assertEqual(len(scores), 16)
-        self.assertEqual(len(llm.requests), 2)
-        self.assertEqual(llm.requests[1], ["W15"])
+        self.assertEqual([request[0] for request in llm.requests], ["full", "scores", "reasons"])
+        self.assertEqual(llm.requests[1][1], list(range(1, 17)))
+        self.assertTrue(all(entry["reasoning"] == "Relevant." for entry in scores))
+
+    def test_two_stage_reasoning_only_targets_high_scores_or_top_fifty(self):
+        documents = [record(f"W{index}", f"Paper {index}") for index in range(80)]
+        scores = [
+            {"uid": f"W{index}", "score": 8 if index < 55 else 2, "reasoning": ""}
+            for index in range(80)
+        ]
+        agent = PaperSeekAgent(config(), FakeLLM())
+
+        selected = agent._ranking_reason_documents(documents, scores)
+
+        self.assertEqual(len(selected), 55)
+        self.assertEqual([document.uid for document in selected], [f"W{index}" for index in range(55)])
 
     def test_ranking_batch_receives_stable_search_plan_context(self):
         class StructuredRankingLLM:

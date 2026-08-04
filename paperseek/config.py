@@ -65,7 +65,7 @@ class AgentConfig:
     llm_model: str = ""
     llm_base_url: str = ""
     llm_max_tokens: int = 2048
-    ranking_llm_timeout_seconds: int = 60
+    ranking_llm_timeout_seconds: int = 180
     wos_db: str = "WOS"
     search_field: str = ""
     discipline_fields: tuple[str, ...] = field(default_factory=tuple)
@@ -75,7 +75,7 @@ class AgentConfig:
     citation_per_seed: int = _DEFAULT_BUDGET.citation_per_seed
     citation_max_records: int = _DEFAULT_BUDGET.citation_max_records
     citation_depth: int = _DEFAULT_BUDGET.citation_depth
-    ranking_batch_size: int = 8
+    ranking_batch_size: int = 256
     ranking_concurrency: int = 16
     ranking_candidate_limit: int = _DEFAULT_BUDGET.ranking_candidate_limit
     target_min: int = 5
@@ -140,7 +140,7 @@ class AgentConfig:
             llm_model=os.environ.get("LLM_MODEL") or default_model(provider),
             llm_base_url=os.environ.get("LLM_BASE_URL") or default_base_url(provider, api_type),
             llm_max_tokens=_int_env("LLM_MAX_TOKENS", 2048),
-            ranking_llm_timeout_seconds=_int_env("RANKING_LLM_TIMEOUT_SECONDS", 60, minimum=10),
+            ranking_llm_timeout_seconds=_int_env("RANKING_LLM_TIMEOUT_SECONDS", 180, minimum=10),
             wos_db=os.environ.get("WOS_DB", "WOS"),
             search_field=os.environ.get("SEARCH_FIELD", ""),
             discipline_fields=os.environ.get("DISCIPLINE_FIELDS", ""),
@@ -150,7 +150,7 @@ class AgentConfig:
             citation_per_seed=_int_env("CITATION_PER_SEED", budget.citation_per_seed),
             citation_max_records=_int_env("CITATION_MAX_RECORDS", budget.citation_max_records),
             citation_depth=_int_env("CITATION_DEPTH", budget.citation_depth),
-            ranking_batch_size=_int_env("RANKING_BATCH_SIZE", 8, minimum=1),
+            ranking_batch_size=_int_env("RANKING_BATCH_SIZE", 256, minimum=1),
             ranking_concurrency=_int_env("RANKING_CONCURRENCY", 16, minimum=1),
             ranking_candidate_limit=_int_env(
                 "RANKING_CANDIDATE_LIMIT",

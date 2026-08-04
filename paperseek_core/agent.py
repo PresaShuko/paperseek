@@ -5540,12 +5540,23 @@ class PaperSeekAgent:
     def _intent_context(self) -> str:
         if not self.search_intent:
             return ""
+        question_type = str(getattr(self.search_plan, "question_type", "") or "")
+        if question_type == "broad_landscape":
+            query_policy = (
+                "Build a high-recall candidate query around the central subject without forcing optional dimensions into AND constraints. "
+            )
+        else:
+            query_policy = (
+                "Build a precise candidate query. Every must_have_facet must remain a mandatory concept group, and required_relation must remain mandatory when present. "
+                "Use OR only for direct alternatives within one required concept; join distinct required concepts and the required relation with AND. "
+            )
         return (
             "\nInterpreted search intent:\n"
             f"{self.search_intent}\n"
             "Use this intent as the invariant goal when generating or revising the query. "
             "Preserve must_have_facets and required_relation, while treating optional_facets as supporting coverage rather than automatic AND constraints. "
-            "Build a high-recall candidate query rather than a final-answer filter, and avoid semantic drift across the listed boundaries. "
+            f"{query_policy}"
+            "Avoid semantic drift across the listed boundaries. "
             "Treat boundaries as interpretation guardrails, not automatic NOT clauses; only exclusions explicitly requested by the user may become hard negative query terms.\n"
         )
 
@@ -6539,11 +6550,11 @@ class PaperSeekAgent:
         return f"{step_id}:{digest}"
 
     def _ranking_batch_size(self, total_documents: int) -> int:
-        configured = getattr(self.config, "ranking_batch_size", 8) or 8
+        configured = getattr(self.config, "ranking_batch_size", 256) or 256
         try:
             batch_size = max(1, int(configured))
         except (TypeError, ValueError):
-            batch_size = 8
+            batch_size = 256
         return min(max(1, batch_size), max(1, total_documents))
 
     def _ranking_concurrency(self) -> int:
@@ -6572,7 +6583,7 @@ class PaperSeekAgent:
         return "429" in text or "rate_limit" in text or "too many requests" in text
 
     def _ranking_llm_timeout_seconds(self) -> int:
-        configured = getattr(self.config, "ranking_llm_timeout_seconds", 60) or 60
+        configured = getattr(self.config, "ranking_llm_timeout_seconds", 180) or 180
         try:
             return max(10, int(configured))
         except (TypeError, ValueError):
@@ -6624,16 +6635,72 @@ class PaperSeekAgent:
             return self.llm
 
     def _score_ranking_batch(self, question: str, documents: list, llm_client: LLMClient) -> list:
-        scores = self._request_ranking_scores(question, documents, llm_client)
-        matched, missing = self._match_ranking_scores_to_documents(documents, scores)
-        if matched and missing:
+        try:
+            scores = self._request_ranking_scores(question, documents, llm_client)
+        except Exception as exc:
+            if not self._should_use_compact_ranking_fallback(exc):
+                raise
             self._emit_log(
-                f"Result ranking batch omitted {len(missing)}/{len(documents)} candidate(s); "
-                "retrying only the missing candidates once."
+                "Full global scoring failed; switching to compact score-only global ranking: "
+                f"{type(exc).__name__}: {exc}"
             )
-            retry_scores = self._request_ranking_scores(question, missing, llm_client)
-            retry_matched, _ = self._match_ranking_scores_to_documents(missing, retry_scores)
-            matched.extend(retry_matched)
+            return self._score_ranking_batch_two_stage(question, documents, llm_client)
+        matched, missing = self._match_ranking_scores_to_documents(documents, scores)
+        if missing:
+            self._emit_log(
+                f"Full global scoring omitted {len(missing)}/{len(documents)} candidate(s); "
+                "switching to compact score-only global ranking."
+            )
+            return self._score_ranking_batch_two_stage(question, documents, llm_client)
+        return matched
+
+    @staticmethod
+    def _should_use_compact_ranking_fallback(exc: Exception) -> bool:
+        text = str(exc or "").casefold()
+        if PaperSeekAgent._is_rate_limit_error(exc):
+            return False
+        return any(
+            marker in text
+            for marker in (
+                "context length",
+                "context_length",
+                "maximum context",
+                "max token",
+                "too many tokens",
+                "truncat",
+                "json",
+                "message content",
+                "did not contain",
+                "empty response",
+                "timed out",
+                "timeout",
+            )
+        )
+
+    def _score_ranking_batch_two_stage(self, question: str, documents: list, llm_client: LLMClient) -> list:
+        scores = self._request_compact_ranking_scores(question, documents, llm_client)
+        matched, missing = self._match_ranking_scores_to_documents(documents, scores)
+        if missing:
+            raise EmptyRankingBatchError(
+                f"Compact global scoring omitted {len(missing)}/{len(documents)} candidate(s)."
+            )
+
+        reason_documents = self._ranking_reason_documents(documents, matched)
+        reason_by_uid = {}
+        for start in range(0, len(reason_documents), 64):
+            batch = reason_documents[start:start + 64]
+            try:
+                reason_by_uid.update(
+                    self._request_ranking_reasons(question, batch, matched, llm_client)
+                )
+            except Exception as exc:
+                self._emit_log(
+                    "Ranking reason generation failed for retained candidates; keeping global scores: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        for entry in matched:
+            entry["reasoning"] = reason_by_uid.get(str(entry.get("uid") or ""), "")
         return matched
 
     def _request_ranking_scores(self, question: str, documents: list, llm_client: LLMClient) -> list:
@@ -6656,13 +6723,173 @@ class PaperSeekAgent:
         ]
 
         chat_json = getattr(llm_client, "chat_json", None)
-        max_tokens = min(8192, max(4096, len(documents) * 256))
+        max_tokens = min(32768, max(4096, len(documents) * 128))
         raw = (
             chat_json(messages, temperature=0.0, max_tokens=max_tokens)
             if callable(chat_json)
             else llm_client.chat(messages, temperature=0.3)
         )
         return self._parse_ranking_response(raw)
+
+    def _request_compact_ranking_scores(self, question: str, documents: list, llm_client: LLMClient) -> list:
+        descriptions = []
+        for index, document in enumerate(documents, 1):
+            description = _describe_document(document, index, abstract_limit=500)
+            descriptions.append(re.sub(rf"^{index}\. UID:.*$", f"{index}.", description, count=1, flags=re.MULTILINE))
+        papers_text = "\n\n".join(descriptions)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Score every supplied paper against the stable SearchPlan on the same absolute 0-10 relevance rubric. "
+                    "Use only the supplied evidence. Return every integer index exactly once and do not generate reasons. "
+                    'Output only JSON shaped as {"scores":[[1,9],[2,6]]}.'
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Research question: {question}\n\n"
+                    f"Stable SearchPlan:\n{self._ranking_plan_context()}\n\n"
+                    f"Papers:\n\n{papers_text}\n\n"
+                    'Return only {"scores":[[index,score],...]} with one pair for every index.'
+                ),
+            },
+        ]
+        chat_json = getattr(llm_client, "chat_json", None)
+        raw = (
+            chat_json(messages, temperature=0.0, max_tokens=4096)
+            if callable(chat_json)
+            else llm_client.chat(messages, temperature=0.0)
+        )
+        return self._parse_compact_ranking_scores(raw, documents)
+
+    def _ranking_reason_documents(self, documents: list, scores: list) -> list:
+        score_by_uid = {
+            str(entry.get("uid") or ""): float(entry.get("score") or 0)
+            for entry in scores
+        }
+        ordered = sorted(
+            documents,
+            key=lambda document: score_by_uid.get(self._ranking_document_identity(document), 0),
+            reverse=True,
+        )
+        if len(ordered) < 50:
+            return ordered
+        high_scores = [
+            document
+            for document in ordered
+            if score_by_uid.get(self._ranking_document_identity(document), 0) >= 5
+        ]
+        return high_scores if len(high_scores) > 50 else ordered[:50]
+
+    def _request_ranking_reasons(
+        self,
+        question: str,
+        documents: list,
+        scores: list,
+        llm_client: LLMClient,
+    ) -> dict[str, str]:
+        score_by_uid = {
+            str(entry.get("uid") or ""): entry.get("score", 0)
+            for entry in scores
+        }
+        descriptions = []
+        identities = []
+        for index, document in enumerate(documents, 1):
+            identity = self._ranking_document_identity(document)
+            identities.append(identity)
+            description = _describe_document(document, index, abstract_limit=700)
+            description = re.sub(rf"^{index}\. UID:.*$", f"{index}. Score: {score_by_uid.get(identity, 0)}", description, count=1, flags=re.MULTILINE)
+            descriptions.append(description)
+        retained_text = "\n\n".join(descriptions)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Explain the supplied relevance scores using only the paper metadata and stable SearchPlan. "
+                    "Give one concise evidence-based sentence in the user's language for every integer index. "
+                    'Output only JSON shaped as {"reasons":[[1,"reason"],[2,"reason"]]}.'
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Research question: {question}\n\n"
+                    f"Stable SearchPlan:\n{self._ranking_plan_context()}\n\n"
+                    f"Retained papers:\n\n{retained_text}\n\n"
+                    'Return only {"reasons":[[index,"reason"],...]}.'
+                ),
+            },
+        ]
+        chat_json = getattr(llm_client, "chat_json", None)
+        max_tokens = min(8192, max(2048, len(documents) * 96))
+        raw = (
+            chat_json(messages, temperature=0.0, max_tokens=max_tokens)
+            if callable(chat_json)
+            else llm_client.chat(messages, temperature=0.0)
+        )
+        return self._parse_ranking_reasons(raw, identities)
+
+    @staticmethod
+    def _json_object(raw: str) -> dict:
+        text = str(raw or "").strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        try:
+            value = json.loads(text)
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if not match:
+                return {}
+            try:
+                value = json.loads(match.group(0))
+                return value if isinstance(value, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+
+    def _parse_compact_ranking_scores(self, raw: str, documents: list) -> list:
+        pairs = self._json_object(raw).get("scores")
+        if not isinstance(pairs, list):
+            return []
+        output = []
+        seen = set()
+        for pair in pairs:
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            try:
+                index = int(pair[0])
+                score = float(pair[1])
+            except (TypeError, ValueError):
+                continue
+            if index < 1 or index > len(documents) or index in seen or not math.isfinite(score):
+                continue
+            seen.add(index)
+            output.append({
+                "uid": self._ranking_document_identity(documents[index - 1]),
+                "score": score,
+                "reasoning": "",
+            })
+        return output
+
+    def _parse_ranking_reasons(self, raw: str, identities: list[str]) -> dict[str, str]:
+        pairs = self._json_object(raw).get("reasons")
+        if not isinstance(pairs, list):
+            return {}
+        output = {}
+        for pair in pairs:
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            try:
+                index = int(pair[0])
+            except (TypeError, ValueError):
+                continue
+            reason = re.sub(r"\s+", " ", str(pair[1] or "")).strip()
+            if 1 <= index <= len(identities) and reason:
+                output[identities[index - 1]] = reason
+        return output
 
     @staticmethod
     def _ranking_document_identity(document: Any) -> str:

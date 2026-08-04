@@ -36,6 +36,9 @@ Query-view rules:
 - Survey, review, or overview literature may be one supplementary view, but never make those publication types a required concept across the portfolio unless the user explicitly asks for reviews.
 - Keep broad-landscape concept groups inclusive: one view should represent one coherent naming family. Do not AND a task with an optional technique, publication type, application, or evaluation facet merely to reduce result count.
 - For a specific relation or method question, every view must retain the required_relation and the necessary must_have_facets, while varying terminology or perspective.
+- Classify a question as broad_landscape only when the user is genuinely asking for an overview of a field without a required relation, mechanism, comparison, population, outcome, or application constraint. A request does not become broad_landscape merely because it asks to find literature.
+- When the user names multiple objects, conditions, populations, mechanisms, outcomes, or a relation between concepts, classify the request as specific_relation, method_application, mechanism, or comparison as appropriate. Put every explicit relevance requirement in must_have_facets and preserve the requested relation in required_relation.
+- Precision takes priority over speculative recall for non-broad questions. Adjacent terminology may vary the wording of a required facet, but it must not replace, weaken, or omit that facet or the required relation.
 - Make the views genuinely different. Do not repeat the same terms with reordered wording.
 - Keep each view concise: at most 3 concept groups, at most 5 terms per group, and a purpose of at most 15 words. The source-specific compiler will add syntax later.
 - Keep core_concepts, must_have_facets, optional_facets, likely_synonyms, adjacent_concepts, boundaries, and ambiguities to at most 5 short entries each. Do not narrate your reasoning inside any field.
@@ -138,6 +141,14 @@ Official OpenAlex API guidance converted into prompt rules:
 - Keep all quotation marks and parentheses balanced.
 - Keep every OR synonym group parenthesized when it is combined with another concept by AND.
 - Keep the encoded request comfortably below OpenAlex's approximately 4 KB URL limit. Prefer a few established terms over long synonym inventories.
+
+Semantic construction rules:
+- Read the interpreted SearchPlan before writing the query.
+- For broad_landscape questions, build a concise high-recall query around the central subject.
+- For every other question type, represent every must_have_facet as a mandatory concept group and preserve required_relation as a mandatory relation group when it is non-empty.
+- Join direct synonyms for the same facet with OR inside one parenthesized group. Join distinct required facets and the required relation with AND.
+- Optional facets and adjacent concepts must not replace or weaken a required facet. Include them only when they clarify an existing required group without making the query broader than the user's request.
+- Before returning JSON, verify that removing any AND group would drop an explicit user requirement. If a required facet or relation is missing, repair the query before returning it.
 
 Output contract:
 - Return exactly one valid JSON object with keys "query" and "rationale".

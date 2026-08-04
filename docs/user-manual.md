@@ -494,7 +494,7 @@ PaperSeek 将影响检索广度和成本的参数组合为四档预算。Web UI 
 
 PaperSeek 使用 LLM 对候选论文进行相关性评分。评分用于文献发现阶段的优先级排序，不是论文质量、学术影响或系统综述纳入标准。
 
-排序阶段会按批次调用 LLM。默认批大小为 `8`，默认并发为 `16`；实测扩大批次没有稳定降低总耗时，且更容易出现模型漏回个别候选，因此默认保持较小批次。部分响应只重试缺失候选；端点报错时会按 `16`、`8`、`4` 自动降级重试。若最低并发仍失败，PaperSeek 会将失败批次按数据源顺序以零分回退，不会让整次检索失败。ranking 批次默认使用 `RANKING_LLM_TIMEOUT_SECONDS=60`，超时后回退本地预排序；可通过 `RANKING_BATCH_SIZE`、`RANKING_CONCURRENCY` 和 `RANKING_LLM_TIMEOUT_SECONDS` 调整。如果手动设为 `32`，失败时会按 `32`、`16`、`8`、`4` 降级。
+排序阶段默认把预排序后的最多 `256` 篇候选放入一次 LLM 请求进行全局打分，使所有候选共享同一上下文和评分标准。首选响应包含分数和简短理由；请求报错、截断或漏项时，系统自动切换到两阶段回退：先以短整数编号为全部候选输出紧凑分数，再以每批最多 `64` 篇只为最终前 50 篇或所有 5 分及以上的保留结果生成理由。理由生成失败不会丢失分数；紧凑评分仍失败时才回退本地预排序。全局评分默认使用 `RANKING_LLM_TIMEOUT_SECONDS=180`。可通过 `RANKING_BATCH_SIZE` 降低单次请求规模。
 
 在 LLM 排序之前，PaperSeek 会先执行轻量多路召回融合。每个数据源按自身能力提供相关性、高影响力/高引用、最新记录或本地质量等路线；不支持的路线会自动跳过。声明可安全并发的数据源会并行执行独立路线，并在全部完成后按固定路线顺序融合，避免网络完成顺序影响结果。运行时保留较深的主相关性路线，并将多样性路线限制在仍有机会进入最终 LLM 候选门限的深度。系统会对候选去重，并使用 RRF、BM25/词项覆盖和纯 Python hashing embedding cosine 进行预重排，再把最多 `RETRIEVAL_POOL_MAX` 条候选交给 LLM。社区版默认使用本地纯 Python embedding；如自行配置外部 embedding/reranker，也可在 Web UI 高级设置中选择中国科技云、OpenAI、阿里云百炼、硅基流动、OpenRouter、NVIDIA NIM、智谱、火山方舟、ModelScope 或自定义端点。ModelScope API-Inference 仅用于 Qwen embedding，不作为 reranker；其他服务商可使用 `qwen3-embedding:8b`、`bge-large-zh:latest`、OpenRouter embedding/rerank 模型或 NVIDIA NIM 的 `nvidia/nv-embedqa-e5-v5`、`nv-rerank-qa-mistral-4b:1` 等模型。多个模型可用逗号分隔，系统会按顺序尝试。
 
@@ -578,10 +578,10 @@ Web UI 运行时：
 | `CITATION_PER_SEED` | `4` | `fast` 下每个 seed 的引用邻居数量。 |
 | `CITATION_MAX_RECORDS` | `40` | `fast` 下引用扩展加入候选池的最大记录数。 |
 | `CITATION_DEPTH` | `2` | OpenAlex 引用扩展遍历层数。 |
-| `RANKING_BATCH_SIZE` | `8` | LLM 排序批大小；候选数较多时会自适应放大以减少批次数。 |
+| `RANKING_BATCH_SIZE` | `256` | 单次 LLM 全局评分的候选上限；调低后按多批执行。 |
 | `RANKING_CONCURRENCY` | `16` | LLM 排序并发数；端点报错时会自动降到 `8`、`4` 重试。 |
 | `LLM_TIMEOUT_SECONDS` | `180` | 常规单次 LLM 请求超时秒数，最小 `30`。 |
-| `RANKING_LLM_TIMEOUT_SECONDS` | `60` | 仅用于 LLM 排序批次的超时秒数，最小 `10`；超时后回退本地预排序。 |
+| `RANKING_LLM_TIMEOUT_SECONDS` | `180` | 用于 LLM 全局评分或排序批次的超时秒数，最小 `10`；超时后回退本地预排序。 |
 | `RANKING_CANDIDATE_LIMIT` | `256` | `fast` 下进入 LLM 打分的候选上限。 |
 | `RETRIEVAL_POOL_MAX` | `3000` | `fast` 下 LLM 打分前的融合候选池上限。 |
 | `RETRIEVAL_POOL_MIN` | `5` | 自适应检索式调整后的最低有效候选数。 |

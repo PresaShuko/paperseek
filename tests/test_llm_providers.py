@@ -328,7 +328,7 @@ class LLMProviderTest(unittest.TestCase):
     def test_ranking_llm_timeout_defaults_to_preview_safe_value(self):
         with temporary_env(clear=("RANKING_LLM_TIMEOUT_SECONDS",)):
             config = AgentConfig.from_env()
-            self.assertEqual(config.ranking_llm_timeout_seconds, 60)
+            self.assertEqual(config.ranking_llm_timeout_seconds, 180)
 
         with temporary_env({"RANKING_LLM_TIMEOUT_SECONDS": "15"}):
             config = AgentConfig.from_env()

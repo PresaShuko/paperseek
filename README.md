@@ -446,7 +446,7 @@ ModelScope API-Inference 可用于 LLM 和 Qwen embedding，不作为 Rerank 服
 
 在进入 LLM 打分前，PaperSeek 会先进行轻量多路召回预重排：按数据源能力综合相关性、高引用/影响力、时效性和本地质量等信号，去重后用 RRF 融合召回排名，并叠加纯 Python hashing embedding cosine、BM25 和词项覆盖分数。允许并发的数据源会并行执行独立召回路线；运行时会保留较深的主相关性路线，同时把影响力、时效性等多样性路线限制在足以进入最终 LLM 候选门限的深度，避免重复读取不会进入后续排序的长尾记录。默认 `fast` 预算的 LLM 前融合候选池上限为 `3000`。社区版默认不依赖外部 embedding 服务；如需外部增强，可在 Web UI 高级设置中从 Local Python、中国科技云、OpenAI、阿里云百炼、硅基流动、OpenRouter、NVIDIA NIM、智谱、火山方舟、ModelScope 或自定义端点中选择 embedding 服务，其中 ModelScope API-Inference 仅使用 `Qwen/Qwen3-Embedding-8B` 和 `Qwen/Qwen3-Embedding-4B`。如果用户自行配置外部 embedding/reranker，也可使用中国科技云的 `qwen3-embedding:8b`、`bge-large-zh:latest`、OpenRouter 的 embedding/rerank 模型或 NVIDIA NIM 的 `nvidia/nv-embedqa-e5-v5`、`nv-rerank-qa-mistral-4b:1` 等模型，配置多个模型时会按顺序 fallback，失败时会回退到本地 RRF 顺序。
 
-候选池较大时，LLM 排序会按固定批次并发执行。默认批大小为 `8`、并发为 `16`；实测扩大批次没有稳定缩短总耗时，且更容易出现模型漏回个别候选，因此默认保留较小批次。若模型返回部分结果，系统只重试缺失候选；若一个或多个批次失败，则按 `16 -> 8 -> 4` 降低并发重试。并发 `4` 仍失败时只回退失败批次，不会使整次检索失败。ranking 批次默认使用 `RANKING_LLM_TIMEOUT_SECONDS=60`，超时后回退本地预排序，避免长时间端点等待拖断整次检索。高级用户仍可手动把 `RANKING_CONCURRENCY` 设为 `32`，此时会按 `32 -> 16 -> 8 -> 4` 降级。
+默认会把预排序后的最多 `256` 篇候选放入同一次 LLM 请求进行全局打分，使候选共享同一评分上下文和标准。首选响应包含每篇论文的分数与简短理由；如果请求报错、响应截断或漏项，系统会自动改用短整数编号完成一次紧凑的全局评分，再以每批最多 `64` 篇只为最终前 50 篇或所有 5 分及以上的保留结果生成理由。紧凑评分仍失败时才回退本地预排序。全局评分默认使用 `RANKING_LLM_TIMEOUT_SECONDS=180`；可通过 `RANKING_BATCH_SIZE` 降低单次请求规模。
 
 `TARGET_MIN` 用于判断候选是否少到需要恢复；`TARGET_MAX` 是用户期望范围和排序参考，不会仅因数据库总命中数较大就触发反复收窄，也不是最终展示的硬上限。LLM 打分前最多保留 `RANKING_CANDIDATE_LIMIT` 条候选，默认 `fast` 预算为 `256`。最终结果少于 50 条时全部展示；结果较多时至少展示前 50 条，如果 5 分及以上候选超过 50 条，则展示全部高分候选。
 
@@ -517,7 +517,7 @@ A -> B  表示 A 引用了 B
 | `CITATION_DEPTH` | `2` | OpenAlex 引用扩展遍历层数。 |
 | `RANKING_BATCH_SIZE` / `RANKING_CONCURRENCY` | `8` / `16` | LLM 排序批大小和并发数。 |
 | `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | `2048` / `180` | LLM 输出长度和常规单次请求超时。 |
-| `RANKING_LLM_TIMEOUT_SECONDS` | `60` | 仅用于 LLM 排序批次的超时；超时后回退本地预排序。 |
+| `RANKING_LLM_TIMEOUT_SECONDS` | `180` | 仅用于 LLM 全局评分或排序批次的超时；超时后回退本地预排序。 |
 | `RANKING_CANDIDATE_LIMIT` | `256` | 默认 `fast` 下送入 LLM 打分的候选上限。 |
 | `RETRIEVAL_POOL_MAX` / `RETRIEVAL_POOL_MIN` | `3000` / `5` | 默认 `fast` 下 LLM 打分前的融合候选池范围。 |
 | `RETRIEVAL_LANE_LIMIT` / `RETRIEVAL_RRF_K` | `500` / `60` | 默认 `fast` 下每路召回的配置上限和 RRF 融合常数；实际路线深度还会按 LLM 候选门限裁剪。 |

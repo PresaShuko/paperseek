@@ -104,7 +104,7 @@ Docker 镜像接受与 CLI 和 Web UI 后端相同的环境变量。绝大多数
 
 `DISCIPLINE_FIELDS` 用于设置服务器端默认 Source Filter。它会按当前 `DATA_SOURCE` 归一化：OpenAlex 接受 Field ID/标签/URL，WoS 接受 Web of Science Category，arXiv 接受 `cs.IR` 等 category；没有可靠硬过滤的数据源应使用 `SEARCH_FIELD` 文本提示。多个值建议用分号分隔，例如 `17;14`、`Computer Science;Business, Management and Accounting` 或 `cs.IR;cs.LG`；用户仍可在 Web UI 中按本次会话修改选择。
 
-`RANKING_BATCH_SIZE` 和 `RANKING_CONCURRENCY` 控制 LLM 相关性排序阶段的固定批大小与并发，默认分别为 `8` 和 `16`。模型只返回部分候选时会定向重试缺失项；默认批次失败时会按 `16 -> 8 -> 4` 降低并发重试失败批次。若手动设为 `32`，则会按 `32 -> 16 -> 8 -> 4` 降级。若并发 `4` 仍失败，只回退失败批次为源顺序零分，不会使整次检索失败。`RANKING_LLM_TIMEOUT_SECONDS` 控制排序批次超时，默认 60 秒，最小 10 秒；超时后回退本地预排序。`LLM_TIMEOUT_SECONDS` 控制其他 LLM 请求超时，默认 180 秒，最小 30 秒。
+`RANKING_BATCH_SIZE` 控制单次 LLM 全局评分的候选上限，默认 `256`。完整评分请求报错、截断或漏项时，系统改用短整数编号对全部候选进行紧凑分数输出，再以每批最多 `64` 篇只为最终保留结果生成理由；紧凑评分仍失败时才回退本地预排序。调低批大小后会恢复多批并发，`RANKING_CONCURRENCY` 默认 `16`，失败时按 `16 -> 8 -> 4` 降级。`RANKING_LLM_TIMEOUT_SECONDS` 默认 180 秒、最小 10 秒；`LLM_TIMEOUT_SECONDS` 控制其他 LLM 请求超时，默认 180 秒、最小 30 秒。
 
 `SEARCH_BUDGET` 默认使用 `fast`，统一控制查询视角、多路召回、LLM 候选和引用扩展规模，但不会覆盖模型服务自身的思考设置。`TARGET_MIN` 用于识别需要继续恢复的过小候选池；`TARGET_MAX` 是用户期望范围和排序参考，不会仅因数据库总命中数较大就强制收窄，也不是最终结果展示硬上限。`fast` 下 `RANKING_CANDIDATE_LIMIT` 为 256；最终展示会保留至少前 50 条，且当 5 分及以上候选超过 50 条时展示全部高分候选。
 
