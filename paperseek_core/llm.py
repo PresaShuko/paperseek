@@ -163,7 +163,7 @@ class OpenAIChatClient(LLMClient):
         if kimi_coding_endpoint:
             temperature = 0.6
         body = {"model": self.model, "messages": messages, "temperature": temperature}
-        if not self.thinking_enabled and (kimi_coding_endpoint or deepseek_endpoint):
+        if kimi_coding_endpoint or (not self.thinking_enabled and deepseek_endpoint):
             body["thinking"] = {"type": "disabled"}
         if response_format:
             body["response_format"] = response_format

@@ -95,7 +95,7 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(client.last_response_info["finish_reason"], "stop")
         self.assertEqual(client.last_response_info["completion_tokens"], 12)
 
-    def test_kimi_coding_non_low_budget_does_not_force_thinking_mode(self):
+    def test_kimi_coding_globally_disables_thinking(self):
         class FakeResponse:
             status_code = 200
             headers = {}
@@ -111,7 +111,8 @@ class LLMProviderTest(unittest.TestCase):
             )
             client.chat([{"role": "user", "content": "ping"}])
 
-        self.assertNotIn("thinking", post.call_args.kwargs["json"])
+        self.assertEqual(post.call_args.kwargs["json"]["temperature"], 0.6)
+        self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
 
     def test_openai_chat_rotates_key_pool_on_retryable_status(self):
         class FakeResponse:
