@@ -12,7 +12,7 @@ _DEFAULT_BUDGET = search_budget_preset(DEFAULT_SEARCH_BUDGET)
 class SearchConfig:
     data_source: str = "openalex"
     search_budget: str = DEFAULT_SEARCH_BUDGET
-    llm_thinking_enabled: bool = _DEFAULT_BUDGET.llm_thinking_enabled
+    llm_thinking_enabled: bool = True
     target_min: int = 5
     target_max: int = 50
     max_iterations: int = _DEFAULT_BUDGET.max_iterations

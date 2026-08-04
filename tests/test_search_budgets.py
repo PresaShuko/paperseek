@@ -13,10 +13,9 @@ from paperseek_core.config import SearchConfig
 
 
 class SearchBudgetTest(unittest.TestCase):
-    def test_fast_uses_the_smallest_request_budget_and_disables_thinking(self):
+    def test_fast_uses_the_smallest_request_budget(self):
         fast = SEARCH_BUDGET_PRESETS["fast"]
 
-        self.assertFalse(fast.llm_thinking_enabled)
         self.assertEqual(fast.max_iterations, 5)
         self.assertEqual(fast.query_portfolio_max, 3)
         self.assertEqual(fast.query_portfolio_limit, 100)
@@ -30,10 +29,6 @@ class SearchBudgetTest(unittest.TestCase):
 
     def test_presets_widen_the_search_budget_monotonically(self):
         ordered = [SEARCH_BUDGET_PRESETS[name] for name in SEARCH_BUDGET_NAMES]
-        self.assertEqual(
-            [item.llm_thinking_enabled for item in ordered],
-            [False, True, True, True],
-        )
         strictly_increasing = (
             "max_iterations",
             "retrieval_pool_max",
@@ -61,7 +56,7 @@ class SearchBudgetTest(unittest.TestCase):
         self.assertTrue(all(value >= 3 for value in portfolio_limits))
 
     def test_apply_search_budget_updates_all_controlled_fields(self):
-        config = AgentConfig()
+        config = AgentConfig(llm_thinking_enabled=False)
         apply_search_budget(config, "high")
         high = SEARCH_BUDGET_PRESETS["high"]
 
@@ -69,6 +64,7 @@ class SearchBudgetTest(unittest.TestCase):
         for field_name, expected in high.values().items():
             with self.subTest(field=field_name):
                 self.assertEqual(getattr(config, field_name), expected)
+        self.assertFalse(config.llm_thinking_enabled)
 
     def test_agent_and_core_defaults_use_fast(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -78,8 +74,8 @@ class SearchBudgetTest(unittest.TestCase):
 
         self.assertEqual(agent.search_budget, "fast")
         self.assertEqual(core.search_budget, "fast")
-        self.assertFalse(agent.llm_thinking_enabled)
-        self.assertFalse(core.llm_thinking_enabled)
+        self.assertTrue(agent.llm_thinking_enabled)
+        self.assertTrue(core.llm_thinking_enabled)
         self.assertEqual(agent.ranking_batch_size, 8)
         self.assertEqual(agent.retrieval_pool_max, fast.retrieval_pool_max)
         self.assertEqual(core.ranking_candidate_limit, fast.ranking_candidate_limit)

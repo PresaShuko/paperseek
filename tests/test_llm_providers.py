@@ -160,7 +160,7 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["json"]["response_format"], {"type": "json_object"})
         self.assertEqual(post.call_args.kwargs["json"]["max_tokens"], 4096)
 
-    def test_deepseek_json_mode_disables_thinking_for_low_budget(self):
+    def test_deepseek_json_mode_honors_explicit_thinking_setting(self):
         class FakeResponse:
             status_code = 200
             headers = {}
@@ -192,7 +192,7 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(output, '{"intent":"test"}')
         self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
 
-    def test_deepseek_plain_chat_also_disables_thinking_for_low_budget(self):
+    def test_deepseek_plain_chat_honors_explicit_thinking_setting(self):
         class FakeResponse:
             status_code = 200
             headers = {}
@@ -216,7 +216,7 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(output, "clean answer")
         self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
 
-    def test_create_llm_client_carries_budget_thinking_setting(self):
+    def test_search_budget_does_not_change_client_thinking_setting(self):
         with temporary_env(
             {
                 "SEARCH_BUDGET": "fast",
@@ -234,7 +234,7 @@ class LLMProviderTest(unittest.TestCase):
         ):
             medium_client = create_llm_client(AgentConfig.from_env())
 
-        self.assertFalse(fast_client.thinking_enabled)
+        self.assertTrue(fast_client.thinking_enabled)
         self.assertTrue(medium_client.thinking_enabled)
 
     def test_json_mode_does_not_treat_reasoning_as_final_content(self):

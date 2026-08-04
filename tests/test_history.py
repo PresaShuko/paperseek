@@ -108,7 +108,7 @@ class HistoryStoreTest(unittest.TestCase):
             self.assertTrue(detail["params"]["has_llm_api_key"])
             self.assertEqual(detail["params"]["discipline_fields"], ["17", "14"])
             self.assertEqual(detail["params"]["search_budget"], "fast")
-            self.assertFalse(detail["params"]["llm_thinking_enabled"])
+            self.assertTrue(detail["params"]["llm_thinking_enabled"])
             serialized = json.dumps(detail, ensure_ascii=False)
             self.assertNotIn("llm-secret", serialized)
             self.assertNotIn("oa-secret", serialized)

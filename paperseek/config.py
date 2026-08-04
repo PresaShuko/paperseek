@@ -49,7 +49,7 @@ def _tuple_env(name: str) -> tuple[str, ...]:
 class AgentConfig:
     data_source: str = "openalex"
     search_budget: str = DEFAULT_SEARCH_BUDGET
-    llm_thinking_enabled: bool = _DEFAULT_BUDGET.llm_thinking_enabled
+    llm_thinking_enabled: bool = True
     wos_api_key: str = ""
     openalex_api_key: str = ""
     openalex_email: str = ""
@@ -123,7 +123,7 @@ class AgentConfig:
         budget = search_budget_preset(search_budget)
         return cls(
             search_budget=search_budget,
-            llm_thinking_enabled=budget.llm_thinking_enabled,
+            llm_thinking_enabled=True,
             wos_api_key=os.environ.get("WOS_API_KEY", ""),
             data_source=os.environ.get("DATA_SOURCE", "openalex").lower(),
             openalex_api_key=os.environ.get("OPENALEX_API_KEY", ""),

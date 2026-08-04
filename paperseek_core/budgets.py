@@ -8,7 +8,6 @@ SEARCH_BUDGET_NAMES = ("fast", "medium", "high", "max")
 
 @dataclass(frozen=True)
 class SearchBudgetPreset:
-    llm_thinking_enabled: bool
     max_iterations: int
     query_portfolio_max: int
     query_portfolio_limit: int
@@ -28,11 +27,9 @@ class SearchBudgetPreset:
         return asdict(self)
 
 
-# Fast minimizes requests and disables model thinking where the endpoint has an
-# explicit switch. Higher levels widen recall and ranking capacity.
+# Fast minimizes requests. Higher levels widen recall and ranking capacity.
 SEARCH_BUDGET_PRESETS = {
     "fast": SearchBudgetPreset(
-        llm_thinking_enabled=False,
         max_iterations=5,
         query_portfolio_max=3,
         query_portfolio_limit=100,
@@ -49,7 +46,6 @@ SEARCH_BUDGET_PRESETS = {
         crawler_max_wall_seconds=300.0,
     ),
     "medium": SearchBudgetPreset(
-        llm_thinking_enabled=True,
         max_iterations=7,
         query_portfolio_max=3,
         query_portfolio_limit=100,
@@ -66,7 +62,6 @@ SEARCH_BUDGET_PRESETS = {
         crawler_max_wall_seconds=480.0,
     ),
     "high": SearchBudgetPreset(
-        llm_thinking_enabled=True,
         max_iterations=9,
         query_portfolio_max=4,
         query_portfolio_limit=100,
@@ -83,7 +78,6 @@ SEARCH_BUDGET_PRESETS = {
         crawler_max_wall_seconds=720.0,
     ),
     "max": SearchBudgetPreset(
-        llm_thinking_enabled=True,
         max_iterations=12,
         query_portfolio_max=6,
         query_portfolio_limit=100,

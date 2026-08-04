@@ -53,7 +53,7 @@
 - Added a structured SearchPlan that identifies core concepts, required and optional facets, relation constraints, and ambiguities before compiling a source-specific query. Query generation and revision now use validated JSON contracts and retry malformed or source-invalid output before contacting a provider.
 - Added a bounded Query Portfolio and candidate ledger. PaperSeek plans at least three complementary views, selects useful non-duplicate views within the active budget, and records candidate provenance, deduplication, and recovery decisions.
 - Reworked the search loop as an explicit state machine with a native runner and an optional LangGraph backend. Stops, failures, and transient network errors preserve partial results and checkpoints so a run can resume from the latest safe stage.
-- Added `fast`, `medium`, `high`, and `max` search budgets. The default `fast` mode disables optional model thinking and limits requests, while higher budgets expand query, retrieval, ranking, and citation capacity together.
+- Added `fast`, `medium`, `high`, and `max` search budgets. The default `fast` mode limits requests, while higher budgets expand query, retrieval, ranking, and citation capacity together. Search budgets no longer change a model service's own reasoning settings.
 - Reworked the Web UI into a progressive audit view: the active stage opens automatically, completed stages collapse to useful summaries, and error or recovery details remain available on demand. Completed searches stay on the workflow page until the user opens Results or Citation Map.
 - The retrieval workflow draws on PASA's Crawler/Selector split and candidate queue. Pydantic, PydanticAI, and LangGraph support the typed contracts and optional state-graph backend, while the computer-science conference source continues to use the PaperHub integration with the author's permission.
 - WoS Starter now uses a lighter adapter while keeping existing usage compatible and reporting authentication, query-parameter, and upstream errors more clearly.
@@ -62,7 +62,7 @@
 ### v0.2.1 - Hosted Service and Model Routing
 
 - Hosted PaperSeek Service now exposes Semantic Scholar, PubMed, and Crossref. Crossref does not require an API key.
-- Hosted model service routing now supports Auto / Custom mode. Auto selects an available model route, while Custom lets users choose the request model, embedding model, and pre-reranking method.
+- Hosted PaperSeek Service now lets users select Auto, GPT-5.6 Luna, Gemini 3.5 Flash, DeepSeek V4 Flash, or GPT-OSS-120B. The hosted endpoint owns model fallback when Auto is selected.
 - Updated hosted-mode documentation for the PaperSeek Service, Third-party Service, and Bring your own Key / BYOK boundaries.
 
 ### v0.2.0 - More Sources and Multi-Lane Retrieval
@@ -452,14 +452,14 @@ Before LLM scoring, PaperSeek runs lightweight multi-lane pre-ranking across the
 
 ### Search Budget
 
-The Web UI, CLI, API, and MCP expose `fast`, `medium`, `high`, and `max` search budgets; `fast` is the default. `fast` uses the fewest requests and disables model thinking when the endpoint exposes an explicit switch. Higher budgets widen query views, multi-lane recall, LLM candidates, and citation expansion together instead of only adding query-revision rounds.
+The Web UI, CLI, API, and MCP expose `fast`, `medium`, `high`, and `max` search budgets; `fast` is the default. `fast` uses the fewest requests. Higher budgets widen query views, multi-lane recall, LLM candidates, and citation expansion together instead of only adding query-revision rounds. Changing the budget does not override the model service's own reasoning settings.
 
-| Budget | Model thinking | Query soft limit | Query views | Per-lane configured cap | Fused pool | LLM candidates | Citation expansion (seeds / per seed / total / depth) |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `fast` | Off when supported | 5 | 3 | 500 | 3000 | 256 | 3 / 4 / 40 / 2 |
-| `medium` | Service default | 7 | 3 | 750 | 4500 | 384 | 8 / 6 / 80 / 2 |
-| `high` | Service default | 9 | 4 | 1000 | 7000 | 512 | 16 / 8 / 160 / 3 |
-| `max` | Service default | 12 | 6 | 1000 | 10000 | 1024 | 30 / 10 / 320 / 3 |
+| Budget | Query soft limit | Query views | Per-lane configured cap | Fused pool | LLM candidates | Citation expansion (seeds / per seed / total / depth) |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `fast` | 5 | 3 | 500 | 3000 | 256 | 3 / 4 / 40 / 2 |
+| `medium` | 7 | 3 | 750 | 4500 | 384 | 8 / 6 / 80 / 2 |
+| `high` | 9 | 4 | 1000 | 7000 | 512 | 16 / 8 / 160 / 3 |
+| `max` | 12 | 6 | 1000 | 10000 | 1024 | 30 / 10 / 320 / 3 |
 
 Source-specific pagination, rate, and result limits still apply. Per-lane values in the table are configured caps; runtime also clips useful lane depth against the final LLM candidate gate, retaining a deeper relevance lane and a smaller top slice from diversity lanes. `high` and `max` can substantially increase API calls, LLM cost, and latency, so reserve them for difficult topics or higher-recall searches. Granular environment variables and CLI flags override individual preset values.
 

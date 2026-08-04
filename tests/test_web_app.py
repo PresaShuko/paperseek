@@ -393,7 +393,7 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(config.ranking_candidate_limit, 256)
         self.assertEqual(config.citation_seed_count, 3)
         self.assertEqual(config.citation_max_records, 40)
-        self.assertFalse(config.llm_thinking_enabled)
+        self.assertTrue(config.llm_thinking_enabled)
 
     def test_fast_search_budget_uses_minimum_request_limits(self):
         config = _config_from_payload(SearchRequest(question="open innovation", search_budget="fast"))
@@ -405,7 +405,7 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(config.ranking_candidate_limit, 256)
         self.assertEqual(config.citation_seed_count, 3)
         self.assertEqual(config.citation_max_records, 40)
-        self.assertFalse(config.llm_thinking_enabled)
+        self.assertTrue(config.llm_thinking_enabled)
 
     def test_matching_web_budget_preserves_granular_environment_overrides(self):
         with temporary_env(
