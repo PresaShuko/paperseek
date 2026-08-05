@@ -575,7 +575,7 @@ class RetrievalAgentTest(unittest.TestCase):
         agent = PaperSeekAgent(config(), FakeLLM())
         self.assertEqual(agent._ranking_batch_size(256), 256)
 
-    def test_specific_intent_requires_all_explicit_facets(self):
+    def test_specific_intent_balances_precision_with_candidate_recall(self):
         agent = PaperSeekAgent(config(), FakeLLM())
         agent.search_intent = "Find how platform governance affects user innovation."
         agent.search_plan = SearchPlan(
@@ -588,8 +588,10 @@ class RetrievalAgentTest(unittest.TestCase):
 
         context = agent._intent_context()
 
-        self.assertIn("Every must_have_facet must remain a mandatory concept group", context)
-        self.assertIn("join distinct required concepts and the required relation with AND", context)
+        self.assertIn("normally with two or three mandatory concept groups", context)
+        self.assertIn("broad umbrella term", context)
+        self.assertIn("Do not turn every must_have_facet into a separate AND clause", context)
+        self.assertIn("ranking and query-portfolio evidence", context)
 
     def test_broad_intent_retains_high_recall_policy(self):
         agent = PaperSeekAgent(config(), FakeLLM())
@@ -604,25 +606,74 @@ class RetrievalAgentTest(unittest.TestCase):
         context = agent._intent_context()
 
         self.assertIn("Build a high-recall candidate query around the central subject", context)
-        self.assertNotIn("Every must_have_facet must remain a mandatory concept group", context)
+        self.assertNotIn("normally with two or three mandatory concept groups", context)
 
-    def test_global_ranking_batch_reserves_output_for_all_candidate_reasons(self):
+    def test_score_only_global_ranking_falls_back_to_sixty_four_candidate_chunks(self):
+        class TransportFailureThenCompactLLM:
+            def __init__(self):
+                self.requests = []
+                self.failed = False
+                self.score_successes = 0
+
+            def chat_json(self, messages, temperature=0.0, max_tokens=None):
+                system = messages[0]["content"]
+                prompt = messages[-1]["content"]
+                if "integer-indexed papers" in system:
+                    indexes = [int(value) for value in re.findall(r"^(\d+)\.$", prompt, re.MULTILINE)]
+                    self.requests.append(("scores", len(indexes)))
+                    if not self.failed:
+                        self.failed = True
+                        raise RuntimeError(
+                            'LLM API error (502): {"error":{"message":"upstream transport failure","type":"proxy_error"}}'
+                        )
+                    self.score_successes += 1
+                    return json.dumps({
+                        "scores": [
+                            [index, 8 if self.score_successes == 1 and index <= 50 else 2]
+                            for index in indexes
+                        ]
+                    })
+                if "Explain the supplied relevance scores" in system:
+                    indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", prompt, re.MULTILINE)]
+                    self.requests.append(("reasons", len(indexes)))
+                    return json.dumps({"reasons": [[index, "Relevant."] for index in indexes]})
+                raise AssertionError("unexpected ranking request")
+
+        llm = TransportFailureThenCompactLLM()
+        documents = [record(f"W{index}", f"Paper {index}") for index in range(256)]
+        agent = PaperSeekAgent(config(), llm)
+
+        ranked = agent._rank_results("graph retrieval", documents)
+
+        self.assertEqual(len(ranked), 256)
+        self.assertEqual(
+            llm.requests,
+            [("scores", 256), ("scores", 64), ("scores", 64), ("scores", 64), ("scores", 64), ("reasons", 50)],
+        )
+        self.assertTrue(all(entry["reasoning"] == "Relevant." for entry in ranked[:50]))
+        self.assertTrue(all(entry["reasoning"] == "" for entry in ranked[50:]))
+
+    def test_global_score_only_batch_uses_compact_output_budget(self):
         class StructuredRankingLLM:
             def __init__(self):
                 self.max_tokens = None
+                self.system = ""
 
             def chat_json(self, messages, temperature=0.0, max_tokens=None):
                 self.max_tokens = max_tokens
-                return '{"scores":[]}'
+                self.system = messages[0]["content"]
+                return json.dumps({"scores": [[index, 5] for index in range(1, 257)]})
 
         llm = StructuredRankingLLM()
         agent = PaperSeekAgent(config(), llm)
-        agent._request_ranking_scores(
+        scores = agent._request_compact_ranking_scores(
             "graph retrieval",
             [record(f"r{index}", f"Paper {index}") for index in range(256)],
             llm,
         )
-        self.assertEqual(llm.max_tokens, 32768)
+        self.assertEqual(len(scores), 256)
+        self.assertEqual(llm.max_tokens, 4096)
+        self.assertIn("do not output explanations", llm.system)
 
     def test_ranking_batch_prefers_structured_json_mode(self):
         class StructuredRankingLLM:
@@ -631,7 +682,9 @@ class RetrievalAgentTest(unittest.TestCase):
 
             def chat_json(self, messages, temperature=0.3, max_tokens=None):
                 self.calls.append((messages, temperature, max_tokens))
-                return '{"scores":[{"uid":"a","score":9,"reasoning":"Direct match."}]}'
+                if "integer-indexed papers" in messages[0]["content"]:
+                    return '{"scores":[[1,9]]}'
+                return '{"reasons":[[1,"Direct match."]]}'
 
             def chat(self, messages, temperature=0.3):
                 raise AssertionError("plain chat must not be used when chat_json is available")
@@ -639,43 +692,43 @@ class RetrievalAgentTest(unittest.TestCase):
         llm = StructuredRankingLLM()
         agent = PaperSeekAgent(config(), llm)
 
-        scores = agent._score_ranking_batch("graph retrieval", [record("a", "Graph retrieval")], llm)
+        scores = agent._rank_results("graph retrieval", [record("a", "Graph retrieval")])
 
-        self.assertEqual(scores, [{"uid": "a", "score": 9, "reasoning": "Direct match."}])
-        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(scores[0]["score"], 9)
+        self.assertEqual(scores[0]["reasoning"], "Direct match.")
+        self.assertEqual(len(llm.calls), 2)
         self.assertEqual(llm.calls[0][1:], (0.0, 4096))
 
-    def test_partial_global_ranking_falls_back_to_compact_scores_and_retained_reasons(self):
+    def test_partial_global_score_only_output_retries_in_chunks(self):
         class PartialRankingLLM:
             def __init__(self):
                 self.requests = []
+                self.score_calls = 0
 
             def chat_json(self, messages, temperature=0.0, max_tokens=None):
                 system = messages[0]["content"]
                 prompt = messages[-1]["content"]
-                if "do not generate reasons" in system:
+                if "integer-indexed papers" in system:
                     indexes = [int(value) for value in re.findall(r"^(\d+)\.$", prompt, re.MULTILINE)]
                     self.requests.append(("scores", indexes))
+                    self.score_calls += 1
+                    if self.score_calls == 1:
+                        indexes = indexes[:-1]
                     return json.dumps({"scores": [[index, 8] for index in indexes]})
                 if "Explain the supplied relevance scores" in system:
                     indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", prompt, re.MULTILINE)]
                     self.requests.append(("reasons", indexes))
                     return json.dumps({"reasons": [[index, "Relevant."] for index in indexes]})
-                uids = re.findall(r"UID: ([^\n]+)", prompt)
-                self.requests.append(("full", uids))
-                return json.dumps({"scores": [
-                    {"uid": uid, "score": 8, "reasoning": "Relevant."}
-                    for uid in uids[:-1]
-                ]})
+                raise AssertionError("unexpected ranking request")
 
         llm = PartialRankingLLM()
         documents = [record(f"W{index}", f"Paper {index}") for index in range(16)]
         agent = PaperSeekAgent(config(), llm)
 
-        scores = agent._score_ranking_batch("graph retrieval", documents, llm)
+        scores = agent._rank_results("graph retrieval", documents)
 
         self.assertEqual(len(scores), 16)
-        self.assertEqual([request[0] for request in llm.requests], ["full", "scores", "reasons"])
+        self.assertEqual([request[0] for request in llm.requests], ["scores", "scores", "reasons"])
         self.assertEqual(llm.requests[1][1], list(range(1, 17)))
         self.assertTrue(all(entry["reasoning"] == "Relevant." for entry in scores))
 
@@ -698,8 +751,10 @@ class RetrievalAgentTest(unittest.TestCase):
                 self.messages = []
 
             def chat_json(self, messages, temperature=0.0, max_tokens=None):
-                self.messages = messages
-                return '{"scores":[{"uid":"a","score":8,"reasoning":"Relevant."}]}'
+                self.messages.append(messages)
+                if "integer-indexed papers" in messages[0]["content"]:
+                    return '{"scores":[[1,8]]}'
+                return '{"reasons":[[1,"Relevant."]]}'
 
         llm = StructuredRankingLLM()
         agent = PaperSeekAgent(config(), llm)
@@ -710,9 +765,9 @@ class RetrievalAgentTest(unittest.TestCase):
             boundaries=["Exclude unrelated optimization domains"],
         )
 
-        agent._score_ranking_batch("Which works extend Global Descent?", [record("a", "A paper")], llm)
+        agent._rank_results("Which works extend Global Descent?", [record("a", "A paper")])
 
-        prompt = llm.messages[-1]["content"]
+        prompt = llm.messages[0][-1]["content"]
         self.assertIn("Stable SearchPlan", prompt)
         self.assertIn("Find methods that extend Global Descent", prompt)
         self.assertIn("Exclude unrelated optimization domains", prompt)

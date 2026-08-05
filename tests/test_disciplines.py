@@ -44,14 +44,25 @@ class BatchRankingLlm:
 
     def chat(self, messages, temperature=0.3):
         text = messages[-1]["content"]
-        uids = re.findall(r"UID: ([^\n]+)", text)
+        reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+        if reason_indexes:
+            return json.dumps({"reasons": [[index, "ranked"] for index in reason_indexes]})
+        entries = _compact_work_entries(text)
+        uids = [f"W{work_index:02d}" for _, work_index in entries]
         self.calls.append(tuple(uids))
         if self.fail_uid and self.fail_uid in uids:
             raise RuntimeError("simulated batch failure")
-        return json.dumps([
-            {"uid": uid, "score": int(uid.replace("W", "")), "reasoning": "ranked"}
-            for uid in uids
-        ])
+        return json.dumps({"scores": [[local_index, work_index] for local_index, work_index in entries]})
+
+
+def _compact_work_entries(text):
+    entries = []
+    for block in text.split("\n\n"):
+        local_match = re.search(r"^(\d+)\.$", block, re.MULTILINE)
+        work_match = re.search(r"^\s*Title: Work (\d+)$", block, re.MULTILINE)
+        if local_match and work_match:
+            entries.append((int(local_match.group(1)), int(work_match.group(1))))
+    return entries
 
 
 def openalex_work(work_id, field_id):
@@ -657,15 +668,16 @@ class DisciplineMappingTest(unittest.TestCase):
 
             def chat(self, messages, temperature=0.3):
                 text = messages[-1]["content"]
-                uids = re.findall(r"UID: ([^\n]+)", text)
+                reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+                if reason_indexes:
+                    return json.dumps({"reasons": [[index, "ranked"] for index in reason_indexes]})
+                entries = _compact_work_entries(text)
+                uids = [f"W{work_index:02d}" for _, work_index in entries]
                 self.calls.append(tuple(uids))
                 if "W04" in uids and not self.attempts.get("W04"):
                     self.attempts["W04"] = 1
                     raise RuntimeError("temporary endpoint pressure")
-                return json.dumps([
-                    {"uid": uid, "score": int(uid.replace("W", "")), "reasoning": "ranked"}
-                    for uid in uids
-                ])
+                return json.dumps({"scores": [[local_index, work_index] for local_index, work_index in entries]})
 
         calls = []
         config = SimpleNamespace(
@@ -704,14 +716,15 @@ class DisciplineMappingTest(unittest.TestCase):
 
             def chat(self, messages, temperature=0.3):
                 text = messages[-1]["content"]
-                uids = re.findall(r"UID: ([^\n]+)", text)
+                reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+                if reason_indexes:
+                    return json.dumps({"reasons": [[index, "ranked"] for index in reason_indexes]})
+                entries = _compact_work_entries(text)
+                uids = [f"W{work_index:02d}" for _, work_index in entries]
                 self.calls.append(tuple(uids))
                 if "W00" in uids:
                     raise RuntimeError("LLM API error (429): too many requests")
-                return json.dumps([
-                    {"uid": uid, "score": int(uid.replace("W", "")), "reasoning": "ranked"}
-                    for uid in uids
-                ])
+                return json.dumps({"scores": [[local_index, work_index] for local_index, work_index in entries]})
 
         calls = []
         config = SimpleNamespace(

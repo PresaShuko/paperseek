@@ -207,6 +207,10 @@ class SourcePromptRoutingTest(unittest.TestCase):
         self.assertIn("must_have_facets", prompts.SYSTEM_SEARCH_INTENT_ANALYSIS)
         self.assertIn("same absolute rubric", prompts.SYSTEM_RESULT_RANKING)
         self.assertNotIn("Sort scores by score", prompts.SYSTEM_RESULT_RANKING)
+        self.assertIn("Venue credibility adjustment", prompts.SYSTEM_RESULT_RANKING)
+        self.assertIn("field-leading journal or conference", prompts.SYSTEM_RESULT_RANKING)
+        self.assertIn("on-hold or delisted status", prompts.SYSTEM_RESULT_RANKING)
+        self.assertIn("Open access by itself is never negative evidence", prompts.SYSTEM_RESULT_RANKING)
 
     def test_semantic_scholar_query_sanitizer_replaces_hyphenated_terms(self):
         self.assertEqual(

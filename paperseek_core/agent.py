@@ -5547,8 +5547,10 @@ class PaperSeekAgent:
             )
         else:
             query_policy = (
-                "Build a precise candidate query. Every must_have_facet must remain a mandatory concept group, and required_relation must remain mandatory when present. "
-                "Use OR only for direct alternatives within one required concept; join distinct required concepts and the required relation with AND. "
+                "Build a balanced precision-oriented candidate query, normally with two or three mandatory concept groups: the central subject plus one or two of the most discriminating relation, object, population, method, or outcome facets. "
+                "When the subject is a broad umbrella term, require two discriminating groups; when it is a stable narrow named construct, one additional group may be sufficient. "
+                "Do not turn every must_have_facet into a separate AND clause. Combine closely related facets when established terminology expresses them together, and preserve remaining facets as ranking and query-portfolio evidence. "
+                "Add a remaining facet in a later revision only when returned titles show that it is needed to correct topic drift. "
             )
         return (
             "\nInterpreted search intent:\n"
@@ -6234,10 +6236,12 @@ class PaperSeekAgent:
             try:
                 self._check_cancelled()
                 self._llm_request_log("result_ranking")
-                scores = self._score_ranking_batch(question, documents, self._new_ranking_llm_client())
+                ranking_llm = self._new_ranking_llm_client()
+                scores = self._score_ranking_batch(question, documents, ranking_llm)
                 self._check_cancelled()
                 if documents and not scores:
                     raise EmptyRankingBatchError("LLM ranking batch returned no valid score entries.")
+                scores = self._attach_ranking_reasons(question, documents, scores, ranking_llm)
                 self._llm_response_log("result_ranking")
             except SearchCancelled:
                 raise
@@ -6541,6 +6545,13 @@ class PaperSeekAgent:
                 batch_size=batch_size,
                 candidate_count=len(documents),
             )
+        if scores:
+            scores = self._attach_ranking_reasons(
+                question,
+                documents,
+                scores,
+                self._new_ranking_llm_client(),
+            )
         return self._rank_from_scores(documents, scores)
 
     @staticmethod
@@ -6635,27 +6646,66 @@ class PaperSeekAgent:
             return self.llm
 
     def _score_ranking_batch(self, question: str, documents: list, llm_client: LLMClient) -> list:
+        return self._score_ranking_batch_score_only(question, documents, llm_client)
+
+    def _score_ranking_batch_score_only(self, question: str, documents: list, llm_client: LLMClient) -> list:
+        self._emit_log(f"Global score-only ranking started: candidates={len(documents)}.")
         try:
-            scores = self._request_ranking_scores(question, documents, llm_client)
+            scores = self._request_compact_ranking_scores(question, documents, llm_client)
         except Exception as exc:
-            if not self._should_use_compact_ranking_fallback(exc):
+            if not self._should_retry_score_only_in_chunks(exc):
                 raise
             self._emit_log(
-                "Full global scoring failed; switching to compact score-only global ranking: "
+                "Global score-only ranking failed; retrying in 64-candidate score-only chunks: "
                 f"{type(exc).__name__}: {exc}"
             )
-            return self._score_ranking_batch_two_stage(question, documents, llm_client)
+            scores = self._request_compact_ranking_scores_in_chunks(question, documents, llm_client)
         matched, missing = self._match_ranking_scores_to_documents(documents, scores)
         if missing:
             self._emit_log(
-                f"Full global scoring omitted {len(missing)}/{len(documents)} candidate(s); "
-                "switching to compact score-only global ranking."
+                f"Global score-only ranking omitted {len(missing)}/{len(documents)} candidate(s); "
+                "retrying in 64-candidate score-only chunks."
             )
-            return self._score_ranking_batch_two_stage(question, documents, llm_client)
+            scores = self._request_compact_ranking_scores_in_chunks(question, documents, llm_client)
+            matched, missing = self._match_ranking_scores_to_documents(documents, scores)
+            if missing:
+                raise EmptyRankingBatchError(
+                    f"Chunked score-only ranking omitted {len(missing)}/{len(documents)} candidate(s)."
+                )
+        self._emit_log(f"Global score-only ranking completed: scored={len(matched)}.")
         return matched
 
+    def _attach_ranking_reasons(
+        self,
+        question: str,
+        documents: list,
+        scores: list,
+        llm_client: LLMClient,
+    ) -> list:
+        reason_documents = self._ranking_reason_documents(documents, scores)
+        reason_by_uid = {}
+        if reason_documents:
+            self._emit_log(
+                f"Ranking reason generation started for {len(reason_documents)} retained candidate(s)."
+            )
+        for start in range(0, len(reason_documents), 64):
+            batch = reason_documents[start:start + 64]
+            try:
+                reason_by_uid.update(
+                    self._request_ranking_reasons(question, batch, scores, llm_client)
+                )
+            except Exception as exc:
+                self._emit_log(
+                    "Ranking reason generation failed for retained candidates; keeping global scores: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        for entry in scores:
+            entry["reasoning"] = reason_by_uid.get(str(entry.get("uid") or ""), "")
+        return scores
+
     @staticmethod
-    def _should_use_compact_ranking_fallback(exc: Exception) -> bool:
+    def _should_retry_score_only_in_chunks(exc: Exception) -> bool:
         text = str(exc or "").casefold()
         if PaperSeekAgent._is_rate_limit_error(exc):
             return False
@@ -6674,62 +6724,21 @@ class PaperSeekAgent:
                 "empty response",
                 "timed out",
                 "timeout",
+                "http 500",
+                "http 502",
+                "http 503",
+                "http 504",
+                "api error (500)",
+                "api error (502)",
+                "api error (503)",
+                "api error (504)",
+                "upstream transport failure",
+                "upstream proxy failed",
+                "proxy_error",
+                "network error",
+                "connection reset",
             )
         )
-
-    def _score_ranking_batch_two_stage(self, question: str, documents: list, llm_client: LLMClient) -> list:
-        scores = self._request_compact_ranking_scores(question, documents, llm_client)
-        matched, missing = self._match_ranking_scores_to_documents(documents, scores)
-        if missing:
-            raise EmptyRankingBatchError(
-                f"Compact global scoring omitted {len(missing)}/{len(documents)} candidate(s)."
-            )
-
-        reason_documents = self._ranking_reason_documents(documents, matched)
-        reason_by_uid = {}
-        for start in range(0, len(reason_documents), 64):
-            batch = reason_documents[start:start + 64]
-            try:
-                reason_by_uid.update(
-                    self._request_ranking_reasons(question, batch, matched, llm_client)
-                )
-            except Exception as exc:
-                self._emit_log(
-                    "Ranking reason generation failed for retained candidates; keeping global scores: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-
-        for entry in matched:
-            entry["reasoning"] = reason_by_uid.get(str(entry.get("uid") or ""), "")
-        return matched
-
-    def _request_ranking_scores(self, question: str, documents: list, llm_client: LLMClient) -> list:
-        abstract_limit = max(500, min(1200, 12000 // max(1, len(documents))))
-        descriptions = []
-        for i, doc in enumerate(documents, 1):
-            descriptions.append(_describe_document(doc, i, abstract_limit=abstract_limit))
-
-        papers_text = "\n\n".join(descriptions)
-
-        messages = [
-            {"role": "system", "content": SYSTEM_RESULT_RANKING},
-            {"role": "user", "content": (
-                f"Research question: {question}\n\n"
-                f"Stable SearchPlan (intent context, not paper evidence):\n"
-                f"{self._ranking_plan_context()}\n\n"
-                f"Papers to evaluate:\n\n{papers_text}\n\n"
-                f'Output ONLY one JSON object with the top-level key "scores".'
-            )},
-        ]
-
-        chat_json = getattr(llm_client, "chat_json", None)
-        max_tokens = min(32768, max(4096, len(documents) * 128))
-        raw = (
-            chat_json(messages, temperature=0.0, max_tokens=max_tokens)
-            if callable(chat_json)
-            else llm_client.chat(messages, temperature=0.3)
-        )
-        return self._parse_ranking_response(raw)
 
     def _request_compact_ranking_scores(self, question: str, documents: list, llm_client: LLMClient) -> list:
         descriptions = []
@@ -6740,11 +6749,7 @@ class PaperSeekAgent:
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "Score every supplied paper against the stable SearchPlan on the same absolute 0-10 relevance rubric. "
-                    "Use only the supplied evidence. Return every integer index exactly once and do not generate reasons. "
-                    'Output only JSON shaped as {"scores":[[1,9],[2,6]]}.'
-                ),
+                "content": SYSTEM_RESULT_RANKING,
             },
             {
                 "role": "user",
@@ -6763,6 +6768,25 @@ class PaperSeekAgent:
             else llm_client.chat(messages, temperature=0.0)
         )
         return self._parse_compact_ranking_scores(raw, documents)
+
+    def _request_compact_ranking_scores_in_chunks(
+        self,
+        question: str,
+        documents: list,
+        llm_client: LLMClient,
+        chunk_size: int = 64,
+    ) -> list:
+        scores = []
+        for start in range(0, len(documents), chunk_size):
+            batch = documents[start:start + chunk_size]
+            batch_scores = self._request_compact_ranking_scores(question, batch, llm_client)
+            matched, missing = self._match_ranking_scores_to_documents(batch, batch_scores)
+            if missing:
+                raise EmptyRankingBatchError(
+                    f"Score-only chunk {start // chunk_size + 1} omitted {len(missing)}/{len(batch)} candidate(s)."
+                )
+            scores.extend(matched)
+        return scores
 
     def _ranking_reason_documents(self, documents: list, scores: list) -> list:
         score_by_uid = {
@@ -6809,6 +6833,8 @@ class PaperSeekAgent:
                 "content": (
                     "Explain the supplied relevance scores using only the paper metadata and stable SearchPlan. "
                     "Give one concise evidence-based sentence in the user's language for every integer index. "
+                    "Prioritize topical fit; mention a venue credibility adjustment only when it materially affected the score and the venue reputation is known with high confidence. "
+                    "Do not infer poor quality from open-access status, publisher, impact factor, quartile, or citation count alone. "
                     'Output only JSON shaped as {"reasons":[[1,"reason"],[2,"reason"]]}.'
                 ),
             },
@@ -6976,29 +7002,6 @@ class PaperSeekAgent:
         if not key:
             return {}
         return dict(self.retrieval_metadata_by_key.get(key, {}))
-
-    def _parse_ranking_response(self, raw: str) -> list:
-        raw = raw.strip()
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-        try:
-            payload = json.loads(raw)
-            if isinstance(payload, dict):
-                payload = payload.get("scores")
-            return self._validated_ranking_scores(payload)
-        except json.JSONDecodeError:
-            pass
-
-        m = re.search(r"\[.*\]", raw, re.DOTALL)
-        if m:
-            try:
-                return self._validated_ranking_scores(json.loads(m.group(0)))
-            except json.JSONDecodeError:
-                pass
-
-        return []
 
     @staticmethod
     def _validated_ranking_scores(value: Any) -> list[dict[str, Any]]:

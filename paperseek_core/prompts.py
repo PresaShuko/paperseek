@@ -35,10 +35,10 @@ Query-view rules:
 - Do not AND the successor_paradigm view with the original field phrase: that would prevent it from finding papers whose title and indexed metadata use only the successor terminology. Use one coherent alternative group. Examples of the intended bridge include image retrieval -> image-text representation learning / vision-language pretraining; graph neural networks -> message-passing networks / graph transformers. These are examples of the reasoning pattern, not terms to copy into unrelated plans.
 - Survey, review, or overview literature may be one supplementary view, but never make those publication types a required concept across the portfolio unless the user explicitly asks for reviews.
 - Keep broad-landscape concept groups inclusive: one view should represent one coherent naming family. Do not AND a task with an optional technique, publication type, application, or evaluation facet merely to reduce result count.
-- For a specific relation or method question, every view must retain the required_relation and the necessary must_have_facets, while varying terminology or perspective.
+- For a specific relation or method question, every view must retain the central subject and the requested relation, while varying terminology or perspective. A view may represent secondary must-have facets as ranking criteria rather than separate required groups when conjoining all of them would make the candidate route brittle.
 - Classify a question as broad_landscape only when the user is genuinely asking for an overview of a field without a required relation, mechanism, comparison, population, outcome, or application constraint. A request does not become broad_landscape merely because it asks to find literature.
-- When the user names multiple objects, conditions, populations, mechanisms, outcomes, or a relation between concepts, classify the request as specific_relation, method_application, mechanism, or comparison as appropriate. Put every explicit relevance requirement in must_have_facets and preserve the requested relation in required_relation.
-- Precision takes priority over speculative recall for non-broad questions. Adjacent terminology may vary the wording of a required facet, but it must not replace, weaken, or omit that facet or the required relation.
+- When the user names multiple objects, conditions, populations, mechanisms, outcomes, or a relation between concepts, classify the request as specific_relation, method_application, mechanism, or comparison as appropriate. Record every explicit relevance requirement in must_have_facets and preserve the requested relation in required_relation; this records the final relevance standard, not a requirement to place every facet in the first source query.
+- For non-broad questions, balance precision with enough candidate recall for downstream ranking. The initial source query should normally use two or three mandatory groups: the central subject plus one or two highly discriminating facets or relation groups. A broad umbrella subject needs two discriminating groups; a stable narrow named construct may need only one. Preserve secondary requirements in the plan so query portfolios, title feedback, and ranking can enforce them without making the first query an exhaustive conjunction.
 - Make the views genuinely different. Do not repeat the same terms with reordered wording.
 - Keep each view concise: at most 3 concept groups, at most 5 terms per group, and a purpose of at most 15 words. The source-specific compiler will add syntax later.
 - Keep core_concepts, must_have_facets, optional_facets, likely_synonyms, adjacent_concepts, boundaries, and ambiguities to at most 5 short entries each. Do not narrate your reasoning inside any field.
@@ -145,10 +145,11 @@ Official OpenAlex API guidance converted into prompt rules:
 Semantic construction rules:
 - Read the interpreted SearchPlan before writing the query.
 - For broad_landscape questions, build a concise high-recall query around the central subject.
-- For every other question type, represent every must_have_facet as a mandatory concept group and preserve required_relation as a mandatory relation group when it is non-empty.
-- Join direct synonyms for the same facet with OR inside one parenthesized group. Join distinct required facets and the required relation with AND.
+- For every other question type, build a balanced precision-oriented candidate query, normally with two or three mandatory concept groups: the central subject plus one or two of the most discriminating relation, object, population, method, or outcome facets. If the subject is a broad umbrella term such as digital transformation, governance, policy, or artificial intelligence, use two discriminating groups rather than issuing a broad subject-only query.
+- Do not translate every must_have_facet into a separate AND group. The SearchPlan records the final relevance standard; secondary facets remain available to query portfolios, title-feedback revisions, and ranking.
+- Join direct synonyms for the same selected facet with OR inside one parenthesized group. Join the selected distinct groups with AND. When established terminology expresses a relation and outcome together, keep them in one coherent group instead of duplicating them as separate constraints.
 - Optional facets and adjacent concepts must not replace or weaken a required facet. Include them only when they clarify an existing required group without making the query broader than the user's request.
-- Before returning JSON, verify that removing any AND group would drop an explicit user requirement. If a required facet or relation is missing, repair the query before returning it.
+- Before returning JSON, verify that the query covers the central subject and at least one discriminating requested relation or facet, while leaving enough room for downstream candidate ranking. If it has more than three mandatory groups, remove the least discriminating secondary group before returning it.
 
 Output contract:
 - Return exactly one valid JSON object with keys "query" and "rationale".
@@ -661,7 +662,7 @@ Output contract:
 Output ONLY the JSON object."""
 
 SYSTEM_RESULT_RANKING = """\
-You are the final evidence-based relevance judge in a literature-search system. Given a stable SearchPlan and a list of papers, score every paper independently on a 0-10 relevance scale. Apply the same absolute rubric in every batch; never grade a paper relative to the other papers in the current batch.
+You are the final evidence-based relevance judge in a literature-search system. Given a stable SearchPlan and a list of integer-indexed papers, evaluate every paper independently on a 0-10 relevance scale. Apply the same absolute rubric to the entire candidate set; never grade a paper relative to the other papers in the current request.
 
 Scoring guide:
 - 9-10: The available evidence directly covers every must-have facet and the required relation, with no explicit boundary conflict.
@@ -671,16 +672,26 @@ Scoring guide:
 - 1-2: The available evidence establishes that the paper is irrelevant despite sharing keywords.
 - 0: The supplied evidence establishes no substantive connection to the research intent.
 
+Venue credibility adjustment, applied only after the topical score:
+- +1: a well-established, field-leading journal or conference whose importance to this specific field is clear from stable scholarly reputation.
+- 0: an ordinary, broad-scope, unfamiliar, or unverified venue. Unknown reputation is neutral.
+- -1: a venue confidently known for high-volume publication with limited field-specific selectivity or consistently weak editorial screening.
+- -2: a venue with reliable evidence of an on-hold or delisted status, paper-mill activity, systematic citation manipulation, or similarly serious editorial-integrity concerns.
+- Clamp the adjusted final score to 0-10. Venue credibility is secondary: it must not turn an off-topic paper into a relevant one or erase strong direct topical evidence.
+- Judge field importance, not journal quartile, impact factor, open-access status, publisher, or citation count alone. Open access by itself is never negative evidence.
+- Apply a non-zero venue adjustment only when the venue identity and reputation are known with high confidence from the supplied metadata and stable knowledge. Do not guess current status; use 0 when uncertain.
+
 Rules:
 - Use core_concepts to interpret terminology, must_have_facets and required_relation to judge high relevance, optional_facets only as supporting evidence, and boundaries to detect explicit drift.
 - A score of 7 or higher requires positive title, abstract, keyword, or metadata evidence for the central subject and any required relation. Do not infer a relation merely because its component words appear separately.
 - An explicit conflict with a stated boundary normally caps the score at 4.
-- Missing abstracts mean incomplete evidence, not irrelevance. Judge conservatively from the title and other supplied metadata and state the uncertainty without inventing content.
+- Missing abstracts mean incomplete evidence, not irrelevance. Judge conservatively from the title and other supplied metadata without inventing content.
 - Base every claim only on the supplied title, abstract, keywords, source, year, document type, authors, and provider metadata.
 - Do not use citation count as topical relevance evidence.
-- The reasoning must be one concise sentence in the user's language that identifies the strongest matched facet and any material missing or conflicting facet.
+- Assess the evidence for each paper before assigning its score, but do not output explanations or hidden reasoning in this step.
+- Return every supplied integer index exactly once. Do not omit low-scoring papers and do not return any other index.
 
 Output one JSON object with this exact top-level shape:
-{"scores":[{"uid":"...","score":N,"reasoning":"One concise evidence-based sentence."}]}
+{"scores":[[1,9],[2,6],[3,0]]}
 
-Return exactly one entry for every supplied UID and no other UID. Output ONLY the JSON object, no markdown, no code blocks."""
+Output ONLY the JSON object, no markdown, no code blocks."""

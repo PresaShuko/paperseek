@@ -1,3 +1,5 @@
+import json
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -26,6 +28,16 @@ from paperseek_core.harness import (
     SearchLoopController,
 )
 from paperseek_core.sources.providers import PaperRecord, ProviderError, ProviderSearchResult, SearchMetadata
+
+
+def _compact_paper_entries(text):
+    entries = []
+    for block in text.split("\n\n"):
+        local_match = re.search(r"^(\d+)\.$", block, re.MULTILINE)
+        paper_match = re.search(r"^\s*Title: Paper (\d+)$", block, re.MULTILINE)
+        if local_match and paper_match:
+            entries.append((int(local_match.group(1)), int(paper_match.group(1))))
+    return entries
 
 
 def snapshot(**overrides):
@@ -1213,18 +1225,16 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                 return self
 
             def chat(self, messages, temperature=0.3):
-                import json
-                import re
-
                 text = messages[-1]["content"]
-                uids = re.findall(r"UID: ([^\n]+)", text)
+                reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+                if reason_indexes:
+                    return json.dumps({"reasons": [[index, "ranked"] for index in reason_indexes]})
+                entries = _compact_paper_entries(text)
+                uids = [f"W{paper_index:02d}" for _, paper_index in entries]
                 if "W00" in uids and not self.failed:
                     self.failed = True
                     raise RuntimeError("LLM API error (429): too many requests")
-                return json.dumps([
-                    {"uid": uid, "score": int(uid.replace("W", "")), "reasoning": "ranked"}
-                    for uid in uids
-                ])
+                return json.dumps({"scores": [[local_index, paper_index] for local_index, paper_index in entries]})
 
         config = SimpleNamespace(
             data_source="openalex",
@@ -1245,7 +1255,7 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
         self.assertEqual(agent.search_run_state.ranking_batch_observations[0].batch_index, 1)
         self.assertEqual(agent.search_run_state.ranking_recovery_decisions[0].action, RANKING_RETRY_LOWER_CONCURRENCY)
 
-    def test_agent_retries_empty_ranking_batch_once_at_same_concurrency(self):
+    def test_agent_retries_empty_global_score_output_in_compact_chunks(self):
         class EmptyOnceRankingLlm:
             def __init__(self):
                 self.empty_returned = False
@@ -1254,18 +1264,16 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                 return self
 
             def chat(self, messages, temperature=0.3):
-                import json
-                import re
-
                 text = messages[-1]["content"]
-                uids = re.findall(r"UID: ([^\n]+)", text)
+                reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+                if reason_indexes:
+                    return json.dumps({"reasons": [[index, "ranked"] for index in reason_indexes]})
+                entries = _compact_paper_entries(text)
+                uids = [f"W{paper_index:02d}" for _, paper_index in entries]
                 if "W00" in uids and not self.empty_returned:
                     self.empty_returned = True
                     return "[]"
-                return json.dumps([
-                    {"uid": uid, "score": int(uid.replace("W", "")), "reasoning": "ranked"}
-                    for uid in uids
-                ])
+                return json.dumps({"scores": [[local_index, paper_index] for local_index, paper_index in entries]})
 
         config = SimpleNamespace(
             data_source="openalex",
@@ -1277,17 +1285,17 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             search_loop_backend="native",
         )
-        agent = PaperSeekAgent(config, EmptyOnceRankingLlm())
+        llm = EmptyOnceRankingLlm()
+        agent = PaperSeekAgent(config, llm)
         documents = [PaperRecord(uid=f"W{index:02d}", title=f"Paper {index}", provider="fake") for index in range(6)]
 
         ranked = agent._rank_results("AI governance", documents)
 
         self.assertEqual(len(ranked), 6)
         self.assertEqual(ranked[0]["document"].uid, "W05")
-        self.assertEqual(agent.search_run_state.ranking_batch_observations[0].error_type, "EmptyRankingBatchError")
-        self.assertEqual(agent.search_run_state.ranking_recovery_decisions[0].action, RANKING_RETRY_SAME_TIER)
+        self.assertTrue(llm.empty_returned)
 
-    def test_agent_retries_ranking_batch_with_only_invalid_scalar_entries(self):
+    def test_agent_retries_invalid_global_score_output_in_compact_chunks(self):
         class InvalidOnceRankingLlm:
             def __init__(self):
                 self.invalid_returned = False
@@ -1296,17 +1304,16 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                 return self
 
             def chat(self, messages, temperature=0.3):
-                import json
-                import re
-
-                uids = re.findall(r"UID: ([^\n]+)", messages[-1]["content"])
+                text = messages[-1]["content"]
+                reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+                if reason_indexes:
+                    return json.dumps({"reasons": [[index, "ranked"] for index in reason_indexes]})
+                entries = _compact_paper_entries(text)
+                uids = [f"W{paper_index:02d}" for _, paper_index in entries]
                 if "W00" in uids and not self.invalid_returned:
                     self.invalid_returned = True
                     return "[1, null, {\"score\": 8}]"
-                return json.dumps([
-                    {"uid": uid, "score": int(uid.replace("W", "")), "reasoning": "ranked"}
-                    for uid in uids
-                ])
+                return json.dumps({"scores": [[local_index, paper_index] for local_index, paper_index in entries]})
 
         config = SimpleNamespace(
             data_source="openalex",
@@ -1318,15 +1325,15 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             search_loop_backend="native",
         )
-        agent = PaperSeekAgent(config, InvalidOnceRankingLlm())
+        llm = InvalidOnceRankingLlm()
+        agent = PaperSeekAgent(config, llm)
         documents = [PaperRecord(uid=f"W{index:02d}", title=f"Paper {index}", provider="fake") for index in range(6)]
 
         ranked = agent._rank_results("AI governance", documents)
 
         self.assertEqual(len(ranked), 6)
         self.assertEqual(ranked[0]["document"].uid, "W05")
-        self.assertEqual(agent.search_run_state.ranking_batch_observations[0].error_type, "EmptyRankingBatchError")
-        self.assertEqual(agent.search_run_state.ranking_recovery_decisions[0].action, RANKING_RETRY_SAME_TIER)
+        self.assertTrue(llm.invalid_returned)
 
     def test_rank_from_scores_ignores_invalid_checkpoint_entries(self):
         config = SimpleNamespace(

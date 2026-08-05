@@ -1,4 +1,5 @@
 import json
+import re
 from threading import Event
 
 import pytest
@@ -16,10 +17,13 @@ class RankingLLM:
         self.calls = 0
 
     def chat(self, messages, temperature=0.3):
-        self.calls += 1
         text = messages[-1]["content"]
-        uid = "W2" if "W2" in text and "W1" not in text else "W1"
-        return json.dumps([{"uid": uid, "score": 8, "reasoning": "relevant"}])
+        reason_indexes = [int(value) for value in re.findall(r"^(\d+)\. Score:", text, re.MULTILINE)]
+        if reason_indexes:
+            return json.dumps({"reasons": [[index, "relevant"] for index in reason_indexes]})
+        self.calls += 1
+        indexes = [int(value) for value in re.findall(r"^(\d+)\.$", text, re.MULTILINE)]
+        return json.dumps({"scores": [[index, 8] for index in indexes]})
 
     def fork(self):
         return self
