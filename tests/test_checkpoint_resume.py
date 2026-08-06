@@ -9,7 +9,8 @@ from paperseek_core.agent import PaperSeekAgent, SearchCancelled
 from paperseek_core.harness import QueryLoopDecision, SearchCheckpoint, SearchRunState
 from paperseek_core.planning import ConceptGroup, QueryView, SearchPlan
 from paperseek_core.retrieval import document_key
-from paperseek_core.sources.providers import PaperRecord, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperRecord
+from paperseek_core.sources.contracts import ProviderSearchResult, SearchMetadata
 
 
 class RankingLLM:

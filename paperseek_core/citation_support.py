@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from paperseek_core.harness import CandidateCitationPath
 from paperseek_core.retrieval import document_alias_keys, document_key
-from paperseek_core.sources.providers import CitationSeedPlan
+from paperseek_core.sources.contracts import CitationSeedPlan
 
 
 def citation_count(document: Any) -> int:
@@ -15,7 +15,7 @@ def citation_count(document: Any) -> int:
 
 
 class CitationSupport:
-    """Citation planning and graph bookkeeping outside the Agent facade."""
+    """Citation planning and graph bookkeeping outside the agent."""
 
     def __init__(self, host: Any) -> None:
         self.host = host

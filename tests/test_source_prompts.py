@@ -8,7 +8,8 @@ from paperseek_core.agent import (
     _sanitize_openalex_query,
     _sanitize_semantic_scholar_query,
 )
-from paperseek_core.sources.providers import PaperRecord, ProviderError, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperRecord
+from paperseek_core.sources.contracts import ProviderError, ProviderSearchResult, SearchMetadata
 
 
 class CapturingLlm:

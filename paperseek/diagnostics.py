@@ -2,7 +2,7 @@
 import json
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 import requests
@@ -15,16 +15,14 @@ from paperseek.disciplines import (
     discipline_source_note,
     openalex_field_ids,
 )
-from paperseek.providers import (
-    ArxivProvider,
-    CrossrefProvider,
-    GoogleScholarSerperProvider,
-    OpenAlexProvider,
-    PaperHubProvider,
-    ProviderError,
-    PubMedProvider,
-    SemanticScholarProvider,
-)
+from paperseek_core.sources.arxiv import ArxivProvider
+from paperseek_core.sources.contracts import ProviderError
+from paperseek_core.sources.crossref import CrossrefProvider
+from paperseek_core.sources.google_scholar import GoogleScholarSerperProvider
+from paperseek_core.sources.openalex import OpenAlexProvider
+from paperseek_core.sources.paperhub import PaperHubProvider
+from paperseek_core.sources.pubmed import PubMedProvider
+from paperseek_core.sources.semantic_scholar import SemanticScholarProvider
 from paperseek_core.sources.wos import result_from_json as _wos_result_from_json
 from paperseek.source_metadata import get_source_metadata, list_source_metadata, require_source_metadata
 

@@ -32,7 +32,7 @@ from paperseek_core.retrieval_pipeline import RetrievalPipeline
 from paperseek_core.retrieval_support import RetrievalSupport
 from paperseek_core.retrieval_clients import ExternalRetrievalServices
 from paperseek_core.citation_pipeline import CitationExpansionPipeline
-from paperseek_core.citation_support import CitationSupport, citation_count as _citation_count
+from paperseek_core.citation_support import CitationSupport
 from paperseek_core.query_portfolio import QueryPortfolioPipeline
 from paperseek_core.query_generation import QueryGenerationPipeline
 from paperseek_core.query_contract import (
@@ -58,9 +58,7 @@ from paperseek_core.harness import (
     query_response_from_json as _harness_query_response_from_json,
     strip_llm_fence as _harness_strip_llm_fence,
 )
-from paperseek_core.sources.providers import (
-    ProviderError,
-)
+from paperseek_core.sources.contracts import ProviderError
 from paperseek_core.sources.factory import create_source_provider
 from paperseek_core.planning import SearchPlan
 

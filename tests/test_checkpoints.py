@@ -12,7 +12,7 @@ from paperseek_core.checkpoints import (
 from paperseek_core.harness import (
     SearchCheckpoint,
 )
-from paperseek_core.sources.providers import (
+from paperseek_core.domain.models import (
     PaperAuthor,
     PaperCitation,
     PaperIdentifiers,

@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from paperseek_core.sources.providers import (
-    ArxivProvider,
-    CrossrefProvider,
-    GoogleScholarSerperProvider,
-    OpenAlexProvider,
-    PaperHubProvider,
-    PubMedProvider,
-    SemanticScholarProvider,
-    WosProvider,
-)
+from paperseek_core.sources.arxiv import ArxivProvider
+from paperseek_core.sources.crossref import CrossrefProvider
+from paperseek_core.sources.google_scholar import GoogleScholarSerperProvider
+from paperseek_core.sources.openalex import OpenAlexProvider
+from paperseek_core.sources.paperhub import PaperHubProvider
+from paperseek_core.sources.pubmed import PubMedProvider
+from paperseek_core.sources.semantic_scholar import SemanticScholarProvider
+from paperseek_core.sources.wos import WosProvider
 
 
 def create_source_provider(

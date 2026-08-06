@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from paperseek_core.agent import PaperSeekAgent
 from paperseek_core.planning import ConceptGroup, QueryView, fallback_search_plan, parse_search_plan
 from paperseek_core.query_compiler import ArxivQueryCompiler, OpenAlexQueryCompiler
-from paperseek_core.sources.providers import PaperRecord, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperRecord
+from paperseek_core.sources.contracts import ProviderSearchResult, SearchMetadata
 
 
 class SequencedLlm:
@@ -133,7 +134,7 @@ class SearchPlanTest(unittest.TestCase):
 
         self.assertIn("at least three valid complementary query views", plan.coverage_gaps()[0])
 
-    def test_legacy_intent_json_remains_valid_without_enabling_portfolio(self):
+    def test_unstructured_intent_json_remains_valid_without_enabling_portfolio(self):
         plan = parse_search_plan(
             '{"intent":"Find graph neural network papers","core_concepts":["graph neural networks"],"likely_synonyms":["GNN"]}',
             "Find graph neural network papers",
@@ -439,7 +440,7 @@ class QueryPortfolioIntegrationTest(unittest.TestCase):
         self.assertEqual(cross_modal["added_unique"], 1)
         self.assertTrue(any(row.get("action") == "portfolio" for row in result["history"]))
 
-    def test_legacy_intent_output_gets_one_structured_portfolio_repair(self):
+    def test_unstructured_intent_output_gets_one_structured_portfolio_repair(self):
         llm = SequencedLlm(
             [
                 '{"intent":"Find image retrieval papers","core_concepts":["image retrieval"],"likely_synonyms":["CBIR"]}',

@@ -4,8 +4,6 @@ import json
 import logging
 import re
 import time
-from typing import Any
-
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -32,7 +30,7 @@ from paperseek.disciplines import (
 from paperseek.env_loader import load_env_file
 from paperseek.history import HistoryStore
 from paperseek.llm_client import LLMError, create_llm_client
-from paperseek.providers import ProviderError
+from paperseek_core.sources.contracts import ProviderError
 from paperseek.run_executor import InProcessRunExecutor
 from paperseek.search_agent import PaperSeekAgent
 from paperseek.source_metadata import list_source_metadata, supported_source_ids

@@ -8,17 +8,16 @@ from unittest.mock import patch
 from paperseek_core.agent import PaperSeekAgent
 from paperseek_core.planning import SearchPlan
 from paperseek_core.retrieval import RetrievalLane, document_key, fuse_candidates_rrf
-from paperseek_core.sources.providers import (
-    ArxivProvider,
+from paperseek_core.domain.models import (
     PaperCitation,
-    PaperHubProvider,
     PaperIdentifiers,
     PaperRecord,
     PaperSource,
-    ProviderSearchResult,
-    SearchMetadata,
-    SemanticScholarProvider,
 )
+from paperseek_core.sources.arxiv import ArxivProvider
+from paperseek_core.sources.contracts import ProviderSearchResult, SearchMetadata
+from paperseek_core.sources.paperhub import PaperHubProvider
+from paperseek_core.sources.semantic_scholar import SemanticScholarProvider
 
 
 class FakeLLM:
@@ -211,7 +210,7 @@ class ProviderLaneTest(unittest.TestCase):
             captured["attempts"] = attempts
             return FakeResponse(text=atom), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.arxiv.get_with_retries", fake_get):
             ArxivProvider().search("graph retrieval", lane=RetrievalLane.RECENT)
 
         self.assertEqual(captured["sortBy"], "submittedDate")
@@ -226,7 +225,7 @@ class ProviderLaneTest(unittest.TestCase):
             captured.update({"url": url, "params": dict(params or {})})
             return FakeResponse(payload={"total": 0, "data": []}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.semantic_scholar.get_with_retries", fake_get):
             SemanticScholarProvider(api_key="key").search("graph retrieval", lane=RetrievalLane.IMPACT)
 
         self.assertTrue(captured["url"].endswith("/paper/search/bulk"))

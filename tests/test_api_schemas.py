@@ -2,19 +2,11 @@ import unittest
 
 from pydantic import ValidationError
 
-from paperseek.api.schemas import DiagnosticRequest, SearchRequest
-from paperseek.web_app import (
-    DiagnosticRequest as LegacyDiagnosticRequest,
-    SearchRequest as LegacySearchRequest,
-    app,
-)
+from paperseek.api.schemas import SearchRequest
+from paperseek.web_app import app
 
 
 class ApiSchemaContractTest(unittest.TestCase):
-    def test_web_app_imports_reference_canonical_schemas(self):
-        self.assertIs(LegacySearchRequest, SearchRequest)
-        self.assertIs(LegacyDiagnosticRequest, DiagnosticRequest)
-
     def test_openapi_routes_reference_canonical_request_components(self):
         schema = app.openapi()
         components = schema["components"]["schemas"]

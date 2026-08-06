@@ -18,7 +18,9 @@ from paperseek_core.disciplines import (
     wos_category_clause,
 )
 from paperseek_core.planning import parse_search_plan
-from paperseek_core.sources.providers import CitationSeedPlan, OpenAlexProvider, PaperIdentifiers, PaperRecord, ProviderError, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperIdentifiers, PaperRecord
+from paperseek_core.sources.contracts import CitationSeedPlan, ProviderError, ProviderSearchResult, SearchMetadata
+from paperseek_core.sources.openalex import OpenAlexProvider
 
 
 class FakeResponse:
@@ -207,7 +209,7 @@ class DisciplineMappingTest(unittest.TestCase):
             captured.update(params or {})
             return FakeResponse(), {"method": "GET", "url": FakeResponse.url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", side_effect=fake_get):
+        with patch("paperseek_core.sources.openalex.get_with_retries", side_effect=fake_get):
             result = OpenAlexProvider().search("open innovation", limit=1, field_ids=("17", "14"))
 
         self.assertEqual(result.metadata.total, 0)
@@ -843,7 +845,7 @@ class DisciplineMappingTest(unittest.TestCase):
             },
         )
 
-        with patch("paperseek_core.sources.providers.get_with_retries", side_effect=fake_get):
+        with patch("paperseek_core.sources.openalex.get_with_retries", side_effect=fake_get):
             citation_data = OpenAlexProvider().citation_neighbors_with_graph(
                 [seed],
                 per_seed=4,
@@ -893,7 +895,7 @@ class DisciplineMappingTest(unittest.TestCase):
             raw={"referenced_works": ["https://openalex.org/Wback1"]},
         )
 
-        with patch("paperseek_core.sources.providers.get_with_retries", side_effect=fake_get):
+        with patch("paperseek_core.sources.openalex.get_with_retries", side_effect=fake_get):
             citation_data = OpenAlexProvider().citation_neighbors_with_graph(
                 [seed],
                 per_seed=2,

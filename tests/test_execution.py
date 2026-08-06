@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from paperseek_core.agent import PaperSeekAgent
 from paperseek_core.execution import SearchCancelled, run_cancellable
 from paperseek_core.llm import OpenAIChatClient
-from paperseek_core.sources.providers import PaperRecord, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperRecord
+from paperseek_core.sources.contracts import ProviderSearchResult, SearchMetadata
 
 
 class _SlowChatHandler(BaseHTTPRequestHandler):

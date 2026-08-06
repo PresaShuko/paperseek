@@ -228,7 +228,7 @@ class McpServerLogicTest(unittest.TestCase):
 
     def test_smoke_test_redacts_provider_error_credentials(self):
         from paperseek.mcp_server import smoke_test_logic
-        from paperseek.providers import ProviderError
+        from paperseek_core.sources.contracts import ProviderError
 
         secret = "sk-secret-abcdef123456"
 

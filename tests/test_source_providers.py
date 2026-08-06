@@ -4,22 +4,18 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
-from paperseek_core.sources.providers import (
-    ArxivProvider,
-    CrossrefProvider,
-    reconstruct_abstract,
-    GoogleScholarSerperProvider,
-    OpenAlexProvider,
-    PaperHubProvider,
-    PaperIdentifiers,
-    PaperRecord,
-    ProviderError,
-    PubMedProvider,
-    SemanticScholarProvider,
-    _retry_delay,
-    normalize_doi,
-)
 from paperseek_core.retrieval import RetrievalLane
+from paperseek_core.domain.models import PaperIdentifiers, PaperRecord
+from paperseek_core.sources.arxiv import ArxivProvider
+from paperseek_core.sources.contracts import ProviderError
+from paperseek_core.sources.crossref import CrossrefProvider
+from paperseek_core.sources.google_scholar import GoogleScholarSerperProvider
+from paperseek_core.sources.http import retry_delay
+from paperseek_core.sources.normalization import normalize_doi, reconstruct_abstract
+from paperseek_core.sources.openalex import OpenAlexProvider
+from paperseek_core.sources.paperhub import PaperHubProvider
+from paperseek_core.sources.pubmed import PubMedProvider
+from paperseek_core.sources.semantic_scholar import SemanticScholarProvider
 
 
 class FakeResponse:
@@ -40,8 +36,8 @@ class SourceProviderTest(unittest.TestCase):
         SemanticScholarProvider._last_request_at = 0.0
         PaperHubProvider.reset_cache()
 
-    @patch("paperseek_core.sources.providers.time.sleep")
-    @patch("paperseek_core.sources.providers.time.monotonic", side_effect=[10.0, 10.0, 10.25, 11.05])
+    @patch("paperseek_core.sources.semantic_scholar.time.sleep")
+    @patch("paperseek_core.sources.semantic_scholar.time.monotonic", side_effect=[10.0, 10.0, 10.25, 11.05])
     def test_semantic_scholar_throttle_enforces_one_request_per_second(self, _monotonic, sleep):
         SemanticScholarProvider._throttle()
         SemanticScholarProvider._throttle()
@@ -52,8 +48,8 @@ class SourceProviderTest(unittest.TestCase):
         response = FakeResponse(status_code=429)
         response.headers = {}
 
-        self.assertEqual(_retry_delay(response, 1, "semanticscholar"), 2.0)
-        self.assertEqual(_retry_delay(response, 2, "semanticscholar"), 4.0)
+        self.assertEqual(retry_delay(response, 1, "semanticscholar"), 2.0)
+        self.assertEqual(retry_delay(response, 2, "semanticscholar"), 4.0)
 
     def test_normalize_doi(self):
         self.assertEqual(normalize_doi(None), "")
@@ -77,7 +73,7 @@ class SourceProviderTest(unittest.TestCase):
             payload = {"meta": {"count": 1, "page": 1, "per_page": 1}, "results": []}
             return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.openalex.get_with_retries", fake_get):
             OpenAlexProvider(api_key="test-key").search(
                 "methods for calibrating peer review bias",
                 limit=100,
@@ -118,7 +114,7 @@ class SourceProviderTest(unittest.TestCase):
             return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
         provider = CrossrefProvider(email="researcher@example.org")
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.crossref.get_with_retries", fake_get):
             provider.search("AI governance", limit=25, page=3, lane=RetrievalLane.RELEVANCE)
             provider.search("AI governance", limit=25, page=1, lane=RetrievalLane.IMPACT)
             provider.search("AI governance", limit=25, page=1, lane=RetrievalLane.RECENT)
@@ -162,7 +158,7 @@ class SourceProviderTest(unittest.TestCase):
             })
             return FakeResponse(text=atom), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.arxiv.get_with_retries", fake_get):
             result = ArxivProvider().search("graph retrieval", limit=1)
 
         self.assertEqual(result.metadata.total, 1)
@@ -203,7 +199,7 @@ class SourceProviderTest(unittest.TestCase):
             captured.update({"provider": provider, "headers": headers, "params": params})
             return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.semantic_scholar.get_with_retries", fake_get):
             result = SemanticScholarProvider(api_key="s2-key").search("graph learning", limit=1)
 
         record = result.hits[0]
@@ -237,7 +233,7 @@ class SourceProviderTest(unittest.TestCase):
                 }],
             }), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 2}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.semantic_scholar.get_with_retries", fake_get):
             provider = SemanticScholarProvider(api_key="s2-key")
             result = provider.search("graph learning", limit=1)
 
@@ -262,7 +258,7 @@ class SourceProviderTest(unittest.TestCase):
                 return FakeResponse(text=xml), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
             raise AssertionError(url)
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.pubmed.get_with_retries", fake_get):
             result = PubMedProvider(api_key="ncbi-key", email="you@example.org", tool="paperseek-test").search("cancer", limit=1)
 
         self.assertEqual(len(calls), 3)
@@ -299,7 +295,7 @@ class SourceProviderTest(unittest.TestCase):
             captured.update({"url": url, "json": json, "headers": headers, "timeout": timeout})
             return FakeResponse(payload=payload, status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             result = GoogleScholarSerperProvider(api_key="serper-a,serper-b").search("AI governance", limit=5, page=2)
 
         self.assertEqual(captured["url"], "https://google.serper.dev/scholar")
@@ -413,7 +409,7 @@ class SourceProviderTest(unittest.TestCase):
                 url=url,
             ), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", side_effect=fake_get):
+        with patch("paperseek_core.sources.openalex.get_with_retries", side_effect=fake_get):
             records = provider._fetch_works(
                 ["https://openalex.org/W1", "W2", "W1"],
                 attempts=1,
@@ -453,7 +449,7 @@ class SourceProviderTest(unittest.TestCase):
         def fake_post(url, json=None, headers=None, timeout=0):
             return FakeResponse(payload=["not", "a", "dict"], status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             with self.assertRaisesRegex(Exception, "unexpected JSON structure"):
                 GoogleScholarSerperProvider(api_key="serper-a").search("AI governance", limit=5)
 
@@ -471,7 +467,7 @@ class SourceProviderTest(unittest.TestCase):
         def fake_post(url, json=None, headers=None, timeout=0):
             return FakeResponse(payload=payload, status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             result = GoogleScholarSerperProvider(api_key="serper-a").search("AI governance", limit=1)
 
         self.assertEqual(result.hits[0].names.authors, [])
@@ -495,7 +491,7 @@ class SourceProviderTest(unittest.TestCase):
         def fake_post(url, json=None, headers=None, timeout=0):
             return FakeResponse(payload=payload, status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             result = GoogleScholarSerperProvider(api_key="serper-a").search("digital economy", limit=1)
 
         record = result.hits[0]
@@ -520,7 +516,7 @@ class SourceProviderTest(unittest.TestCase):
         def fake_post(url, json=None, headers=None, timeout=0):
             return FakeResponse(payload=payload, status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             result = GoogleScholarSerperProvider(api_key="serper-a").search("digital transformation", limit=1)
 
         record = result.hits[0]
@@ -546,7 +542,7 @@ class SourceProviderTest(unittest.TestCase):
         def fake_post(url, json=None, headers=None, timeout=0):
             return FakeResponse(payload=payload, status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             result = GoogleScholarSerperProvider(api_key="serper-a").search("foreign direct investment", limit=1)
 
         record = result.hits[0]
@@ -571,7 +567,7 @@ class SourceProviderTest(unittest.TestCase):
             payload = payloads.pop(0) if payloads else {"organic": []}
             return FakeResponse(payload=payload, status_code=200, url=url)
 
-        with patch("paperseek_core.sources.providers.requests.post", fake_post):
+        with patch("paperseek_core.sources.google_scholar.requests.post", fake_post):
             result = GoogleScholarSerperProvider(api_key="serper-a").search("AI governance", limit=5)
 
         self.assertEqual(pages[:2], [1, 2])
@@ -586,7 +582,7 @@ class SourceProviderTest(unittest.TestCase):
                 return FakeResponse(payload={"papers": [{"id": "p1", "title": "Graph Neural Retrieval", "authors": ["Ada"], "conference": "ICLR", "year": 2025, "abstract": "retrieval with graphs"}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
             raise AssertionError(url)
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.paperhub.get_with_retries", fake_get):
             result = PaperHubProvider().search("graph retrieval", limit=1)
 
         self.assertEqual(result.metadata.total, 1)
@@ -607,7 +603,7 @@ class SourceProviderTest(unittest.TestCase):
                 return FakeResponse(payload={"papers": [{"id": "p1", "title": "Graph Neural Retrieval", "authors": ["Ada"], "conference": "ICLR", "year": 2025, "abstract": "retrieval with graphs"}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
             raise AssertionError(url)
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.paperhub.get_with_retries", fake_get):
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(lambda _: PaperHubProvider().search("graph retrieval", limit=1), range(2)))
 
@@ -643,7 +639,7 @@ class SourceProviderTest(unittest.TestCase):
             }
             return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.paperhub.get_with_retries", fake_get):
             provider = PaperHubProvider()
             result = provider.search("conference:ICML year:2026", limit=10)
 
@@ -668,7 +664,7 @@ class SourceProviderTest(unittest.TestCase):
                 return FakeResponse(payload={"papers": [{"id": "good", "title": "Good", "authors": ["Ada"]}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
             return FakeResponse(status_code=503, text="unavailable"), {"method": "GET", "url": url, "status": 503, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.paperhub.get_with_retries", fake_get):
             with self.assertRaisesRegex(ProviderError, "broken.fake.json returned HTTP 503"):
                 PaperHubProvider().search("graph", limit=10)
 
@@ -687,7 +683,7 @@ class SourceProviderTest(unittest.TestCase):
                 return FakeResponse(payload=manifest), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
             return FakeResponse(payload={"papers": [{"id": "p1", "title": "Graph Retrieval", "authors": ["Ada"]}]}), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.paperhub.get_with_retries", fake_get):
             provider = PaperHubProvider()
             provider.search("graph", limit=1)
             PaperHubProvider._paper_cache_loaded_at = time.monotonic() - provider.CACHE_TTL_SECONDS - 1
@@ -707,7 +703,7 @@ class SourceProviderTest(unittest.TestCase):
         def fake_get(provider, url, params=None, headers=None, timeout=0, query=""):
             return FakeResponse(status_code=503, text="unavailable"), {"method": "GET", "url": url, "status": 503, "elapsed_ms": 1}
 
-        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+        with patch("paperseek_core.sources.paperhub.get_with_retries", fake_get):
             provider = PaperHubProvider()
             result = provider.search("graph", limit=1)
 

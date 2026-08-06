@@ -1,7 +1,7 @@
 import unittest
 
 from paperseek_core.harness import classify_error
-from paperseek_core.sources.providers import ProviderError
+from paperseek_core.sources.contracts import ProviderError
 
 
 class HarnessErrorTest(unittest.TestCase):

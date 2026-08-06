@@ -85,7 +85,7 @@ def main(argv=None):
         if command == "history":
             return _run_history(rest)
 
-    # Legacy mode: `paperseek "question" ...`
+    # Direct question mode: `paperseek "question" ...`
     return _run_search(argv, prog="paperseek")
 
 

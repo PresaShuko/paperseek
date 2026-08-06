@@ -1,51 +1,31 @@
 from __future__ import annotations
 
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
 from html import unescape
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
-import math
+from typing import Any, Dict, List, Optional
 import re
 import requests
 import threading
 import time
-import xml.etree.ElementTree as ET
 
+from paperseek_core.domain.models import (
+    PaperAuthor,
+    PaperCitation,
+    PaperIdentifiers,
+    PaperKeywords,
+    PaperLinks,
+    PaperNames,
+    PaperRecord,
+    PaperSource,
+)
 from paperseek_core.retrieval import ProviderRetrievalCapabilities, RetrievalLane
-import paperseek_core.sources.providers as _shared
-
-PaperAuthor = _shared.PaperAuthor
-PaperNames = _shared.PaperNames
-PaperSource = _shared.PaperSource
-PaperLinks = _shared.PaperLinks
-PaperCitation = _shared.PaperCitation
-PaperIdentifiers = _shared.PaperIdentifiers
-PaperKeywords = _shared.PaperKeywords
-PaperRecord = _shared.PaperRecord
-CitationSeedPlan = _shared.CitationSeedPlan
-SearchMetadata = _shared.SearchMetadata
-ProviderSearchResult = _shared.ProviderSearchResult
-ProviderError = _shared.ProviderError
-reconstruct_abstract = _shared.reconstruct_abstract
-normalize_doi = _shared.normalize_doi
-
-
-def get_with_retries(*args, **kwargs):
-    return _shared.get_with_retries(*args, **kwargs)
-
-
-def _split_api_keys(value: str) -> List[str]:
-    return _shared._split_api_keys(value)
-
-
-def _retry_delay(response: requests.Response, attempt: int, source: str = "") -> float:
-    return _shared._retry_delay(response, attempt, source)
+from paperseek_core.sources.contracts import ProviderError, ProviderSearchResult, SearchMetadata
+from paperseek_core.sources.http import redact_request_text, retry_delay, split_api_keys
 
 class GoogleScholarSerperProvider:
     BASE_URL = "https://google.serper.dev/scholar"
 
     def __init__(self, api_key: str = ""):
-        self.api_keys = _split_api_keys(api_key)
+        self.api_keys = split_api_keys(api_key)
         self.last_response_info: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._index = 0
@@ -172,7 +152,7 @@ class GoogleScholarSerperProvider:
                 }
                 last_response = response
                 if response.status_code in {401, 403, 408, 409, 425, 429, 500, 502, 503, 504} and attempt < attempts:
-                    time.sleep(_retry_delay(response, attempt, "googlescholar"))
+                    time.sleep(retry_delay(response, attempt, "googlescholar"))
                     continue
                 return response, info
             except requests.RequestException as exc:
@@ -187,7 +167,7 @@ class GoogleScholarSerperProvider:
                 "elapsed_ms": int((time.perf_counter() - started) * 1000),
                 "attempts": attempts,
             }
-        detail = _redact_request_text(last_exc)
+        detail = redact_request_text(last_exc)
         raise ProviderError("googlescholar", f"Google Scholar via Serper request failed after {attempts} attempts: {detail}", query=query) from last_exc
 
     def _next_api_key(self) -> str:

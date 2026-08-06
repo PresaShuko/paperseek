@@ -5,7 +5,8 @@ from typing import Any
 
 from paperseek_core.disciplines import openalex_field_ids
 from paperseek_core.harness import CITATION_RETRY_REDUCED
-from paperseek_core.sources.providers import OpenAlexProvider, ProviderError
+from paperseek_core.sources.contracts import ProviderError
+from paperseek_core.sources.openalex import OpenAlexProvider
 
 
 class CitationExpansionPipeline:

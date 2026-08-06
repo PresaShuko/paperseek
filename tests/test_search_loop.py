@@ -25,7 +25,8 @@ from paperseek_core.harness import (
     SearchRunState,
     SearchLoopController,
 )
-from paperseek_core.sources.providers import PaperRecord, ProviderError, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperRecord
+from paperseek_core.sources.contracts import ProviderError, ProviderSearchResult, SearchMetadata
 
 
 def _compact_paper_entries(text):

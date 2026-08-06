@@ -16,7 +16,9 @@ from paperseek_core.query_compiler import (
     query_compiler_sources,
     supports_query_portfolio,
 )
-from paperseek_core.sources.providers import PaperHubProvider, PaperRecord, ProviderSearchResult, SearchMetadata
+from paperseek_core.domain.models import PaperRecord
+from paperseek_core.sources.contracts import ProviderSearchResult, SearchMetadata
+from paperseek_core.sources.paperhub import PaperHubProvider
 
 
 def sample_view() -> QueryView:

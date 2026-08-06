@@ -4,7 +4,9 @@ from unittest.mock import patch
 
 from paperseek_core.harness.search_loop import SearchLoopController
 from paperseek_core.harness.schemas import SearchRunState
-from paperseek_core.sources.providers import CitationSeedPlan, OpenAlexProvider, PaperIdentifiers, PaperRecord
+from paperseek_core.domain.models import PaperIdentifiers, PaperRecord
+from paperseek_core.sources.contracts import CitationSeedPlan
+from paperseek_core.sources.openalex import OpenAlexProvider
 
 
 def record(work_id: str, references=None) -> PaperRecord:

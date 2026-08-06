@@ -26,7 +26,7 @@ from paperseek_core.prompts import (
     SYSTEM_QUERY_GENERATION,
     SYSTEM_SEMANTIC_SCHOLAR_QUERY_GENERATION,
 )
-from paperseek_core.sources.providers import ProviderError
+from paperseek_core.sources.contracts import ProviderError
 
 
 def _trim_boolean_edges(query: str) -> str:

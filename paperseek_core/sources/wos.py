@@ -6,20 +6,18 @@ from typing import Any, Callable, Optional
 import requests
 
 from paperseek_core.client import ApiClient, ApiException, Configuration, DocumentsApi
+from paperseek_core.domain.models import (
+    PaperAuthor,
+    PaperCitation,
+    PaperIdentifiers,
+    PaperKeywords,
+    PaperLinks,
+    PaperNames,
+    PaperRecord,
+    PaperSource,
+)
 from paperseek_core.retrieval import ProviderRetrievalCapabilities, RetrievalLane
-import paperseek_core.sources.providers as _shared
-
-
-PaperAuthor = _shared.PaperAuthor
-PaperCitation = _shared.PaperCitation
-PaperIdentifiers = _shared.PaperIdentifiers
-PaperKeywords = _shared.PaperKeywords
-PaperLinks = _shared.PaperLinks
-PaperNames = _shared.PaperNames
-PaperRecord = _shared.PaperRecord
-PaperSource = _shared.PaperSource
-ProviderSearchResult = _shared.ProviderSearchResult
-SearchMetadata = _shared.SearchMetadata
+from paperseek_core.sources.contracts import ProviderSearchResult, SearchMetadata
 
 
 def _as_list(value: Any) -> list:
@@ -245,4 +243,3 @@ class WosProvider:
                 body=response.text,
             ) from exc
         return result_from_json(payload, limit)
-

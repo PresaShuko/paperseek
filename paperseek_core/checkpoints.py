@@ -2,7 +2,7 @@ import re
 from dataclasses import asdict
 from typing import Any, Iterable
 
-from paperseek_core.sources.providers import (
+from paperseek_core.domain.models import (
     PaperAuthor,
     PaperCitation,
     PaperIdentifiers,

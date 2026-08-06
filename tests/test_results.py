@@ -1,7 +1,7 @@
 import unittest
 
 from paperseek.formatter import ranked_items_to_dict
-from paperseek.providers import (
+from paperseek_core.domain.models import (
     PaperAuthor,
     PaperCitation,
     PaperIdentifiers,

@@ -1,45 +1,22 @@
 from __future__ import annotations
 
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
-from html import unescape
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
-import math
+from typing import Any, Dict, List, Optional
 import re
-import requests
-import threading
-import time
 import xml.etree.ElementTree as ET
 
+from paperseek_core.domain.models import (
+    PaperAuthor,
+    PaperIdentifiers,
+    PaperKeywords,
+    PaperLinks,
+    PaperNames,
+    PaperRecord,
+    PaperSource,
+)
 from paperseek_core.retrieval import ProviderRetrievalCapabilities, RetrievalLane
-import paperseek_core.sources.providers as _shared
-
-PaperAuthor = _shared.PaperAuthor
-PaperNames = _shared.PaperNames
-PaperSource = _shared.PaperSource
-PaperLinks = _shared.PaperLinks
-PaperCitation = _shared.PaperCitation
-PaperIdentifiers = _shared.PaperIdentifiers
-PaperKeywords = _shared.PaperKeywords
-PaperRecord = _shared.PaperRecord
-CitationSeedPlan = _shared.CitationSeedPlan
-SearchMetadata = _shared.SearchMetadata
-ProviderSearchResult = _shared.ProviderSearchResult
-ProviderError = _shared.ProviderError
-reconstruct_abstract = _shared.reconstruct_abstract
-normalize_doi = _shared.normalize_doi
-
-
-def get_with_retries(*args, **kwargs):
-    return _shared.get_with_retries(*args, **kwargs)
-
-
-def _split_api_keys(value: str) -> List[str]:
-    return _shared._split_api_keys(value)
-
-
-def _retry_delay(response: requests.Response, attempt: int, source: str = "") -> float:
-    return _shared._retry_delay(response, attempt, source)
+from paperseek_core.sources.contracts import ProviderError, ProviderSearchResult, SearchMetadata
+from paperseek_core.sources.http import get_with_retries
+from paperseek_core.sources.normalization import normalize_doi
 
 class PubMedProvider:
     BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -194,4 +171,3 @@ class PubMedProvider:
     def _extract_year(value: str) -> Optional[int]:
         match = re.search(r"\b(19|20)\d{2}\b", value or "")
         return int(match.group(0)) if match else None
-

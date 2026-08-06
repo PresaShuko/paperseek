@@ -11,7 +11,7 @@ from paperseek_core.harness import (
     RECOVERY_SIMPLIFY_QUERY,
 )
 from paperseek_core.llm import LLMError
-from paperseek_core.sources.providers import ProviderError
+from paperseek_core.sources.contracts import ProviderError
 
 
 @dataclass

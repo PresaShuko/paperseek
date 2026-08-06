@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from paperseek_core.query_contract import QueryContractGuard
-from paperseek_core.sources.providers import ProviderError
+from paperseek_core.sources.contracts import ProviderError
 
 
 class QueryContractGuardTest(unittest.TestCase):
