@@ -56,12 +56,12 @@ def snapshot(**overrides):
 
 class SearchLoopControllerTest(unittest.TestCase):
     def test_accepts_results_inside_target_range(self):
-        decision = SearchLoopController("native").decide(snapshot(total=25))
+        decision = SearchLoopController().decide(snapshot(total=25))
         self.assertEqual(decision.action, ACTION_ACCEPT)
         self.assertTrue(decision.terminal)
 
     def test_title_drift_narrows_before_accepting_target_range(self):
-        decision = SearchLoopController("native").decide(snapshot(
+        decision = SearchLoopController().decide(snapshot(
             total=25,
             query='"overseas Chinese" investment crowding',
             intent_terms=["overseas", "chinese", "investment", "crowding"],
@@ -78,7 +78,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertIn("Title-intent coverage", decision.reason)
 
     def test_title_drift_does_not_override_adaptive_limit(self):
-        decision = SearchLoopController("native").decide(snapshot(
+        decision = SearchLoopController().decide(snapshot(
             total=25,
             iteration=13,
             adaptive_max_iterations=13,
@@ -95,18 +95,18 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertTrue(decision.terminal)
 
     def test_accepts_pool_sized_results_without_more_narrowing(self):
-        decision = SearchLoopController("native").decide(snapshot(total=1200, target_max=50, retrieval_pool_max=3000))
+        decision = SearchLoopController().decide(snapshot(total=1200, target_max=50, retrieval_pool_max=3000))
         self.assertEqual(decision.action, ACTION_ACCEPT_POOL)
         self.assertTrue(decision.terminal)
 
     def test_first_large_source_count_is_narrowed_before_materialization(self):
-        decision = SearchLoopController("native").decide(snapshot(total=31561, iteration=1))
+        decision = SearchLoopController().decide(snapshot(total=31561, iteration=1))
         self.assertEqual(decision.action, ACTION_NARROW)
         self.assertFalse(decision.terminal)
         self.assertIn("bounded retrieval pool of 3000", decision.message)
 
     def test_improving_large_source_count_keeps_narrowing_past_soft_budget(self):
-        decision = SearchLoopController("native").decide(snapshot(
+        decision = SearchLoopController().decide(snapshot(
             total=5000,
             iteration=5,
             history=[
@@ -120,7 +120,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertFalse(decision.terminal)
 
     def test_accepts_stalled_large_source_count_into_bounded_pool(self):
-        decision = SearchLoopController("native").decide(snapshot(
+        decision = SearchLoopController().decide(snapshot(
             total=5000,
             iteration=5,
             history=[
@@ -135,13 +135,13 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertIn("bounded retrieval", decision.message)
 
     def test_accepts_large_source_count_at_adaptive_hard_limit(self):
-        decision = SearchLoopController("native").decide(snapshot(total=5000, iteration=13))
+        decision = SearchLoopController().decide(snapshot(total=5000, iteration=13))
         self.assertEqual(decision.action, ACTION_ACCEPT_HIGH)
         self.assertTrue(decision.terminal)
         self.assertIn("adaptive hard limit", decision.message)
 
     def test_title_drift_can_redirect_large_source_count_within_soft_budget(self):
-        decision = SearchLoopController("native").decide(snapshot(
+        decision = SearchLoopController().decide(snapshot(
             total=500000,
             query='"remote work" productivity',
             intent_terms=["remote", "work", "productivity"],
@@ -156,13 +156,13 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertFalse(decision.terminal)
 
     def test_zero_results_broaden_past_configured_soft_budget(self):
-        controller = SearchLoopController("native")
+        controller = SearchLoopController()
         self.assertEqual(controller.decide(snapshot(total=0, iteration=1)).action, ACTION_BROADEN)
         self.assertEqual(controller.decide(snapshot(total=0, iteration=5)).action, ACTION_BROADEN)
         self.assertEqual(controller.decide(snapshot(total=0, iteration=13, adaptive_max_iterations=13)).action, ACTION_EMPTY)
 
     def test_repeated_zero_results_stop_before_adaptive_limit(self):
-        decision = SearchLoopController("native").decide(snapshot(
+        decision = SearchLoopController().decide(snapshot(
             total=0,
             iteration=3,
             history=[
@@ -172,25 +172,8 @@ class SearchLoopControllerTest(unittest.TestCase):
         ))
         self.assertEqual(decision.action, ACTION_EMPTY)
 
-    def test_removed_langgraph_backend_falls_back_to_native(self):
-        controller = SearchLoopController("langgraph")
-        self.assertEqual(controller.summary()["backend_used"], "native")
-        self.assertIn("fallback_reason", controller.summary())
-
-    def test_auto_backend_prefers_native_for_maintained_default(self):
-        controller = SearchLoopController("auto")
-
-        self.assertEqual(controller.summary()["backend_requested"], "auto")
-        self.assertEqual(controller.summary()["backend_used"], "native")
-
-    def test_unknown_backend_falls_back_without_importing_langgraph(self):
-        controller = SearchLoopController("experimental")
-
-        self.assertEqual(controller.summary()["backend_used"], "native")
-        self.assertIn("no longer supported", controller.summary()["fallback_reason"])
-
     def test_native_evaluate_appends_validation_observation_and_decision(self):
-        controller = SearchLoopController("native")
+        controller = SearchLoopController()
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
 
         updated, decision = controller.evaluate(state, snapshot(
@@ -210,7 +193,7 @@ class SearchLoopControllerTest(unittest.TestCase):
 
     def test_preflight_records_invalid_query_before_source_request(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="")
-        updated, validation = SearchLoopController("native").preflight(
+        updated, validation = SearchLoopController().preflight(
             state,
             '("AI governance" OR "AI policy"',
         )
@@ -225,7 +208,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         state = SearchRunState(question="AI governance", source="openalex", current_query="")
         result_obj = object()
 
-        updated, result, error = SearchLoopController("native").source_search(
+        updated, result, error = SearchLoopController().source_search(
             state,
             "AI governance",
             lambda query: result_obj,
@@ -240,7 +223,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         state = SearchRunState(question="AI governance", source="openalex", current_query="")
         exc = ProviderError("openalex", "Invalid query parameters error.", status=400, query="bad query")
 
-        updated, result, error = SearchLoopController("native").source_search(
+        updated, result, error = SearchLoopController().source_search(
             state,
             "bad query",
             lambda query: (_ for _ in ()).throw(exc),
@@ -257,7 +240,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         state = SearchRunState(question="AI governance", source="openalex", current_query="bad query")
         exc = ProviderError("openalex", "Invalid query parameters error.", status=400, query="bad query")
 
-        updated, decision = SearchLoopController("native").recover_source_error(
+        updated, decision = SearchLoopController().recover_source_error(
             state,
             exc,
             query="bad query",
@@ -273,7 +256,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         state = SearchRunState(question="AI governance", source="openalex", current_query="bad query")
         exc = ProviderError("openalex", "Invalid query parameters error.", status=400, query="bad query")
 
-        updated, decision = SearchLoopController("native").recover_source_error(
+        updated, decision = SearchLoopController().recover_source_error(
             state,
             exc,
             query="bad query",
@@ -289,7 +272,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         state = SearchRunState(question="AI governance", source="wos", current_query='TS=("AI governance")')
         exc = ApiException(status=512, reason="Server error", body="query too complex")
 
-        updated, decision = SearchLoopController("native").recover_source_error(
+        updated, decision = SearchLoopController().recover_source_error(
             state,
             exc,
             query='TS=("AI governance")',
@@ -304,7 +287,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         state = SearchRunState(question="AI governance", source="wos", current_query='TS=("AI governance")')
         exc = ApiException(status=400, reason="Bad Request", body="query syntax rejected")
 
-        updated, decision = SearchLoopController("native").recover_source_error(
+        updated, decision = SearchLoopController().recover_source_error(
             state,
             exc,
             query='TS=("AI governance")',
@@ -319,7 +302,7 @@ class SearchLoopControllerTest(unittest.TestCase):
     def test_native_records_ranking_batch_error_and_lower_concurrency_decision(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
         exc = RuntimeError("LLM API error (429): too many requests")
-        controller = SearchLoopController("native")
+        controller = SearchLoopController()
 
         updated, observation = controller.observe_ranking_batch_error(
             state,
@@ -351,7 +334,7 @@ class SearchLoopControllerTest(unittest.TestCase):
     def test_native_records_ranking_keep_local_order_at_minimum_concurrency(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
 
-        updated, decision = SearchLoopController("native").recover_ranking_failures(
+        updated, decision = SearchLoopController().recover_ranking_failures(
             state,
             step_id="llm_reranking",
             concurrency=4,
@@ -368,7 +351,7 @@ class SearchLoopControllerTest(unittest.TestCase):
     def test_native_records_same_tier_retry_for_empty_ranking_output(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
 
-        updated, decision = SearchLoopController("native").recover_ranking_failures(
+        updated, decision = SearchLoopController().recover_ranking_failures(
             state,
             step_id="llm_reranking",
             concurrency=16,
@@ -386,7 +369,7 @@ class SearchLoopControllerTest(unittest.TestCase):
     def test_native_plans_citation_expansion_roles(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
 
-        updated, decision = SearchLoopController("native").plan_citation_expansion(
+        updated, decision = SearchLoopController().plan_citation_expansion(
             state,
             candidate_count=100,
             seed_ranking_count=64,
@@ -407,7 +390,7 @@ class SearchLoopControllerTest(unittest.TestCase):
                 update={"records": [{"key": "existing", "id": "existing", "title": "Existing paper"}]}
             )
         )
-        controller = SearchLoopController("native")
+        controller = SearchLoopController()
 
         updated, first = controller.update_candidate_queue(
             state,
@@ -434,7 +417,7 @@ class SearchLoopControllerTest(unittest.TestCase):
     def test_native_citation_recovery_retries_with_reduced_budget_then_skips(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
         exc = ProviderError("openalex", "temporary citation failure", status=503, query="AI governance")
-        controller = SearchLoopController("native")
+        controller = SearchLoopController()
 
         updated, observation = controller.observe_citation_traversal(
             state,
@@ -493,7 +476,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             ranking_concurrency=4,
             openalex_api_key="",
             openalex_email="",
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, NeverCalledLlm())
         agent.cancel_check = lambda: True
@@ -551,7 +533,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                     serper_api_key="serper-test",
                     retrieval_pool_max=3000,
                     retrieval_pool_min=5,
-                    search_loop_backend="native",
                 )
                 agent = PaperSeekAgent(config, FakeLLM())
                 provider = UniversalProvider(source)
@@ -564,7 +545,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                 self.assertEqual(provider.queries[0]["query"], "graph neural networks")
                 self.assertEqual(result["source"], source)
                 self.assertEqual(result["history"][0]["action"], ACTION_ACCEPT)
-                self.assertEqual(result["search_loop"]["backend_used"], "native")
                 self.assertEqual(result["search_state"]["source"], source)
                 self.assertEqual(result["search_state"]["observations"][0]["total"], 7)
 
@@ -604,7 +584,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             retrieval_pool_max=3000,
             retrieval_pool_min=5,
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, FakeLLM())
         provider = FakeProvider()
@@ -616,7 +595,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
 
         self.assertEqual(provider.queries, ["AI governance"])
         self.assertEqual(result["history"][0]["action"], ACTION_ACCEPT_POOL)
-        self.assertEqual(result["search_loop"]["backend_used"], "native")
         self.assertEqual(result["search_state"]["source"], "openalex")
         self.assertEqual(result["search_state"]["observations"][0]["total"], 1200)
         self.assertEqual(result["search_state"]["decisions"][0]["action"], ACTION_ACCEPT_POOL)
@@ -665,7 +643,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             retrieval_pool_max=3000,
             retrieval_pool_min=5,
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, FakeLLM())
         provider = FakeProvider()
@@ -730,7 +707,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             retrieval_pool_max=3000,
             retrieval_pool_min=5,
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, FakeLLM())
         provider = FakeProvider()
@@ -794,7 +770,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             retrieval_pool_max=3000,
             retrieval_pool_min=5,
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, FakeLLM())
         provider = FakeProvider()
@@ -821,8 +796,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             "paperhub",
             "wos",
         )
-        backends = ("native",)
-
         class FakeLLM:
             def __init__(self):
                 self.calls = 0
@@ -857,49 +830,46 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                     [PaperRecord(uid="p4", title="AI governance accountability and responsible AI", provider="fake")],
                 )
 
-        for backend in backends:
-            for source in sources:
-                with self.subTest(source=source, backend=backend):
-                    config = SimpleNamespace(
-                        data_source=source,
-                        discipline_fields=(),
-                        search_field="",
-                        expand_citations=False,
-                        target_min=5,
-                        target_max=50,
-                        max_iterations=5,
-                        fetch_abstracts=False,
-                        openalex_api_key="",
-                        openalex_email="",
-                        crossref_email="",
-                        semantic_scholar_api_key="",
-                        pubmed_api_key="",
-                        pubmed_email="",
-                        pubmed_tool="paperseek",
-                        serper_api_key="serper-test",
-                        wos_api_key="wos-test",
-                        wos_db="WOS",
-                        retrieval_pool_max=3000,
-                        retrieval_pool_min=5,
-                        search_loop_backend=backend,
-                    )
-                    agent = PaperSeekAgent(config, FakeLLM())
-                    provider = TwoStepProvider()
-                    if source == "wos":
-                        agent._provider_search = provider.search
-                    else:
-                        agent.provider = provider
-                    agent._retrieve_candidates = lambda question, query, hits: hits
-                    agent._rank_results = lambda question, documents, **_: []
+        for source in sources:
+            with self.subTest(source=source):
+                config = SimpleNamespace(
+                    data_source=source,
+                    discipline_fields=(),
+                    search_field="",
+                    expand_citations=False,
+                    target_min=5,
+                    target_max=50,
+                    max_iterations=5,
+                    fetch_abstracts=False,
+                    openalex_api_key="",
+                    openalex_email="",
+                    crossref_email="",
+                    semantic_scholar_api_key="",
+                    pubmed_api_key="",
+                    pubmed_email="",
+                    pubmed_tool="paperseek",
+                    serper_api_key="serper-test",
+                    wos_api_key="wos-test",
+                    wos_db="WOS",
+                    retrieval_pool_max=3000,
+                    retrieval_pool_min=5,
+                )
+                agent = PaperSeekAgent(config, FakeLLM())
+                provider = TwoStepProvider()
+                if source == "wos":
+                    agent._provider_search = provider.search
+                else:
+                    agent.provider = provider
+                agent._retrieve_candidates = lambda question, query, hits: hits
+                agent._rank_results = lambda question, documents, **_: []
 
-                    result = agent.search("AI governance accountability")
+                result = agent.search("AI governance accountability")
 
-                    self.assertEqual(provider.queries, ["AI governance", "AI governance accountability"])
-                    self.assertEqual([row["action"] for row in result["history"]], [ACTION_NARROW, ACTION_ACCEPT])
-                    self.assertIn("off-intent", result["history"][0]["message"])
-                    self.assertEqual(result["search_state"]["decisions"][0]["action"], ACTION_NARROW)
-                    self.assertEqual(result["search_state"]["decisions"][1]["action"], ACTION_ACCEPT)
-                    self.assertEqual(result["search_loop"]["backend_used"], backend)
+                self.assertEqual(provider.queries, ["AI governance", "AI governance accountability"])
+                self.assertEqual([row["action"] for row in result["history"]], [ACTION_NARROW, ACTION_ACCEPT])
+                self.assertIn("off-intent", result["history"][0]["message"])
+                self.assertEqual(result["search_state"]["decisions"][0]["action"], ACTION_NARROW)
+                self.assertEqual(result["search_state"]["decisions"][1]["action"], ACTION_ACCEPT)
 
     def test_agent_repairs_invalid_query_in_preflight_before_provider_request(self):
         class FakeLLM:
@@ -932,7 +902,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             retrieval_pool_max=3000,
             retrieval_pool_min=5,
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, FakeLLM())
         agent._analyze_intent = lambda question: ""
@@ -992,7 +961,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             openalex_email="",
             retrieval_pool_max=3000,
             retrieval_pool_min=5,
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, FakeLLM())
         provider = RejectOnceProvider()
@@ -1035,7 +1003,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             ranking_concurrency=32,
             openalex_api_key="",
             openalex_email="",
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, RateLimitThenRecoverLlm())
         documents = [PaperRecord(uid=f"W{index:02d}", title=f"Paper {index}", provider="fake") for index in range(6)]
@@ -1074,7 +1041,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             ranking_concurrency=4,
             openalex_api_key="",
             openalex_email="",
-            search_loop_backend="native",
         )
         llm = EmptyOnceRankingLlm()
         agent = PaperSeekAgent(config, llm)
@@ -1114,7 +1080,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             ranking_concurrency=4,
             openalex_api_key="",
             openalex_email="",
-            search_loop_backend="native",
         )
         llm = InvalidOnceRankingLlm()
         agent = PaperSeekAgent(config, llm)
@@ -1133,7 +1098,6 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             expand_citations=False,
             openalex_api_key="",
             openalex_email="",
-            search_loop_backend="native",
         )
         agent = PaperSeekAgent(config, object())
         documents = [

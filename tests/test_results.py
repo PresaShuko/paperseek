@@ -14,7 +14,7 @@ from paperseek.providers import (
 
 
 class ResultsTest(unittest.TestCase):
-    def test_ranked_items_keep_legacy_and_stable_fields(self):
+    def test_ranked_items_keep_public_result_fields(self):
         record = PaperRecord(
             uid="W123",
             title="Open Innovation on Digital Platforms",

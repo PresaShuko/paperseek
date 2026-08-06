@@ -94,7 +94,6 @@ def _build_search_config(
     target_min: int = 0,
     target_max: int = 0,
     max_iterations: int = 0,
-    search_loop_backend: str = "",
     retrieval_pool_max: int = 0,
     retrieval_lane_limit: int = 0,
     ranking_candidate_limit: int = 0,
@@ -125,8 +124,6 @@ def _build_search_config(
         overrides["target_max"] = target_max
     if max_iterations > 0:
         overrides["max_iterations"] = max_iterations
-    if search_loop_backend:
-        overrides["search_loop_backend"] = search_loop_backend
     if retrieval_pool_max > 0:
         overrides["retrieval_pool_max"] = retrieval_pool_max
     if retrieval_lane_limit > 0:
@@ -150,7 +147,6 @@ def search_papers_logic(
     target_min: int = 0,
     target_max: int = 0,
     max_iterations: int = 0,
-    search_loop_backend: str = "",
     retrieval_pool_max: int = 0,
     retrieval_lane_limit: int = 0,
     ranking_candidate_limit: int = 0,
@@ -178,7 +174,6 @@ def search_papers_logic(
         target_min=target_min,
         target_max=target_max,
         max_iterations=max_iterations,
-        search_loop_backend=search_loop_backend,
         retrieval_pool_max=retrieval_pool_max,
         retrieval_lane_limit=retrieval_lane_limit,
         ranking_candidate_limit=ranking_candidate_limit,
@@ -287,7 +282,6 @@ def create_server():
         target_min: int = 0,
         target_max: int = 0,
         max_iterations: int = 0,
-        search_loop_backend: str = "",
         retrieval_pool_max: int = 0,
         retrieval_lane_limit: int = 0,
         ranking_candidate_limit: int = 0,
@@ -316,9 +310,6 @@ def create_server():
             target_max: Maximum target results (default from env: 50).
             max_iterations: Optional explicit query-refinement override; the
                 fast search budget uses 5 before adaptive recovery.
-            search_loop_backend: Search loop controller backend. Use "native";
-                "auto" remains accepted for compatibility and uses the same
-                built-in controller. Omit to use env/default config.
             retrieval_pool_max: Maximum fused candidates before LLM ranking.
             retrieval_lane_limit: Maximum records fetched per retrieval lane.
             ranking_candidate_limit: Maximum pre-ranked candidates sent to LLM scoring.
@@ -341,7 +332,6 @@ def create_server():
             target_min=target_min,
             target_max=target_max,
             max_iterations=max_iterations,
-            search_loop_backend=search_loop_backend,
             retrieval_pool_max=retrieval_pool_max,
             retrieval_lane_limit=retrieval_lane_limit,
             ranking_candidate_limit=ranking_candidate_limit,

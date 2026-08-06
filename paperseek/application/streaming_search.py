@@ -35,7 +35,7 @@ def stream_persisted_search(
     heartbeat_seconds: float = 10.0,
     heartbeat_factory: Optional[Callable[[], dict[str, Any]]] = None,
 ) -> Iterator[dict[str, Any]]:
-    """Execute one compatibility stream with persisted ownership semantics."""
+    """Execute one persisted search stream with ownership semantics."""
 
     session: Optional[SearchRunSession] = None
     config: Optional[AgentConfig] = None

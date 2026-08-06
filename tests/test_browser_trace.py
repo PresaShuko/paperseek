@@ -386,7 +386,6 @@ class BrowserTraceTest(unittest.TestCase):
         self.assertIn("3/4", live_step_label)
         self.assertIn("17/32", live_step_label)
         self.assertIn("Technical audit", search_text)
-        self.assertIn("LOOP BACKEND", search_text)
         self.assertIn("Loop decisions", search_text)
         self.assertIn("Candidate queue", search_text)
         self.assertIn("Query portfolio", search_text)

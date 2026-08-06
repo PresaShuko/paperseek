@@ -98,7 +98,6 @@ def _migration_1(conn: sqlite3.Connection) -> None:
         """
     )
     _ensure_column(conn, "search_runs", "history_json", "TEXT")
-    _ensure_column(conn, "search_runs", "search_loop_json", "TEXT")
     _ensure_column(conn, "search_runs", "search_state_json", "TEXT")
     _ensure_column(conn, "search_runs", "ranking_steps_json", "TEXT")
 

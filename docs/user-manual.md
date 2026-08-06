@@ -369,7 +369,6 @@ Vercel 部署所需文件：
 | 文件 | 说明 |
 | --- | --- |
 | `app.py` | Vercel FastAPI 自动识别入口，暴露 `paperseek.web_app.app`。 |
-| `api/index.py` | 兼容 Python 入口，也暴露同一个 FastAPI `app`。 |
 | `vercel.json` | 最小 Vercel 项目配置，避免使用 `functions` pattern 触发函数匹配失败。 |
 | `requirements.txt` | Python 依赖。 |
 
@@ -568,7 +567,6 @@ Web UI 运行时：
 | `TARGET_MIN` | `5` | 目标最少结果数。 |
 | `TARGET_MAX` | `50` | 用户期望结果上界和排序参考，不作为强制收窄或展示上限。 |
 | `MAX_ITERATIONS` | `5` | `fast` 的查询调整软上限；显式配置时覆盖预算预设。 |
-| `SEARCH_LOOP_BACKEND` | `native` | 查询调度后端。`auto` 作为兼容值也使用稳定的内置控制器。 |
 | `PAPERSEEK_PYDANTICAI_QUERY_RETRY` | `auto` | 查询式格式重试后端；安装 `paperseek[harness]` 后，`auto` 会让坏 JSON / 脏输出重试走 PydanticAI schema 校验，否则自动回落到原生 JSON 重试。可设为 `off` 关闭。 |
 | `EXPAND_CITATIONS` | `true` | 是否启用 OpenAlex 引用扩展。 |
 | `FETCH_ABSTRACTS` | `false` | 是否尝试 DOI 外部摘要补全。 |
@@ -1215,7 +1213,6 @@ paperseek search "responsible AI governance" --source openalex --json > results.
 | `--min` | 目标最少结果数。 |
 | `--max` | 用户期望的目标最大值，用于查询调整参考，不作为最终展示或导出的硬上限。 |
 | `--iterations` | 最大查询调整轮数。 |
-| `--search-loop-backend` | 查询调度后端：`native`；`auto` 为兼容值。 |
 | `--output`, `-o` | `text` 或 `json`。 |
 | `--json` | `--output json` 快捷方式。 |
 | `--verbose`, `-v` | 打印中间查询信息。 |

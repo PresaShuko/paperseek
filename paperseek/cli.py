@@ -1,7 +1,7 @@
 """
 PaperSeek command line interface.
 
-Backward-compatible search still works:
+Direct search:
     paperseek "your research question"
 
 Agent-friendly commands are also available:
@@ -140,8 +140,6 @@ Environment variables:
   SEARCH_BUDGET      Search breadth preset: fast, medium, high, or max; default: fast
   SEARCH_FIELD       Default discipline/field constraint
   DISCIPLINE_FIELDS  OpenAlex Field IDs or labels for source-specific discipline limits
-  SEARCH_LOOP_BACKEND
-                     Query-loop backend: native (auto remains accepted for compatibility)
   QUERY_PORTFOLIO_ENABLED
                      Set to "false" to disable SearchPlan multi-view retrieval
   QUERY_PORTFOLIO_MAX
@@ -210,7 +208,6 @@ Environment variables:
         help="Maximum actual source requests from SearchPlan views (fast default: 2)",
     )
     parser.add_argument("--query-portfolio-limit", type=int, default=None, help="Maximum records requested per query view (default: 100)")
-    parser.add_argument("--search-loop-backend", default=None, choices=["auto", "native"], help="Search loop backend (auto and native use the built-in controller)")
     retrieval_providers = ["local", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter", "nvidia", "zhipu", "volcengine", "modelscope", "custom"]
     reranker_providers = ["off", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter", "nvidia", "zhipu", "volcengine", "custom"]
     parser.add_argument("--retrieval-embedding-provider", default=None, choices=retrieval_providers, help="Embedding provider for pre-ranking")
@@ -256,7 +253,6 @@ def _apply_search_args(config: AgentConfig, args) -> AgentConfig:
         "query_portfolio": "query_portfolio_enabled",
         "query_portfolio_max": "query_portfolio_max",
         "query_portfolio_limit": "query_portfolio_limit",
-        "search_loop_backend": "search_loop_backend",
         "retrieval_embedding_provider": "retrieval_embedding_provider",
         "retrieval_embedding_model": "retrieval_embedding_model",
         "retrieval_reranker_provider": "retrieval_reranker_provider",
@@ -360,7 +356,6 @@ def _run_search(argv, prog: str):
             query_view_selection=result.get("query_view_selection", []),
             query_portfolio=result.get("query_portfolio", []),
             query_iteration_memory=result.get("query_iteration_memory", []),
-            search_loop=result.get("search_loop", {}),
             search_state=result.get("search_state", {}),
             ranking_steps=result.get("ranking_steps", []),
         ))

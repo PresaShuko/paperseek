@@ -183,7 +183,6 @@ class SearchCompletionPipeline:
             "total": total,
             "iterations": iteration,
             "history": history,
-            "search_loop": host.search_loop_metadata,
             "search_state": host._search_state_payload(),
             "citation_map": host.citation_map,
             "ranking_steps": list(host.ranking_steps.values()),

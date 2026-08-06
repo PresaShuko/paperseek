@@ -41,7 +41,6 @@ class SearchConfig:
     query_portfolio_enabled: bool = True
     query_portfolio_max: int = _DEFAULT_BUDGET.query_portfolio_max
     query_portfolio_limit: int = _DEFAULT_BUDGET.query_portfolio_limit
-    search_loop_backend: str = "native"
 
 
 @dataclass
@@ -101,7 +100,6 @@ class RuntimeConfig:
     query_portfolio_enabled: bool
     query_portfolio_max: int
     query_portfolio_limit: int
-    search_loop_backend: str
     llm_provider: str
     llm_api_type: str
     llm_model: str
@@ -161,7 +159,6 @@ def build_runtime_config(
         query_portfolio_enabled=search.query_portfolio_enabled,
         query_portfolio_max=search.query_portfolio_max,
         query_portfolio_limit=search.query_portfolio_limit,
-        search_loop_backend=search.search_loop_backend,
         llm_provider=(llm.provider or "openai").lower(),
         llm_api_type=(llm.api_type or "openai_responses").lower(),
         llm_model=llm.model,

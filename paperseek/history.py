@@ -95,11 +95,6 @@ def history_now(timezone_name: Optional[str] = None, utc_offset_minutes: Any = N
     return datetime.now(_history_timezone(timezone_name, utc_offset_minutes)).isoformat(timespec="seconds")
 
 
-def utc_now() -> str:
-    """Backward-compatible name for persisted history timestamps."""
-    return history_now()
-
-
 def history_enabled() -> bool:
     return os.environ.get("PAPERSEEK_HISTORY_ENABLED", "true").strip().lower() not in DISABLED_VALUES
 
@@ -199,7 +194,6 @@ def safe_search_params_from_config(config: AgentConfig) -> dict[str, Any]:
         "query_portfolio_enabled": getattr(config, "query_portfolio_enabled", True),
         "query_portfolio_max": getattr(config, "query_portfolio_max", 3),
         "query_portfolio_limit": getattr(config, "query_portfolio_limit", 100),
-        "search_loop_backend": getattr(config, "search_loop_backend", "auto"),
         "has_wos_api_key": bool(config.wos_api_key),
         "has_openalex_api_key": bool(config.openalex_api_key),
         "has_openalex_email": bool(config.openalex_email),
@@ -224,7 +218,6 @@ def result_payload_from_search_result(result: dict[str, Any], source: str) -> di
         "total": result["total"],
         "iterations": result["iterations"],
         "history": result.get("history", []),
-        "search_loop": result.get("search_loop", {}),
         "search_state": result.get("search_state", {}),
         "citation_map": result.get("citation_map", {}),
         "ranking_steps": result.get("ranking_steps", []),
@@ -670,7 +663,7 @@ class HistoryStore:
                     f"""
                     UPDATE search_runs
                     SET source = ?, final_query = ?, db = ?, field = ?, total = ?, iterations = ?,
-                        status = ?, error_message = NULL, history_json = ?, search_loop_json = ?,
+                        status = ?, error_message = NULL, history_json = ?,
                         search_state_json = ?, citation_map_json = ?, ranking_steps_json = ?,
                         finished_at = ?, claimed_by = NULL, lease_expires_at = NULL
                     WHERE id = ?{owner_clause}
@@ -684,7 +677,6 @@ class HistoryStore:
                         _as_int(safe_payload.get("iterations")),
                         "success",
                         _json_dumps(safe_payload.get("history") or []),
-                        _json_dumps(safe_payload.get("search_loop") or {}),
                         _json_dumps(safe_payload.get("search_state") or {}),
                         _json_dumps(safe_payload.get("citation_map") or {}),
                         _json_dumps(safe_payload.get("ranking_steps") or []),
@@ -746,7 +738,6 @@ class HistoryStore:
                         status = ?,
                         error_message = ?,
                         history_json = COALESCE(?, history_json),
-                        search_loop_json = COALESCE(?, search_loop_json),
                         search_state_json = COALESCE(?, search_state_json),
                         citation_map_json = COALESCE(?, citation_map_json),
                         ranking_steps_json = COALESCE(?, ranking_steps_json),
@@ -763,7 +754,6 @@ class HistoryStore:
                         "error",
                         str(error_message or ""),
                         _json_dumps(safe_payload.get("history")) if "history" in safe_payload else None,
-                        _json_dumps(safe_payload.get("search_loop")) if "search_loop" in safe_payload else None,
                         _json_dumps(safe_payload.get("search_state")) if "search_state" in safe_payload else None,
                         _json_dumps(safe_payload.get("citation_map")) if "citation_map" in safe_payload else None,
                         _json_dumps(safe_payload.get("ranking_steps")) if "ranking_steps" in safe_payload else None,
@@ -914,7 +904,6 @@ class HistoryStore:
         if include_payload:
             data["params"] = _json_loads(row["params_json"], {})
             data["history"] = _json_loads(row["history_json"], [])
-            data["search_loop"] = _json_loads(row["search_loop_json"], {})
             data["search_state"] = _json_loads(row["search_state_json"], {})
             data["citation_map"] = _json_loads(row["citation_map_json"], {})
             data["ranking_steps"] = _json_loads(row["ranking_steps_json"], [])

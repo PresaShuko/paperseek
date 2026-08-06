@@ -1,5 +1,5 @@
 from paperseek.config import AgentConfig
-from paperseek.config_compiler import compile_agent_config, normalize_search_loop_backend
+from paperseek.config_compiler import compile_agent_config
 
 
 def test_blank_run_credentials_do_not_erase_environment_values():
@@ -69,15 +69,3 @@ def test_source_is_selected_before_discipline_normalization():
 
     assert config.data_source == "openalex"
     assert config.discipline_fields == ("17",)
-
-
-def test_search_loop_backend_rejects_removed_runtime_backends():
-    assert normalize_search_loop_backend("auto") == "auto"
-    assert normalize_search_loop_backend("native") == "native"
-
-    try:
-        normalize_search_loop_backend("langgraph")
-    except ValueError as exc:
-        assert "auto or native" in str(exc)
-    else:
-        raise AssertionError("removed backend must be rejected at request compilation")

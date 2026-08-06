@@ -38,7 +38,6 @@ CONFIG_ENV_KEYS = (
     "QUERY_PORTFOLIO_MAX",
     "QUERY_PORTFOLIO_LIMIT",
     "RANKING_CANDIDATE_LIMIT",
-    "SEARCH_LOOP_BACKEND",
     "PAPERSEEK_PYDANTICAI_QUERY_RETRY",
     "DISCIPLINE_FIELDS",
 )
@@ -72,7 +71,6 @@ def fake_harness_search_result(question: str = "graph neural networks", source: 
         "query_iteration_memory": [
             {"iteration": 1, "query": "graph neural networks", "total": 1, "hit_count": 1}
         ],
-        "search_loop": {"backend_requested": "auto", "backend_used": "native"},
         "search_state": {
             "question": question,
             "source": source,

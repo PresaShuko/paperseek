@@ -1,4 +1,4 @@
-from paperseek_core.harness.controller import SearchLoopController
+from paperseek_core.harness.search_loop import SearchLoopController
 from paperseek_core.harness.errors import classify_error
 from paperseek_core.harness.schemas import (
     ACTION_ACCEPT,

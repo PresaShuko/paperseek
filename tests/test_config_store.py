@@ -22,15 +22,6 @@ class ConfigStoreTest(unittest.TestCase):
                 config_store.unset_config_value("LLM_API_KEY")
                 self.assertNotIn("LLM_API_KEY", config_store.read_config())
 
-    def test_search_loop_backend_is_supported_user_config(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with temporary_env(
-                {"PAPERSEEK_CONFIG_FILE": str(Path(tmp) / "config.json")},
-                clear=CONFIG_ENV_KEYS,
-            ):
-                config_store.set_config_value("SEARCH_LOOP_BACKEND", "native")
-                self.assertEqual(config_store.read_config()["SEARCH_LOOP_BACKEND"], "native")
-
 
 if __name__ == "__main__":
     unittest.main()

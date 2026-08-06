@@ -35,13 +35,6 @@ _SECRET_OR_ENDPOINT_FIELDS = {
 }
 
 
-def normalize_search_loop_backend(value: Any) -> str:
-    backend = str(value or "native").strip().lower() or "native"
-    if backend not in {"auto", "native"}:
-        raise ValueError("search_loop_backend must be one of auto or native")
-    return backend
-
-
 def compile_agent_config(
     overrides: Mapping[str, Any] | None = None,
     *,
@@ -87,9 +80,6 @@ def compile_agent_config(
     discipline_fields = values.pop("discipline_fields", ())
     if discipline_supplied:
         config.discipline_fields = normalize_source_filter_values(config.data_source, discipline_fields)
-
-    if "search_loop_backend" in values:
-        config.search_loop_backend = normalize_search_loop_backend(values.pop("search_loop_backend"))
 
     for name, value in values.items():
         if not hasattr(config, name):

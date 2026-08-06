@@ -42,7 +42,6 @@ def test_legacy_database_is_upgraded_without_losing_rows():
         assert conn.execute("SELECT question FROM search_runs WHERE id='run_legacy'").fetchone()[0] == "legacy question"
         assert {
             "history_json",
-            "search_loop_json",
             "search_state_json",
             "ranking_steps_json",
             "claimed_by",

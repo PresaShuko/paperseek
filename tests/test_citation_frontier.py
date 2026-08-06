@@ -2,7 +2,7 @@ import math
 import unittest
 from unittest.mock import patch
 
-from paperseek_core.harness.native_loop import NativeQueryLoopRunner
+from paperseek_core.harness.search_loop import SearchLoopController
 from paperseek_core.harness.schemas import SearchRunState
 from paperseek_core.sources.providers import CitationSeedPlan, OpenAlexProvider, PaperIdentifiers, PaperRecord
 
@@ -72,7 +72,7 @@ class CitationFrontierTest(unittest.TestCase):
 
     def test_typed_loop_observation_preserves_frontier_audit(self):
         state = SearchRunState(question="graph retrieval", source="openalex")
-        updated, observation = NativeQueryLoopRunner().observe_citation_traversal(
+        updated, observation = SearchLoopController().observe_citation_traversal(
             state,
             status="complete",
             seed_count=10,

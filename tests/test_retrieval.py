@@ -367,7 +367,7 @@ class RetrievalAgentTest(unittest.TestCase):
         self.assertIn("ranking_candidate_limit", second_evidence.ranking_gate_reason_codes)
         self.assertEqual(second_evidence.lifecycle[-1].action, "truncated_before_llm")
 
-    def test_legacy_candidate_preparation_keeps_records_already_in_iteration_ledger(self):
+    def test_candidate_preparation_keeps_records_already_in_iteration_ledger(self):
         remembered = record("W1", "Remembered iteration result")
         fresh = record("W2", "Fresh retrieval result")
         agent = PaperSeekAgent(config(expand_citations=False), FakeLLM())
@@ -412,7 +412,7 @@ class RetrievalAgentTest(unittest.TestCase):
                     return ProviderSearchResult(SearchMetadata(total=1, page=1, limit=limit), [record("recent", "graph retrieval recent", year=2025)])
                 return ProviderSearchResult(SearchMetadata(total=1, page=1, limit=limit), [record("rel", "graph retrieval relevant", year=2022)])
 
-        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
+        agent = PaperSeekAgent(config(data_source="openalex", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
         agent.provider = Provider()
         docs = agent._retrieve_candidates("graph retrieval", "graph retrieval", [])
         self.assertEqual({doc.uid for doc in docs}, {"rel", "recent"})
@@ -436,7 +436,7 @@ class RetrievalAgentTest(unittest.TestCase):
                     [record(lane, f"{lane} result")],
                 )
 
-        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
+        agent = PaperSeekAgent(config(data_source="openalex", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
         agent.provider = Provider()
 
         docs = agent._retrieve_candidates("graph retrieval", "graph retrieval", [])
@@ -473,7 +473,7 @@ class RetrievalAgentTest(unittest.TestCase):
                 )
 
         provider = Provider()
-        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
+        agent = PaperSeekAgent(config(data_source="openalex", retrieval_lane_limit=10, retrieval_pool_max=10), FakeLLM())
         agent.provider = provider
 
         agent._retrieve_candidates("natural language research question", "compiled boolean query", [])
@@ -502,7 +502,7 @@ class RetrievalAgentTest(unittest.TestCase):
                 return ProviderSearchResult(SearchMetadata(total=150, page=page, limit=limit), hits)
 
         provider = Provider()
-        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=150, retrieval_pool_max=150), FakeLLM())
+        agent = PaperSeekAgent(config(data_source="openalex", retrieval_lane_limit=150, retrieval_pool_max=150), FakeLLM())
         agent.provider = provider
 
         docs = agent._retrieve_candidates("question", "compiled query", primary)
@@ -519,7 +519,7 @@ class RetrievalAgentTest(unittest.TestCase):
             def search(self, query, limit=50, page=1, lane=RetrievalLane.RELEVANCE):
                 raise RuntimeError("temporary page failure")
 
-        agent = PaperSeekAgent(config(data_source="fake", retrieval_lane_limit=150, retrieval_pool_max=150), FakeLLM())
+        agent = PaperSeekAgent(config(data_source="openalex", retrieval_lane_limit=150, retrieval_pool_max=150), FakeLLM())
         agent.provider = Provider()
         events = []
         agent.event_handler = events.append

@@ -167,8 +167,7 @@ def _broad_narrowing_has_stalled(previous_totals: list[int], current_total: int)
     return all(reduction < 0.10 for reduction in reductions)
 
 
-class NativeQueryLoopRunner:
-    backend_used = "native"
+class SearchLoopController:
 
     def preflight(self, state: SearchRunState, query: str) -> tuple[SearchRunState, QueryValidation]:
         current = state.with_current_query(query)

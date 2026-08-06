@@ -41,7 +41,6 @@ class ExecutionLifecycleTest(unittest.TestCase):
             ranking_concurrency=4,
             target_min=5,
             target_max=50,
-            search_loop_backend="native",
         )
         return PaperSeekAgent(config, llm or SimpleNamespace())
 

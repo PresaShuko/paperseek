@@ -12,7 +12,6 @@ class StaticAppTraceTest(unittest.TestCase):
         self.assertIn("function renderSearchLoopAudit", app_js)
         self.assertIn('renderSearchLoopAudit(item.auditData, "search")', app_js)
         self.assertIn('renderSearchLoopAudit(item.auditData, "ranking")', app_js)
-        self.assertIn("LOOP BACKEND", app_js)
         self.assertIn("Ranking recovery", app_js)
         self.assertIn("Citation recovery", app_js)
         self.assertIn("Candidate queue", app_js)

@@ -91,7 +91,6 @@ class AgentConfig:
     query_portfolio_enabled: bool = True
     query_portfolio_max: int = _DEFAULT_BUDGET.query_portfolio_max
     query_portfolio_limit: int = _DEFAULT_BUDGET.query_portfolio_limit
-    search_loop_backend: str = "auto"
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -154,7 +153,6 @@ class AgentConfig:
             query_portfolio_enabled=os.environ.get("QUERY_PORTFOLIO_ENABLED", "true").lower() not in ("0", "false", "no"),
             query_portfolio_max=_int_env("QUERY_PORTFOLIO_MAX", budget.query_portfolio_max, minimum=1),
             query_portfolio_limit=_int_env("QUERY_PORTFOLIO_LIMIT", budget.query_portfolio_limit, minimum=1),
-            search_loop_backend=os.environ.get("SEARCH_LOOP_BACKEND", "native").strip().lower() or "native",
         )
 
     def validate(self):

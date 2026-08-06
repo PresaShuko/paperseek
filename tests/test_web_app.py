@@ -129,7 +129,6 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["source"], "arxiv")
-        self.assertEqual(payload["search_loop"]["backend_used"], "native")
         self.assertEqual(payload["search_state"]["candidate_queue"]["origin_counts"]["retrieval"], 1)
         self.assertEqual(payload["ranking_steps"][0]["id"], "llm_ranking")
 
@@ -175,7 +174,6 @@ class WebAppTest(unittest.TestCase):
         result_events = [event for event in events if event.get("type") == "result"]
         self.assertEqual(len(result_events), 1)
         payload = result_events[0]["data"]
-        self.assertEqual(payload["search_loop"]["backend_used"], "native")
         self.assertEqual(payload["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
         self.assertEqual(payload["ranking_steps"][0]["status"], "complete")
         self.assertTrue(callable(cancel_checks[0]))
@@ -238,7 +236,6 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(detail["status"], "error")
         self.assertEqual(detail["error_message"], "ranking timeout")
         self.assertEqual(detail["history"][0]["action"], "narrow")
-        self.assertEqual(detail["search_loop"]["backend_used"], "native")
         self.assertEqual(detail["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
         self.assertEqual(detail["ranking_steps"][0]["status"], "processing")
 
@@ -368,18 +365,6 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(config.llm_provider, "deepseek")
             self.assertEqual(config.llm_model, "deepseek-test")
             self.assertEqual(config.discipline_fields, ("17", "14"))
-            self.assertEqual(config.search_loop_backend, "native")
-
-    def test_config_from_payload_applies_search_loop_backend(self):
-        payload = SearchRequest(
-            question="open innovation",
-            data_source="openalex",
-            llm_provider="ollama",
-            llm_api_type="openai_chat",
-            search_loop_backend="native",
-        )
-        config = _config_from_payload(payload)
-        self.assertEqual(config.search_loop_backend, "native")
 
     def test_default_search_budget_is_fast(self):
         payload = SearchRequest(question="open innovation")
@@ -465,7 +450,6 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["llm_provider"], "deepseek")
-            self.assertEqual(payload["search_loop_backend"], "native")
             self.assertEqual(payload["search_budget"], "fast")
             self.assertTrue(payload["query_portfolio_enabled"])
             self.assertEqual(payload["query_portfolio_max"], 3)

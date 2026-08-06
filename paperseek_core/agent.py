@@ -365,8 +365,7 @@ class PaperSeekAgent:
         self.intent_analysis = IntentAnalysisPipeline(self)
         self.checkpoints = CheckpointCoordinator(self)
         self.candidate_ledger = CandidateLedger(self)
-        self.search_loop = SearchLoopController.from_config(config)
-        self.search_loop_metadata = self.search_loop.summary()
+        self.search_loop = SearchLoopController()
         self.search_run_state: Optional[SearchRunState] = None
         self.cancel_check: Optional[Callable[[], bool]] = None
         self.checkpoint_handler: Optional[Callable[[dict], None]] = None
@@ -482,7 +481,6 @@ class PaperSeekAgent:
             "total": self.last_total,
             "iterations": self.last_iteration,
             "history": list(self.iteration_history or []),
-            "search_loop": dict(self.search_loop_metadata or {}),
             "search_state": self._search_state_payload(),
             "citation_map": dict(self.citation_map or {}),
             "ranking_steps": list(self.ranking_steps.values()),

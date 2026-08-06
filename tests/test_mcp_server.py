@@ -216,11 +216,9 @@ class McpServerLogicTest(unittest.TestCase):
                 result = search_papers_logic(
                     question="graph neural networks",
                     source="arxiv",
-                    search_loop_backend="native",
                 )
 
         self.assertEqual(result["source"], "arxiv")
-        self.assertEqual(result["search_loop"]["backend_used"], "native")
         self.assertEqual(result["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
         self.assertEqual(result["ranking_steps"][0]["id"], "llm_ranking")
 
@@ -310,7 +308,6 @@ class McpServerLogicTest(unittest.TestCase):
                 target_min=10,
                 target_max=30,
                 max_iterations=3,
-                search_loop_backend="native",
                 ranking_candidate_limit=128,
                 expand_citations=False,
                 fetch_abstracts=True,
@@ -321,16 +318,9 @@ class McpServerLogicTest(unittest.TestCase):
         self.assertEqual(config.target_min, 10)
         self.assertEqual(config.target_max, 30)
         self.assertEqual(config.max_iterations, 3)
-        self.assertEqual(config.search_loop_backend, "native")
         self.assertEqual(config.ranking_candidate_limit, 128)
         self.assertFalse(config.expand_citations)
         self.assertTrue(config.fetch_abstracts)
-
-    def test_build_search_config_rejects_invalid_search_loop_backend(self):
-        from paperseek.mcp_server import _build_search_config
-
-        with self.assertRaisesRegex(ValueError, "search_loop_backend"):
-            _build_search_config(search_loop_backend="invalid")
 
     def test_build_search_config_applies_search_budget(self):
         from paperseek.mcp_server import _build_search_config

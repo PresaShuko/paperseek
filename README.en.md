@@ -510,7 +510,6 @@ Most parameters already have code defaults. After copying `.env.example`, a norm
 | `SEARCH_BUDGET` | `fast` | Unified search budget: `fast`, `medium`, `high`, or `max`. |
 | `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | User-facing target range; the minimum drives sparse-result recovery, while the maximum is not a forced narrowing or display cap. |
 | `MAX_ITERATIONS` | `5` | Query-revision soft limit for `fast`; an explicit value overrides the preset. |
-| `SEARCH_LOOP_BACKEND` | `native` | Query-loop controller backend. `auto` remains a compatibility value and uses the same built-in controller. |
 | `EXPAND_CITATIONS` | `true` | Enable OpenAlex citation expansion. |
 | `FETCH_ABSTRACTS` | `false` | Try external DOI metadata for abstracts. |
 | `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | Citation expansion size for `fast`; explicit values override the preset. |

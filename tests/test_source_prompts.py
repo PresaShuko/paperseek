@@ -690,7 +690,6 @@ class SourcePromptRoutingTest(unittest.TestCase):
                     serper_api_key="serper-test",
                     retrieval_pool_max=3000,
                     retrieval_pool_min=5,
-                    search_loop_backend="native",
                 )
                 agent = PaperSeekAgent(config, llm)
                 provider = QueryTotalProvider({

@@ -36,7 +36,6 @@ class RunDetailResponse(BaseModel):
     resumable: bool = False
     params: dict[str, Any] = Field(default_factory=dict)
     history: list[dict[str, Any]] = Field(default_factory=list)
-    search_loop: dict[str, Any] = Field(default_factory=dict)
     search_state: dict[str, Any] = Field(default_factory=dict)
     citation_map: dict[str, Any] = Field(default_factory=dict)
     ranking_steps: list[dict[str, Any]] = Field(default_factory=list)

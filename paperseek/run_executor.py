@@ -87,7 +87,7 @@ class InProcessRun:
 
 
 class InProcessRunExecutor:
-    """Process-local run ownership used by the compatibility streaming API."""
+    """Process-local ownership for active streamed runs."""
 
     def __init__(self) -> None:
         self._lock = Lock()

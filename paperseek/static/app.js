@@ -1925,7 +1925,6 @@ function recoveryIssueCount(state) {
 }
 
 function renderSearchLoopAudit(data, mode = "search") {
-  const loop = data.search_loop || {};
   const state = data.search_state || {};
   const queue = state.candidate_queue || {};
   const queueKeys = Array.isArray(queue.keys) ? queue.keys : [];
@@ -1959,7 +1958,7 @@ function renderSearchLoopAudit(data, mode = "search") {
       { value: finalOutputCandidates, label: "FINAL OUTPUT" },
     ])
     : metricRow([
-      { value: loop.backend_used || loop.backend_requested || "unknown", label: "LOOP BACKEND" },
+      { value: queueKeys.length, label: "CANDIDATE QUEUE" },
       { value: observations.length, label: "OBSERVATIONS" },
       { value: decisions.length, label: "DECISIONS" },
     ]);

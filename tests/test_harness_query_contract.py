@@ -166,7 +166,6 @@ class PydanticAIQueryContractTest(unittest.TestCase):
             expand_citations=False,
             openalex_api_key="",
             openalex_email="",
-            search_loop_backend="native",
         )
         llm = DirtyThenJsonLLM()
         agent = PaperSeekAgent(config, llm)

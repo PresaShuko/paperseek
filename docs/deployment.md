@@ -270,7 +270,6 @@ PaperSeek 包含：
 | 文件 | 用途 |
 | --- | --- |
 | `app.py` | Vercel FastAPI 自动识别入口，暴露 `paperseek.web_app.app` 为 `app`。 |
-| `api/index.py` | 兼容 Python 入口，同样暴露 FastAPI `app`。 |
 | `vercel.json` | 最小项目配置，故意不使用 `functions` pattern，避免 Vercel 函数匹配失败。 |
 | `requirements.txt` | Vercel Python 依赖。 |
 
@@ -382,7 +381,6 @@ Useful files:
 | File | Purpose |
 | --- | --- |
 | `app.py` | Root FastAPI entrypoint for Vercel auto-detection. |
-| `api/index.py` | Compatibility Python entrypoint. |
 | `vercel.json` | Minimal Vercel configuration without fragile `functions` patterns. |
 | `requirements.txt` | Python dependencies for Vercel. |
 

@@ -47,11 +47,15 @@ class SourceProviderFactoryTest(unittest.TestCase):
                 create_source_provider(self.config, source)
                 constructor.assert_called_once_with()
 
-    def test_wos_remains_the_default_adapter(self):
+    def test_constructs_wos_adapter(self):
         log = Mock()
         with patch("paperseek_core.sources.factory.WosProvider") as constructor:
-            create_source_provider(self.config, "unknown", log=log)
+            create_source_provider(self.config, "wos", log=log)
             constructor.assert_called_once_with(api_key="wos-key", db="WOK", log=log)
+
+    def test_rejects_unknown_source(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported data source"):
+            create_source_provider(self.config, "unknown")
 
 
 if __name__ == "__main__":

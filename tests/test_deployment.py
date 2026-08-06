@@ -17,12 +17,6 @@ class DeploymentTest(unittest.TestCase):
         spec.loader.exec_module(module)
         self.assertEqual(module.app.title, "PaperSeek")
 
-    def test_vercel_entrypoint_exposes_fastapi_app(self):
-        spec = importlib.util.spec_from_file_location("paperseek_vercel_entrypoint", ROOT / "api" / "index.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self.assertEqual(module.app.title, "PaperSeek")
-
     def test_dockerfile_runs_web_app_on_container_port(self):
         dockerfile = read_text("Dockerfile")
         self.assertIn("EXPOSE 7860", dockerfile)

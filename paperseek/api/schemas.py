@@ -12,13 +12,6 @@ from paperseek_core.budgets import DEFAULT_SEARCH_BUDGET, normalize_search_budge
 _DEFAULT_WEB_BUDGET = search_budget_preset(DEFAULT_SEARCH_BUDGET)
 
 
-def _clean_search_loop_backend(value: str) -> str:
-    value = (value or "native").strip().lower() or "native"
-    if value not in {"auto", "native"}:
-        raise ValueError("must be one of auto or native")
-    return value
-
-
 class RuntimeConfigRequest(BaseModel):
     data_source: str = "openalex"
     search_budget: str = DEFAULT_SEARCH_BUDGET
@@ -47,7 +40,6 @@ class RuntimeConfigRequest(BaseModel):
     target_min: int = Field(default=5, ge=0, le=50)
     target_max: int = Field(default=50, ge=1, le=50)
     max_iterations: int = Field(default=_DEFAULT_WEB_BUDGET.max_iterations, ge=1, le=36)
-    search_loop_backend: str = "native"
     retrieval_pool_max: int = Field(default=_DEFAULT_WEB_BUDGET.retrieval_pool_max, ge=1, le=10000)
     retrieval_pool_min: int = Field(default=5, ge=0, le=50)
     retrieval_lane_limit: int = Field(default=_DEFAULT_WEB_BUDGET.retrieval_lane_limit, ge=1, le=1000)
@@ -71,11 +63,6 @@ class RuntimeConfigRequest(BaseModel):
     @classmethod
     def clean_api_type(cls, value: str) -> str:
         return (value or "").strip().lower()
-
-    @field_validator("search_loop_backend")
-    @classmethod
-    def clean_search_loop_backend(cls, value: str) -> str:
-        return _clean_search_loop_backend(value)
 
     @field_validator("search_budget")
     @classmethod

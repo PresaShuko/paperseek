@@ -30,7 +30,6 @@ skills/
 ```text
 .
 ├── paperseek/              # Python 包源码，包含 CLI、Web API、数据源适配器和前端静态文件
-├── api/index.py            # Vercel Python 入口
 ├── docs/                   # 用户手册、部署指南和截图
 ├── tests/                  # 单元测试
 ├── Dockerfile              # Docker 部署

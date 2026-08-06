@@ -1,4 +1,4 @@
-"""HTTP response wrapper used by compatibility methods."""
+"""HTTP response wrapper used by the WoS client."""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generic, Optional, TypeVar

@@ -11,7 +11,7 @@ from paperseek.web_app import (
 
 
 class ApiSchemaContractTest(unittest.TestCase):
-    def test_legacy_web_app_imports_reference_canonical_schemas(self):
+    def test_web_app_imports_reference_canonical_schemas(self):
         self.assertIs(LegacySearchRequest, SearchRequest)
         self.assertIs(LegacyDiagnosticRequest, DiagnosticRequest)
 
@@ -38,8 +38,6 @@ class ApiSchemaContractTest(unittest.TestCase):
             SearchRequest(question="   ")
         with self.assertRaises(ValidationError):
             SearchRequest(question="test", data_source="unknown")
-        with self.assertRaises(ValidationError):
-            SearchRequest(question="test", search_loop_backend="langgraph")
 
 
 if __name__ == "__main__":

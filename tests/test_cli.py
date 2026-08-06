@@ -162,7 +162,6 @@ class CliTest(unittest.TestCase):
         self.assertIn("search_plan", payload)
         self.assertIn("query_portfolio", payload)
         self.assertEqual(payload["query_iteration_memory"][0]["hit_count"], 1)
-        self.assertEqual(payload["search_loop"]["backend_used"], "native")
         self.assertEqual(payload["search_state"]["candidate_queue"]["keys"], ["uid:w1"])
         self.assertEqual(payload["ranking_steps"][0]["id"], "llm_ranking")
         self.assertEqual(payload["final_query"], "graph neural networks")

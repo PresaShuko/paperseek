@@ -12,7 +12,7 @@ from tests.helpers import temporary_env
 
 
 class HistoryStoreTest(unittest.TestCase):
-    def test_result_payload_preserves_search_loop_state_for_api_surfaces(self):
+    def test_result_payload_preserves_search_state_for_api_surfaces(self):
         payload = result_payload_from_search_result(
             {
                 "question": "open innovation",
@@ -23,7 +23,6 @@ class HistoryStoreTest(unittest.TestCase):
                 "total": 1,
                 "iterations": 1,
                 "history": [{"iteration": 1, "total": 1}],
-                "search_loop": {"backend_used": "langgraph"},
                 "search_state": {"recovery_decisions": [{"action": "repair_query"}]},
                 "ranking_steps": [{"id": "llm_ranking"}],
                 "citation_map": {},
@@ -32,7 +31,6 @@ class HistoryStoreTest(unittest.TestCase):
             "openalex",
         )
 
-        self.assertEqual(payload["search_loop"]["backend_used"], "langgraph")
         self.assertEqual(payload["search_state"]["recovery_decisions"][0]["action"], "repair_query")
         self.assertEqual(payload["ranking_steps"][0]["id"], "llm_ranking")
 
@@ -63,7 +61,6 @@ class HistoryStoreTest(unittest.TestCase):
                     "total": 1,
                     "iterations": 1,
                     "history": [{"iteration": 1, "query": '"open innovation"', "total": 1}],
-                    "search_loop": {"backend_requested": "auto", "backend_used": "langgraph"},
                     "search_state": {
                         "question": "open innovation",
                         "source": "openalex",
@@ -100,7 +97,6 @@ class HistoryStoreTest(unittest.TestCase):
             self.assertIsNotNone(detail)
             self.assertEqual(detail["status"], "success")
             self.assertEqual(detail["history"][0]["total"], 1)
-            self.assertEqual(detail["search_loop"]["backend_used"], "langgraph")
             self.assertEqual(detail["search_state"]["recovery_decisions"][0]["action"], "repair_query")
             self.assertEqual(detail["ranking_steps"][0]["id"], "llm_ranking")
             self.assertEqual(detail["ranked"][0]["title"], "Open Innovation")
@@ -136,7 +132,6 @@ class HistoryStoreTest(unittest.TestCase):
                     "total": 1200,
                     "iterations": 3,
                     "history": [{"iteration": 3, "total": 1200, "action": "narrow"}],
-                    "search_loop": {"backend_used": "langgraph"},
                     "search_state": {
                         "current_query": '"open innovation"',
                         "recovery_decisions": [{"action": "repair_query"}],
@@ -154,7 +149,6 @@ class HistoryStoreTest(unittest.TestCase):
             self.assertEqual(detail["total"], 1200)
             self.assertEqual(detail["iterations"], 3)
             self.assertEqual(detail["history"][0]["action"], "narrow")
-            self.assertEqual(detail["search_loop"]["backend_used"], "langgraph")
             self.assertEqual(detail["search_state"]["recovery_decisions"][0]["action"], "repair_query")
             self.assertEqual(detail["citation_map"]["status"], "partial")
             self.assertEqual(detail["ranking_steps"][0]["status"], "processing")

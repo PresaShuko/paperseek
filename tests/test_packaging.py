@@ -43,7 +43,6 @@ class PackagingTest(unittest.TestCase):
             ),
         )
         self.assertNotIn('"langchain-core', pyproject)
-        self.assertNotIn('"langgraph', pyproject)
         self.assertNotIn('"Programming Language :: Python :: 3.8"', pyproject)
         self.assertNotIn('"Programming Language :: Python :: 3.9"', pyproject)
         assert_contains_all(self, ci, ('python-version: ["3.12"]',))
@@ -108,7 +107,6 @@ class PackagingTest(unittest.TestCase):
                 "PaperHub integration",
             ),
         )
-        self.assertNotIn("LangGraph", notice)
         self.assertNotIn("MiroFish", notice)
         self.assertNotIn("clarivate/wosstarter_python_client", notice)
         self.assertNotIn("bytedance/pasa", notice)
@@ -175,7 +173,6 @@ class PackagingTest(unittest.TestCase):
             ".dockerignore",
             "docker-compose.yml",
             "app.py",
-            "api/index.py",
             "vercel.json",
             "ms_deploy.json",
         ):

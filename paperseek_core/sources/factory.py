@@ -22,7 +22,7 @@ def create_source_provider(
     *,
     log: Optional[Callable[[str], None]] = None,
 ):
-    source = (data_source or "wos").lower()
+    source = str(data_source or "").strip().lower()
     if source == "openalex":
         return OpenAlexProvider(
             api_key=getattr(config, "openalex_api_key", ""),
@@ -44,8 +44,10 @@ def create_source_provider(
         return GoogleScholarSerperProvider(api_key=getattr(config, "serper_api_key", ""))
     if source == "paperhub":
         return PaperHubProvider()
-    return WosProvider(
-        api_key=getattr(config, "wos_api_key", ""),
-        db=getattr(config, "wos_db", "WOS"),
-        log=log,
-    )
+    if source == "wos":
+        return WosProvider(
+            api_key=getattr(config, "wos_api_key", ""),
+            db=getattr(config, "wos_db", "WOS"),
+            log=log,
+        )
+    raise ValueError(f"Unsupported data source: {data_source!r}")

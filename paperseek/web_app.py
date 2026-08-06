@@ -70,7 +70,6 @@ FIELD_LABELS = {
     "target_max": "Max Results",
     "max_iterations": "Iterations",
     "search_budget": "Search Budget",
-    "search_loop_backend": "Search Loop Backend",
 }
 
 
@@ -179,7 +178,6 @@ def config_defaults():
         "target_min": config.target_min,
         "target_max": config.target_max,
         "max_iterations": config.max_iterations,
-        "search_loop_backend": config.search_loop_backend,
         "query_portfolio_enabled": config.query_portfolio_enabled,
         "query_portfolio_max": config.query_portfolio_max,
         "query_portfolio_limit": config.query_portfolio_limit,
@@ -231,7 +229,6 @@ def _config_from_payload(payload: SearchRequest) -> AgentConfig:
         "expand_citations": payload.expand_citations,
         "target_min": payload.target_min,
         "target_max": payload.target_max,
-        "search_loop_backend": payload.search_loop_backend,
         "retrieval_pool_min": payload.retrieval_pool_min,
         "retrieval_rrf_k": payload.retrieval_rrf_k,
         "retrieval_embedding_model": payload.retrieval_embedding_model,

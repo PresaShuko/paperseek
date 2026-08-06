@@ -510,7 +510,6 @@ A -> B  表示 A 引用了 B
 | `SEARCH_BUDGET` | `fast` | 统一检索预算：`fast`、`medium`、`high`、`max`。 |
 | `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | 用户期望结果范围；最小值参与过小结果恢复，最大值不作为强制收窄或展示上限。 |
 | `MAX_ITERATIONS` | `5` | `fast` 的查询调整软预算；显式配置时覆盖预算预设。 |
-| `SEARCH_LOOP_BACKEND` | `native` | 查询调度后端。`auto` 作为兼容值也使用稳定的内置控制器。 |
 | `EXPAND_CITATIONS` | `true` | 是否启用 OpenAlex 引用扩展。 |
 | `FETCH_ABSTRACTS` | `false` | 是否尝试从外部 DOI 元数据补摘要。 |
 | `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | `fast` 的引用扩展规模；显式配置时覆盖预算预设。 |
