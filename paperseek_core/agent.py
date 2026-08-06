@@ -1,7 +1,6 @@
 
 import re
 import json
-import inspect
 import math
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -18,10 +17,8 @@ from paperseek_core.disciplines import (
     apply_arxiv_category_filter,
     apply_wos_discipline_filter,
     discipline_prompt_context,
-    discipline_source_note,
     discipline_summary,
     normalize_source_filter_values,
-    openalex_field_ids,
 )
 from paperseek_core.retrieval import (
     ProviderRetrievalCapabilities,
@@ -60,6 +57,7 @@ from paperseek_core.harness import (
 )
 from paperseek_core.sources.contracts import ProviderError
 from paperseek_core.sources.factory import create_source_provider
+from paperseek_core.source_execution import SourceRequestExecutor
 from paperseek_core.planning import SearchPlan
 
 
@@ -377,6 +375,12 @@ class PaperSeekAgent:
 
         self.provider = create_source_provider(config, self.data_source, log=self._emit_log)
         self.documents_api = self.provider.documents_api if self.data_source == "wos" else None
+        self.source_requests = SourceRequestExecutor(
+            config,
+            self.data_source,
+            self.discipline_fields,
+            self._run_cancellable,
+        )
 
     def search(
         self,
@@ -785,34 +789,14 @@ class PaperSeekAgent:
         return self.query_contract.syntax_repair_prompt()
 
     def _provider_search_lane(self, query: str, lane: str, limit: int, page: int = 1):
-        return self._run_cancellable(
-            lambda: self._provider_search_lane_blocking(query, lane, limit, page=page)
+        return self.source_requests.search_lane(
+            query,
+            lane,
+            limit,
+            page=page,
+            provider=self.provider,
+            documents_api=self.documents_api,
         )
-
-    def _provider_search_lane_blocking(self, query: str, lane: str, limit: int, page: int = 1):
-        if self.data_source == "openalex":
-            return self._call_provider_search(query=query, limit=limit, page=page, field_ids=openalex_field_ids(self.discipline_fields), lane=lane)
-        if self.data_source == "crossref":
-            return self._call_provider_search(query=query, limit=limit, page=page, lane=lane)
-        if self.provider:
-            if self.data_source == "wos" and self.documents_api is not self.provider.documents_api:
-                self.provider.documents_api = self.documents_api
-            return self._call_provider_search(query=query, limit=limit, page=page, lane=lane)
-
-    def _call_provider_search(self, **kwargs):
-        return self._call_provider_search_with(self.provider, **kwargs)
-
-    @staticmethod
-    def _call_provider_search_with(provider, **kwargs):
-        if provider is None:
-            raise ProviderError("unknown", "No source provider is configured.", query=str(kwargs.get("query") or ""))
-        search = provider.search
-        signature = inspect.signature(search)
-        accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
-        if accepts_kwargs:
-            return search(**kwargs)
-        supported = {name: value for name, value in kwargs.items() if name in signature.parameters}
-        return search(**supported)
 
     def _apply_discipline_filter(self, query: str) -> str:
         if self.data_source == "wos":
@@ -1191,53 +1175,13 @@ class PaperSeekAgent:
         self._emit_stage("ranking", "processing", **payload)
 
     def _source_label(self) -> str:
-        labels = {
-            "wos": "WoS Starter",
-            "openalex": "OpenAlex",
-            "crossref": "Crossref",
-            "arxiv": "arXiv",
-            "semanticscholar": "Semantic Scholar",
-            "pubmed": "PubMed",
-            "googlescholar": "Google Scholar",
-            "paperhub": "Computer science top conferences",
-        }
-        return labels.get(self.data_source, self.data_source)
+        return self.source_requests.source_label()
 
     def _source_request_label(self, query: str) -> str:
-        discipline_note = discipline_source_note(self.discipline_fields, self.data_source)
-        suffix = f" ({discipline_note})" if discipline_note else ""
-        if self.data_source == "wos":
-            return f"GET /documents db={self.config.wos_db} q={query}{suffix}"
-        if self.data_source == "openalex":
-            return f"GET /works search={query}{suffix}"
-        if self.data_source == "crossref":
-            return f"GET /works query.bibliographic={query}{suffix}"
-        if self.data_source == "arxiv":
-            return f"GET /api/query search_query={query}{suffix}"
-        if self.data_source == "semanticscholar":
-            return f"GET /graph/v1/paper/search query={query}{suffix}"
-        if self.data_source == "pubmed":
-            return f"GET /entrez/eutils/esearch.fcgi term={query}{suffix}"
-        if self.data_source == "googlescholar":
-            return f"POST /scholar q={query}{suffix}"
-        if self.data_source == "paperhub":
-            return f"GET paper-hub shards query={query}{suffix}"
-        return f"{query}{suffix}"
+        return self.source_requests.request_label(query)
 
     def _source_response_log(self, result) -> str:
-        total = result.metadata.total if result.metadata else 0
-        count = len(result.hits or [])
-        if self.provider:
-            info = getattr(self.provider, "last_response_info", {}) or {}
-            method = info.get("method", "GET")
-            url = str(info.get("url", "")).split("?")[0] or self._source_label()
-            status = info.get("status", "unknown")
-            elapsed = info.get("elapsed_ms")
-            elapsed_text = f" in {elapsed}ms" if elapsed is not None else ""
-            attempts = info.get("attempts")
-            attempts_text = f"; attempts={attempts}" if attempts else ""
-            return f"{self._source_label()} {method} {url} -> HTTP {status} OK{elapsed_text}{attempts_text}; total={total}; returned={count}."
-        return f"WoS Starter GET /documents completed; total={total}; returned={count}."
+        return self.source_requests.response_log(result, provider=self.provider)
 
     def _llm_request_log(self, purpose: str) -> None:
         base_url = getattr(self.llm, "base_url", "")

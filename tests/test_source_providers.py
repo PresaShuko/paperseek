@@ -7,7 +7,7 @@ from unittest.mock import patch
 from paperseek_core.retrieval import RetrievalLane
 from paperseek_core.domain.models import PaperIdentifiers, PaperRecord
 from paperseek_core.sources.arxiv import ArxivProvider
-from paperseek_core.sources.contracts import ProviderError
+from paperseek_core.sources.contracts import ProviderError, SearchMetadata
 from paperseek_core.sources.crossref import CrossrefProvider
 from paperseek_core.sources.google_scholar import GoogleScholarSerperProvider
 from paperseek_core.sources.http import retry_delay
@@ -86,6 +86,30 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(captured["params"]["per-page"], 50)
         self.assertEqual(captured["params"]["api_key"], "test-key")
 
+    def test_openalex_lane_contract_preserves_paging_fields_and_sort(self):
+        calls = []
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query="", attempts=None):
+            calls.append(dict(params or {}))
+            payload = {"meta": {"count": 0, "page": 1, "per_page": 25}, "results": []}
+            return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+
+        provider = OpenAlexProvider()
+        with patch("paperseek_core.sources.openalex.get_with_retries", fake_get):
+            provider.search("AI governance", limit=25, page=3, field_ids=("17", "14"), lane=RetrievalLane.RELEVANCE)
+            provider.search("AI governance", limit=25, lane=RetrievalLane.IMPACT)
+            provider.search("AI governance", limit=25, lane=RetrievalLane.RECENT)
+
+        self.assertEqual(calls[0]["search"], "AI governance")
+        self.assertEqual(calls[0]["per-page"], 25)
+        self.assertEqual(calls[0]["page"], 3)
+        self.assertEqual(calls[0]["filter"], "primary_topic.field.id:17|14")
+        self.assertEqual(calls[0]["sort"], "relevance_score:desc")
+        self.assertEqual(calls[1]["sort"], "cited_by_count:desc")
+        self.assertEqual(calls[2]["sort"], "publication_date:desc")
+        self.assertNotIn("api_key", calls[0])
+        self.assertNotIn("mailto", calls[0])
+
     def test_openalex_semantic_lane_requires_api_key_before_request(self):
         with self.assertRaisesRegex(Exception, "semantic search requires an API key"):
             OpenAlexProvider().search("semantic retrieval", lane=RetrievalLane.SEMANTIC)
@@ -159,7 +183,7 @@ class SourceProviderTest(unittest.TestCase):
             return FakeResponse(text=atom), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
         with patch("paperseek_core.sources.arxiv.get_with_retries", fake_get):
-            result = ArxivProvider().search("graph retrieval", limit=1)
+            result = ArxivProvider().search("graph retrieval", limit=1, page=2, lane=RetrievalLane.RECENT)
 
         self.assertEqual(result.metadata.total, 1)
         self.assertEqual(result.hits[0].provider, "arxiv")
@@ -169,6 +193,11 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(captured["attempts"], 3)
         self.assertEqual(captured["timeout"], 45)
         self.assertEqual(captured["params"]["search_query"], 'all:"graph retrieval"')
+        self.assertEqual(captured["params"]["start"], 1)
+        self.assertEqual(captured["params"]["max_results"], 1)
+        self.assertEqual(captured["params"]["sortBy"], "submittedDate")
+        self.assertEqual(captured["params"]["sortOrder"], "descending")
+        self.assertEqual(result.metadata.page, 2)
 
     def test_arxiv_provider_escapes_quotes_in_plain_query(self):
         self.assertEqual(
@@ -200,10 +229,14 @@ class SourceProviderTest(unittest.TestCase):
             return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
 
         with patch("paperseek_core.sources.semantic_scholar.get_with_retries", fake_get):
-            result = SemanticScholarProvider(api_key="s2-key").search("graph learning", limit=1)
+            result = SemanticScholarProvider(api_key="s2-key").search("graph learning", limit=1, page=3)
 
         record = result.hits[0]
         self.assertEqual(captured["headers"]["x-api-key"], "s2-key")
+        self.assertEqual(captured["params"]["query"], "graph learning")
+        self.assertEqual(captured["params"]["limit"], 1)
+        self.assertEqual(captured["params"]["offset"], 2)
+        self.assertNotIn("sort", captured["params"])
         self.assertEqual(record.provider, "semanticscholar")
         self.assertEqual(record.identifiers.doi, "10.1234/s2")
         self.assertEqual(record.identifiers.pmid, "123")
@@ -259,12 +292,21 @@ class SourceProviderTest(unittest.TestCase):
             raise AssertionError(url)
 
         with patch("paperseek_core.sources.pubmed.get_with_retries", fake_get):
-            result = PubMedProvider(api_key="ncbi-key", email="you@example.org", tool="paperseek-test").search("cancer", limit=1)
+            result = PubMedProvider(api_key="ncbi-key", email="you@example.org", tool="paperseek-test").search(
+                "cancer",
+                limit=1,
+                page=2,
+                lane=RetrievalLane.RECENT,
+            )
 
         self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0][1]["api_key"], "ncbi-key")
         self.assertEqual(calls[0][1]["email"], "you@example.org")
         self.assertEqual(calls[0][1]["tool"], "paperseek-test")
+        self.assertEqual(calls[0][1]["term"], "cancer")
+        self.assertEqual(calls[0][1]["retmax"], 1)
+        self.assertEqual(calls[0][1]["retstart"], 1)
+        self.assertEqual(calls[0][1]["sort"], "pub+date")
         record = result.hits[0]
         self.assertEqual(record.provider, "pubmed")
         self.assertEqual(record.identifiers.pmid, "123")
@@ -590,6 +632,22 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(record.provider, "paperhub")
         self.assertEqual(record.source.source_title, "ICLR")
         self.assertEqual(record.source.publish_year, 2025)
+
+    def test_paperhub_contract_applies_lane_order_and_page_offset(self):
+        papers = [
+            {"id": "old", "title": "Graph Retrieval", "conference": "ICLR", "year": 2023},
+            {"id": "new", "title": "Graph Retrieval", "conference": "ICLR", "year": 2025},
+        ]
+        provider = PaperHubProvider()
+
+        with patch.object(provider, "_load_papers", return_value=papers):
+            first = provider.search("graph retrieval", limit=1, page=1, lane=RetrievalLane.RECENT)
+            second = provider.search("graph retrieval", limit=1, page=2, lane=RetrievalLane.RECENT)
+
+        self.assertEqual(first.metadata, SearchMetadata(total=2, page=1, limit=1))
+        self.assertEqual(second.metadata, SearchMetadata(total=2, page=2, limit=1))
+        self.assertEqual(first.hits[0].uid, "new")
+        self.assertEqual(second.hits[0].uid, "old")
 
     def test_paperhub_provider_initializes_cache_once_under_concurrency(self):
         calls = []
