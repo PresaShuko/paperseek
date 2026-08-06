@@ -1,6 +1,5 @@
 
 import os
-import re
 from dataclasses import dataclass, field
 
 from paperseek_core.budgets import (
@@ -38,11 +37,6 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if raw in (None, ""):
         return bool(default)
     return raw.strip().lower() not in ("0", "false", "no", "off")
-
-
-def _tuple_env(name: str) -> tuple[str, ...]:
-    values = re.split(r"[,;\s]+", str(os.environ.get(name) or ""))
-    return tuple(dict.fromkeys(value.strip().lower() for value in values if value.strip()))
 
 
 @dataclass
@@ -98,22 +92,6 @@ class AgentConfig:
     query_portfolio_max: int = _DEFAULT_BUDGET.query_portfolio_max
     query_portfolio_limit: int = _DEFAULT_BUDGET.query_portfolio_limit
     search_loop_backend: str = "auto"
-    crawler_enabled: bool = False
-    crawler_sources: tuple[str, ...] = field(default_factory=tuple)
-    candidate_selector_enabled: bool = False
-    citation_feedback_enabled: bool = False
-    crawler_intermediate_selector_enabled: bool = False
-    candidate_selector_batch_size: int = 12
-    candidate_selector_concurrency: int = 2
-    candidate_selector_max_llm_calls: int = _DEFAULT_BUDGET.candidate_selector_max_llm_calls
-    candidate_selector_max_attempts: int = 2
-    candidate_selector_exclude_score_max: float = 0.25
-    candidate_selector_keep_uncertain: bool = True
-    crawler_selector_sample_size: int = 24
-    crawler_max_reader_requests: int = _DEFAULT_BUDGET.crawler_max_reader_requests
-    crawler_max_citation_requests: int = _DEFAULT_BUDGET.crawler_max_citation_requests
-    crawler_max_wall_seconds: float = _DEFAULT_BUDGET.crawler_max_wall_seconds
-    crawler_low_yield_round_limit: int = 2
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -176,39 +154,7 @@ class AgentConfig:
             query_portfolio_enabled=os.environ.get("QUERY_PORTFOLIO_ENABLED", "true").lower() not in ("0", "false", "no"),
             query_portfolio_max=_int_env("QUERY_PORTFOLIO_MAX", budget.query_portfolio_max, minimum=1),
             query_portfolio_limit=_int_env("QUERY_PORTFOLIO_LIMIT", budget.query_portfolio_limit, minimum=1),
-            search_loop_backend=os.environ.get("SEARCH_LOOP_BACKEND", "auto").strip().lower() or "auto",
-            crawler_enabled=_bool_env("PAPERSEEK_CRAWLER", False),
-            crawler_sources=_tuple_env("PAPERSEEK_CRAWLER_SOURCES"),
-            candidate_selector_enabled=_bool_env("PAPERSEEK_CANDIDATE_SELECTOR", False),
-            citation_feedback_enabled=_bool_env("PAPERSEEK_CITATION_FEEDBACK", False),
-            crawler_intermediate_selector_enabled=_bool_env("CRAWLER_INTERMEDIATE_SELECTOR", False),
-            candidate_selector_batch_size=_int_env("CANDIDATE_SELECTOR_BATCH_SIZE", 12, minimum=1),
-            candidate_selector_concurrency=_int_env("CANDIDATE_SELECTOR_CONCURRENCY", 2, minimum=1),
-            candidate_selector_max_llm_calls=_int_env(
-                "CANDIDATE_SELECTOR_MAX_LLM_CALLS",
-                budget.candidate_selector_max_llm_calls,
-            ),
-            candidate_selector_max_attempts=_int_env("CANDIDATE_SELECTOR_MAX_ATTEMPTS", 2, minimum=1),
-            candidate_selector_exclude_score_max=min(
-                1.0,
-                _float_env("CANDIDATE_SELECTOR_EXCLUDE_SCORE_MAX", 0.25),
-            ),
-            candidate_selector_keep_uncertain=_bool_env("CANDIDATE_SELECTOR_KEEP_UNCERTAIN", True),
-            crawler_selector_sample_size=_int_env("CRAWLER_SELECTOR_SAMPLE_SIZE", 24, minimum=1),
-            crawler_max_reader_requests=_int_env(
-                "CRAWLER_MAX_READER_REQUESTS",
-                budget.crawler_max_reader_requests,
-            ),
-            crawler_max_citation_requests=_int_env(
-                "CRAWLER_MAX_CITATION_REQUESTS",
-                budget.crawler_max_citation_requests,
-            ),
-            crawler_max_wall_seconds=_float_env(
-                "CRAWLER_MAX_WALL_SECONDS",
-                budget.crawler_max_wall_seconds,
-                minimum=1.0,
-            ),
-            crawler_low_yield_round_limit=_int_env("CRAWLER_LOW_YIELD_ROUND_LIMIT", 2, minimum=1),
+            search_loop_backend=os.environ.get("SEARCH_LOOP_BACKEND", "native").strip().lower() or "native",
         )
 
     def validate(self):
@@ -217,20 +163,6 @@ class AgentConfig:
         self.data_source = (self.data_source or "openalex").lower()
         if self.data_source not in supported_source_ids():
             raise ValueError(f"DATA_SOURCE must be one of {', '.join(supported_source_ids())}, got '{self.data_source}'")
-        crawler_sources = self.crawler_sources or ()
-        if isinstance(crawler_sources, str):
-            crawler_sources = re.split(r"[,;\s]+", crawler_sources)
-        self.crawler_sources = tuple(
-            dict.fromkeys(str(value or "").strip().lower() for value in crawler_sources if str(value or "").strip())
-        )
-        invalid_crawler_sources = [
-            source for source in self.crawler_sources if source not in supported_source_ids()
-        ]
-        if invalid_crawler_sources:
-            raise ValueError(
-                "PAPERSEEK_CRAWLER_SOURCES must contain only supported sources; "
-                f"got {', '.join(invalid_crawler_sources)}"
-            )
         self.discipline_fields = normalize_source_filter_values(self.data_source, self.discipline_fields)
         if self.data_source == "wos" and not self.wos_api_key:
             missing.append("WOS_API_KEY")

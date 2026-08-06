@@ -18,8 +18,10 @@ class DocumentsApi:
         self.api_client = api_client or ApiClient.get_default()
 
     @staticmethod
-    def _limit(value: Optional[int]) -> int:
-        limit = 10 if value is None else int(value)
+    def _limit(value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        limit = int(value)
         if limit < 1:
             raise ValueError("WoS Starter limit must be positive")
         return min(limit, 50)
@@ -139,10 +141,22 @@ class DocumentsApi:
             headers=kwargs.pop("_headers", None),
         )
 
-    def _document_uid_response(self, uid: str, *, db: Optional[str], timeout: Timeout, headers: Optional[dict]):
+    def _document_uid_response(
+        self,
+        uid: str,
+        *,
+        db: Optional[str],
+        detail: Optional[str],
+        timeout: Timeout,
+        headers: Optional[dict],
+    ):
         if not str(uid or "").strip():
             raise ValueError("uid is required")
-        params = {"db": db} if db else None
+        params = {
+            key: value
+            for key, value in {"db": db, "detail": detail}.items()
+            if value is not None
+        }
         return self.api_client.request(
             "GET",
             f"/documents/{str(uid).strip()}",
@@ -155,6 +169,7 @@ class DocumentsApi:
         self,
         uid: str,
         db: Optional[str] = None,
+        detail: Optional[str] = None,
         _request_timeout: Timeout = None,
         _request_auth: Optional[Dict[str, Any]] = None,
         _content_type: Optional[str] = None,
@@ -162,7 +177,13 @@ class DocumentsApi:
         _host_index: int = 0,
     ) -> Document:
         del _request_auth, _content_type, _host_index
-        response = self._document_uid_response(uid, db=db, timeout=_request_timeout, headers=_headers)
+        response = self._document_uid_response(
+            uid,
+            db=db,
+            detail=detail,
+            timeout=_request_timeout,
+            headers=_headers,
+        )
         payload = self._decode(response)
         if isinstance(payload.get("hits"), list):
             payload = payload["hits"][0] if payload["hits"] else {}
@@ -173,6 +194,7 @@ class DocumentsApi:
         response = self._document_uid_response(
             uid,
             db=kwargs.pop("db", None),
+            detail=kwargs.pop("detail", None),
             timeout=kwargs.pop("_request_timeout", None),
             headers=kwargs.pop("_headers", None),
         )
@@ -187,6 +209,7 @@ class DocumentsApi:
         return self._document_uid_response(
             uid,
             db=kwargs.pop("db", None),
+            detail=kwargs.pop("detail", None),
             timeout=kwargs.pop("_request_timeout", None),
             headers=kwargs.pop("_headers", None),
         )

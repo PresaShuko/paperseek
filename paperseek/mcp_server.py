@@ -16,7 +16,7 @@ Or::
 
     python -m paperseek.mcp_server
 
-Requires Python 3.10+ and the optional ``mcp`` package.
+Requires Python 3.12+ and the optional ``mcp`` package.
 Configuration is read from environment variables or ``.env``,
 identical to the CLI and Web UI.
 """
@@ -26,11 +26,10 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from paperseek_core.budgets import apply_search_budget
 from paperseek.config import AgentConfig
+from paperseek.config_compiler import compile_agent_config
 from paperseek.config_store import load_user_config_into_env
 from paperseek.diagnostics import run_doctor, smoke_source
-from paperseek.disciplines import normalize_source_filter_values
 from paperseek.env_loader import load_env_file
 from paperseek.history import (
     HistoryStore,
@@ -111,39 +110,36 @@ def _build_search_config(
     caller does not explicitly override them. Passing ``True`` or ``False``
     forces the corresponding config field.
     """
-    config = AgentConfig.from_env()
+    overrides = {}
     if search_budget:
-        apply_search_budget(config, search_budget)
+        overrides["search_budget"] = search_budget
     if source:
-        config.data_source = source
+        overrides["data_source"] = source
     if field:
-        config.search_field = field
+        overrides["search_field"] = field
     if discipline_fields:
-        config.discipline_fields = normalize_source_filter_values(config.data_source, discipline_fields)
+        overrides["discipline_fields"] = discipline_fields
     if target_min > 0:
-        config.target_min = target_min
+        overrides["target_min"] = target_min
     if target_max > 0:
-        config.target_max = target_max
+        overrides["target_max"] = target_max
     if max_iterations > 0:
-        config.max_iterations = max_iterations
+        overrides["max_iterations"] = max_iterations
     if search_loop_backend:
-        backend = search_loop_backend.strip().lower()
-        if backend not in {"auto", "langgraph", "native"}:
-            raise ValueError("search_loop_backend must be one of auto, langgraph, native")
-        config.search_loop_backend = backend
+        overrides["search_loop_backend"] = search_loop_backend
     if retrieval_pool_max > 0:
-        config.retrieval_pool_max = retrieval_pool_max
+        overrides["retrieval_pool_max"] = retrieval_pool_max
     if retrieval_lane_limit > 0:
-        config.retrieval_lane_limit = retrieval_lane_limit
+        overrides["retrieval_lane_limit"] = retrieval_lane_limit
     if ranking_candidate_limit > 0:
-        config.ranking_candidate_limit = ranking_candidate_limit
+        overrides["ranking_candidate_limit"] = ranking_candidate_limit
     if retrieval_embedding_provider:
-        config.retrieval_embedding_provider = retrieval_embedding_provider
+        overrides["retrieval_embedding_provider"] = retrieval_embedding_provider
     if expand_citations is not None:
-        config.expand_citations = expand_citations
+        overrides["expand_citations"] = expand_citations
     if fetch_abstracts is not None:
-        config.fetch_abstracts = fetch_abstracts
-    return config
+        overrides["fetch_abstracts"] = fetch_abstracts
+    return compile_agent_config(overrides)
 
 
 def search_papers_logic(
@@ -320,10 +316,9 @@ def create_server():
             target_max: Maximum target results (default from env: 50).
             max_iterations: Optional explicit query-refinement override; the
                 fast search budget uses 5 before adaptive recovery.
-            search_loop_backend: Search loop controller backend: "auto",
-                "native", or "langgraph". "auto" and "native" use the
-                built-in controller; "langgraph" enables the LangGraph state
-                machine. Omit to use env/default config.
+            search_loop_backend: Search loop controller backend. Use "native";
+                "auto" remains accepted for compatibility and uses the same
+                built-in controller. Omit to use env/default config.
             retrieval_pool_max: Maximum fused candidates before LLM ranking.
             retrieval_lane_limit: Maximum records fetched per retrieval lane.
             ranking_candidate_limit: Maximum pre-ranked candidates sent to LLM scoring.

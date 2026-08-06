@@ -17,15 +17,13 @@ import os
 import sys
 import time
 
-from paperseek_core.budgets import SEARCH_BUDGET_NAMES, apply_search_budget
+from paperseek_core.budgets import SEARCH_BUDGET_NAMES
 from paperseek.config import (
     SUPPORTED_LLM_API_TYPES,
     SUPPORTED_LLM_PROVIDERS,
     AgentConfig,
-    default_api_type,
-    default_base_url,
-    default_model,
 )
+from paperseek.config_compiler import compile_agent_config
 from paperseek.config_store import (
     config_path,
     import_env_file,
@@ -36,7 +34,6 @@ from paperseek.config_store import (
     unset_config_value,
 )
 from paperseek.diagnostics import dumps, render_doctor_text, render_smoke_text, run_doctor, smoke_source
-from paperseek.disciplines import normalize_source_filter_values
 from paperseek.env_loader import load_env_file
 from paperseek.formatter import format_json, format_text
 from paperseek.history import (
@@ -144,7 +141,7 @@ Environment variables:
   SEARCH_FIELD       Default discipline/field constraint
   DISCIPLINE_FIELDS  OpenAlex Field IDs or labels for source-specific discipline limits
   SEARCH_LOOP_BACKEND
-                     Query-loop backend: auto, langgraph, or native
+                     Query-loop backend: native (auto remains accepted for compatibility)
   QUERY_PORTFOLIO_ENABLED
                      Set to "false" to disable SearchPlan multi-view retrieval
   QUERY_PORTFOLIO_MAX
@@ -213,7 +210,7 @@ Environment variables:
         help="Maximum actual source requests from SearchPlan views (fast default: 2)",
     )
     parser.add_argument("--query-portfolio-limit", type=int, default=None, help="Maximum records requested per query view (default: 100)")
-    parser.add_argument("--search-loop-backend", default=None, choices=["auto", "langgraph", "native"], help="Search loop backend: auto/native use the built-in controller; langgraph enables the LangGraph state machine")
+    parser.add_argument("--search-loop-backend", default=None, choices=["auto", "native"], help="Search loop backend (auto and native use the built-in controller)")
     retrieval_providers = ["local", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter", "nvidia", "zhipu", "volcengine", "modelscope", "custom"]
     reranker_providers = ["off", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter", "nvidia", "zhipu", "volcengine", "custom"]
     parser.add_argument("--retrieval-embedding-provider", default=None, choices=retrieval_providers, help="Embedding provider for pre-ranking")
@@ -228,89 +225,57 @@ Environment variables:
 
 
 def _apply_search_args(config: AgentConfig, args) -> AgentConfig:
-    if getattr(args, "search_budget", None):
-        apply_search_budget(config, args.search_budget)
-    if args.source:
-        config.data_source = args.source
-    if args.wos_key:
-        config.wos_api_key = args.wos_key
-    if args.openalex_key:
-        config.openalex_api_key = args.openalex_key
-    if args.openalex_email:
-        config.openalex_email = args.openalex_email
-    if args.crossref_email:
-        config.crossref_email = args.crossref_email
-    if args.semantic_scholar_key:
-        config.semantic_scholar_api_key = args.semantic_scholar_key
-    if args.pubmed_key:
-        config.pubmed_api_key = args.pubmed_key
-    if args.pubmed_email:
-        config.pubmed_email = args.pubmed_email
-    if args.pubmed_tool:
-        config.pubmed_tool = args.pubmed_tool
-    if args.serper_key:
-        config.serper_api_key = args.serper_key
-    if args.llm_key:
-        config.llm_api_key = args.llm_key
-    if args.llm_provider:
-        config.llm_provider = args.llm_provider
-        if not args.llm_api_type:
-            config.llm_api_type = default_api_type(args.llm_provider)
-        if not args.llm_model:
-            config.llm_model = default_model(args.llm_provider)
-        if not args.llm_base_url:
-            config.llm_base_url = default_base_url(args.llm_provider, config.llm_api_type)
-    if args.llm_api_type:
-        config.llm_api_type = args.llm_api_type
-    if args.llm_model:
-        config.llm_model = args.llm_model
-    if args.llm_base_url:
-        config.llm_base_url = args.llm_base_url
-    if args.llm_max_tokens is not None:
-        config.llm_max_tokens = args.llm_max_tokens
-    if args.db:
-        config.wos_db = args.db
-    if args.field:
-        config.search_field = args.field
-    if getattr(args, "discipline_fields", None):
-        config.discipline_fields = normalize_source_filter_values(config.data_source, args.discipline_fields)
-    if args.fetch_abstracts is not None and args.fetch_abstracts:
-        config.fetch_abstracts = True
-    if args.no_expand_citations:
-        config.expand_citations = False
-    if args.min is not None:
-        config.target_min = args.min
-    if args.max is not None:
-        config.target_max = args.max
-    if args.iterations is not None:
-        config.max_iterations = args.iterations
-    if args.retrieval_pool_max is not None:
-        config.retrieval_pool_max = args.retrieval_pool_max
-    if args.retrieval_pool_min is not None:
-        config.retrieval_pool_min = args.retrieval_pool_min
-    if args.retrieval_lane_limit is not None:
-        config.retrieval_lane_limit = args.retrieval_lane_limit
-    if args.ranking_candidate_limit is not None:
-        config.ranking_candidate_limit = args.ranking_candidate_limit
-    if args.query_portfolio is not None:
-        config.query_portfolio_enabled = args.query_portfolio
-    if args.query_portfolio_max is not None:
-        config.query_portfolio_max = max(1, args.query_portfolio_max)
-    if args.query_portfolio_limit is not None:
-        config.query_portfolio_limit = max(1, args.query_portfolio_limit)
-    if args.search_loop_backend:
-        config.search_loop_backend = args.search_loop_backend
-    if args.retrieval_embedding_provider:
-        config.retrieval_embedding_provider = args.retrieval_embedding_provider
-    if args.retrieval_embedding_model:
-        config.retrieval_embedding_model = args.retrieval_embedding_model
-    if args.retrieval_reranker_provider is not None:
-        config.retrieval_reranker_provider = args.retrieval_reranker_provider
-    if args.retrieval_reranker_model:
-        config.retrieval_reranker_model = args.retrieval_reranker_model
-    if args.retrieval_crossref_enrichment:
-        config.retrieval_crossref_enrichment = True
-    return config
+    argument_fields = {
+        "search_budget": "search_budget",
+        "source": "data_source",
+        "wos_key": "wos_api_key",
+        "openalex_key": "openalex_api_key",
+        "openalex_email": "openalex_email",
+        "crossref_email": "crossref_email",
+        "semantic_scholar_key": "semantic_scholar_api_key",
+        "pubmed_key": "pubmed_api_key",
+        "pubmed_email": "pubmed_email",
+        "pubmed_tool": "pubmed_tool",
+        "serper_key": "serper_api_key",
+        "llm_key": "llm_api_key",
+        "llm_provider": "llm_provider",
+        "llm_api_type": "llm_api_type",
+        "llm_model": "llm_model",
+        "llm_base_url": "llm_base_url",
+        "llm_max_tokens": "llm_max_tokens",
+        "db": "wos_db",
+        "field": "search_field",
+        "discipline_fields": "discipline_fields",
+        "min": "target_min",
+        "max": "target_max",
+        "iterations": "max_iterations",
+        "retrieval_pool_max": "retrieval_pool_max",
+        "retrieval_pool_min": "retrieval_pool_min",
+        "retrieval_lane_limit": "retrieval_lane_limit",
+        "ranking_candidate_limit": "ranking_candidate_limit",
+        "query_portfolio": "query_portfolio_enabled",
+        "query_portfolio_max": "query_portfolio_max",
+        "query_portfolio_limit": "query_portfolio_limit",
+        "search_loop_backend": "search_loop_backend",
+        "retrieval_embedding_provider": "retrieval_embedding_provider",
+        "retrieval_embedding_model": "retrieval_embedding_model",
+        "retrieval_reranker_provider": "retrieval_reranker_provider",
+        "retrieval_reranker_model": "retrieval_reranker_model",
+    }
+    overrides = {}
+    for argument, field in argument_fields.items():
+        value = getattr(args, argument, None)
+        if value is not None:
+            overrides[field] = value
+
+    if getattr(args, "fetch_abstracts", None):
+        overrides["fetch_abstracts"] = True
+    if getattr(args, "no_expand_citations", False):
+        overrides["expand_citations"] = False
+    if getattr(args, "retrieval_crossref_enrichment", False):
+        overrides["retrieval_crossref_enrichment"] = True
+
+    return compile_agent_config(overrides, environment=config)
 
 
 def _run_search(argv, prog: str):

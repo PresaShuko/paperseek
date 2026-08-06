@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from paperseek_core.sources.providers import (
     ArxivProvider,
+    CrossrefProvider,
     reconstruct_abstract,
     GoogleScholarSerperProvider,
     OpenAlexProvider,
@@ -107,6 +108,29 @@ class SourceProviderTest(unittest.TestCase):
     def test_openalex_advertises_semantic_lane_only_with_api_key(self):
         self.assertNotIn(RetrievalLane.SEMANTIC, OpenAlexProvider().retrieval_capabilities().lanes)
         self.assertIn(RetrievalLane.SEMANTIC, OpenAlexProvider(api_key="key").retrieval_capabilities().lanes)
+
+    def test_crossref_lane_contract_preserves_paging_sort_and_polite_email(self):
+        calls = []
+
+        def fake_get(provider, url, params=None, headers=None, timeout=0, query="", attempts=None):
+            calls.append({"provider": provider, "url": url, "params": dict(params or {}), "headers": dict(headers or {})})
+            payload = {"message": {"total-results": 0, "items": []}}
+            return FakeResponse(payload=payload), {"method": "GET", "url": url, "status": 200, "elapsed_ms": 1}
+
+        provider = CrossrefProvider(email="researcher@example.org")
+        with patch("paperseek_core.sources.providers.get_with_retries", fake_get):
+            provider.search("AI governance", limit=25, page=3, lane=RetrievalLane.RELEVANCE)
+            provider.search("AI governance", limit=25, page=1, lane=RetrievalLane.IMPACT)
+            provider.search("AI governance", limit=25, page=1, lane=RetrievalLane.RECENT)
+
+        self.assertEqual(calls[0]["provider"], "crossref")
+        self.assertEqual(calls[0]["params"]["query.bibliographic"], "AI governance")
+        self.assertEqual(calls[0]["params"]["rows"], 25)
+        self.assertEqual(calls[0]["params"]["offset"], 50)
+        self.assertEqual(calls[0]["params"]["mailto"], "researcher@example.org")
+        self.assertNotIn("sort", calls[0]["params"])
+        self.assertEqual(calls[1]["params"]["sort"], "is-referenced-by-count")
+        self.assertEqual(calls[2]["params"]["sort"], "published")
 
     def test_arxiv_provider_parses_atom_records(self):
         atom = """<?xml version="1.0" encoding="UTF-8"?>

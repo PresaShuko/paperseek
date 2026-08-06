@@ -26,8 +26,6 @@ from paperseek_core.harness.schemas import (
     QueryValidation,
     CandidateQueueEvent,
     CandidateQueueState,
-    FrontierCycleResult,
-    FrontierOutcome,
     CitationFrontierState,
     CitationPlanningDecision,
     CitationRecoveryDecision,
@@ -171,47 +169,6 @@ def _broad_narrowing_has_stalled(previous_totals: list[int], current_total: int)
 
 class NativeQueryLoopRunner:
     backend_used = "native"
-
-    def run_frontier_cycle(
-        self,
-        controller: Any,
-        execute_fn: Callable[[Any], Any],
-        select_fn: Callable[[Any, Any], FrontierOutcome],
-        *,
-        passthrough_exceptions: tuple[type[BaseException], ...] = (),
-    ) -> FrontierCycleResult:
-        actions = controller.next_actions(1)
-        if not actions:
-            return FrontierCycleResult(
-                scheduled=False,
-                stop_reason=str(controller.scheduler.state.stop_reason or controller.state.stop_reason or ""),
-                backend_used=self.backend_used,
-            )
-        action = actions[0]
-        execution = None
-        try:
-            execution = execute_fn(action)
-            outcome = select_fn(action, execution)
-            if not isinstance(outcome, FrontierOutcome):
-                raise TypeError("frontier select_fn must return FrontierOutcome")
-        except passthrough_exceptions:
-            controller.scheduler.release(action.action_id)
-            raise
-        except Exception as exc:
-            outcome = FrontierOutcome(
-                action_id=action.action_id,
-                status="failed",
-                error=f"{exc.__class__.__name__}: {exc}",
-            )
-        controller.complete_action(outcome)
-        return FrontierCycleResult(
-            scheduled=True,
-            action=action,
-            execution=execution,
-            outcome=outcome,
-            stop_reason=str(controller.scheduler.state.stop_reason or controller.state.stop_reason or ""),
-            backend_used=self.backend_used,
-        )
 
     def preflight(self, state: SearchRunState, query: str) -> tuple[SearchRunState, QueryValidation]:
         current = state.with_current_query(query)
@@ -547,33 +504,6 @@ class NativeQueryLoopRunner:
                 message="No records found; generated a broader query.",
                 adjustment="too few or zero records",
                 reason="Zero-result searches should broaden beyond the configured soft iteration count until the adaptive budget is exhausted.",
-            )
-
-        selector_observed = max(0, int(snapshot.selector_observed_count or 0))
-        selector_excluded = max(0, int(snapshot.selector_exclude_count or 0))
-        selector_included = max(0, int(snapshot.selector_include_count or 0))
-        if (
-            selector_observed >= 3
-            and selector_included == 0
-            and selector_excluded / selector_observed >= 0.60
-            and iteration < configured
-        ):
-            missing = [str(value) for value in snapshot.selector_missing_concepts[:6] if str(value).strip()]
-            gap_text = f" Missing SearchPlan facets: {', '.join(missing)}." if missing else ""
-            return QueryLoopDecision(
-                action=ACTION_NARROW,
-                message=(
-                    f"{total} records found, but CandidateSelector rejected most of the inspected results; "
-                    "generated a redirected query."
-                ),
-                adjustment=(
-                    "the inspected candidates are explicitly off-intent; remove or replace the drift-causing "
-                    f"query terms and restore the stable SearchPlan.{gap_text}"
-                ),
-                reason=(
-                    f"CandidateSelector found 0 include and {selector_excluded} exclude decisions among "
-                    f"{selector_observed} inspected candidates."
-                ),
             )
 
         drifted, drift_adjustment, drift_reason = _title_feedback_drift(snapshot)

@@ -149,7 +149,7 @@ class DisciplineMappingTest(unittest.TestCase):
         agent = PaperSeekAgent(config, object())
 
         with patch.object(agent.documents_api, "documents_get", side_effect=ValueError("strict parse")):
-            with patch("paperseek_core.agent.requests.get", side_effect=fake_get):
+            with patch("paperseek_core.sources.wos.requests.get", side_effect=fake_get):
                 result = agent._provider_search("TS=(AI governance)")
 
         self.assertEqual(captured["params"]["q"], "TS=(AI governance)")
@@ -184,7 +184,7 @@ class DisciplineMappingTest(unittest.TestCase):
         agent = PaperSeekAgent(config, object())
         agent.documents_api = FakeDocumentsApi()
 
-        with patch("paperseek_core.agent.time.sleep") as sleep:
+        with patch("paperseek_core.sources.wos.time.sleep") as sleep:
             result = agent._provider_search("TS=(AI governance)")
 
         self.assertEqual(agent.documents_api.calls, 2)

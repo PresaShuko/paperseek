@@ -18,10 +18,6 @@ class SearchBudgetPreset:
     citation_per_seed: int
     citation_max_records: int
     citation_depth: int
-    candidate_selector_max_llm_calls: int
-    crawler_max_reader_requests: int
-    crawler_max_citation_requests: int
-    crawler_max_wall_seconds: float
 
     def values(self) -> dict[str, int | float | bool]:
         return asdict(self)
@@ -40,10 +36,6 @@ SEARCH_BUDGET_PRESETS = {
         citation_per_seed=4,
         citation_max_records=40,
         citation_depth=2,
-        candidate_selector_max_llm_calls=24,
-        crawler_max_reader_requests=8,
-        crawler_max_citation_requests=8,
-        crawler_max_wall_seconds=300.0,
     ),
     "medium": SearchBudgetPreset(
         max_iterations=7,
@@ -56,10 +48,6 @@ SEARCH_BUDGET_PRESETS = {
         citation_per_seed=6,
         citation_max_records=80,
         citation_depth=2,
-        candidate_selector_max_llm_calls=36,
-        crawler_max_reader_requests=12,
-        crawler_max_citation_requests=16,
-        crawler_max_wall_seconds=480.0,
     ),
     "high": SearchBudgetPreset(
         max_iterations=9,
@@ -72,10 +60,6 @@ SEARCH_BUDGET_PRESETS = {
         citation_per_seed=8,
         citation_max_records=160,
         citation_depth=3,
-        candidate_selector_max_llm_calls=48,
-        crawler_max_reader_requests=20,
-        crawler_max_citation_requests=24,
-        crawler_max_wall_seconds=720.0,
     ),
     "max": SearchBudgetPreset(
         max_iterations=12,
@@ -88,10 +72,6 @@ SEARCH_BUDGET_PRESETS = {
         citation_per_seed=10,
         citation_max_records=320,
         citation_depth=3,
-        candidate_selector_max_llm_calls=96,
-        crawler_max_reader_requests=32,
-        crawler_max_citation_requests=48,
-        crawler_max_wall_seconds=1200.0,
     ),
 }
 

@@ -7,8 +7,6 @@ from paperseek_core.harness.schemas import (
     QueryLoopSnapshot,
     QueryValidation,
     CandidateQueueEvent,
-    FrontierCycleResult,
-    FrontierOutcome,
     CitationPlanningDecision,
     CitationRecoveryDecision,
     CitationTraversalObservation,
@@ -20,17 +18,21 @@ from paperseek_core.harness.schemas import (
 
 
 class SearchLoopController:
-    """Query-iteration controller with native default and LangGraph opt-in."""
+    """Stable query-iteration controller backed by the native runner."""
 
-    def __init__(self, backend: str = "auto"):
-        self.backend_requested = (backend or "auto").strip().lower()
+    def __init__(self, backend: str = "native"):
+        self.backend_requested = (backend or "native").strip().lower()
         self.import_error = ""
-        self.runner = self._build_runner()
+        if self.backend_requested not in {"", "auto", "native"}:
+            self.import_error = (
+                f"Search loop backend '{self.backend_requested}' is no longer supported; using native"
+            )
+        self.runner = NativeQueryLoopRunner()
         self.backend_used = self.runner.backend_used
 
     @classmethod
     def from_config(cls, config: Any) -> "SearchLoopController":
-        backend = getattr(config, "search_loop_backend", None) or getattr(config, "harness_backend", None) or "auto"
+        backend = getattr(config, "search_loop_backend", None) or getattr(config, "harness_backend", None) or "native"
         return cls(backend=backend)
 
     def summary(self) -> Dict[str, str]:
@@ -199,32 +201,3 @@ class SearchLoopController:
         origin: str = "",
     ) -> tuple[SearchRunState, CandidateQueueEvent]:
         return self.runner.update_candidate_queue(state, candidate_keys=candidate_keys, origin=origin)
-
-    def run_frontier_cycle(
-        self,
-        controller: Any,
-        execute_fn: Callable[[Any], Any],
-        select_fn: Callable[[Any, Any], FrontierOutcome],
-        *,
-        passthrough_exceptions: tuple[type[BaseException], ...] = (),
-    ) -> FrontierCycleResult:
-        return self.runner.run_frontier_cycle(
-            controller,
-            execute_fn,
-            select_fn,
-            passthrough_exceptions=passthrough_exceptions,
-        )
-
-    def _build_runner(self):
-        if self.backend_requested in {"", "auto", "native"}:
-            return NativeQueryLoopRunner()
-        if self.backend_requested != "langgraph":
-            self.import_error = f"Unknown backend: {self.backend_requested}"
-            return NativeQueryLoopRunner()
-        try:
-            from paperseek_core.harness.langgraph_loop import LangGraphQueryLoopRunner
-
-            return LangGraphQueryLoopRunner()
-        except Exception as exc:
-            self.import_error = f"{exc.__class__.__name__}: {exc}"
-            return NativeQueryLoopRunner()

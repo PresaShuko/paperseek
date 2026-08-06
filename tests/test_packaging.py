@@ -6,11 +6,11 @@ from tests.helpers import ROOT, assert_contains_all, read_text
 
 
 class PackagingTest(unittest.TestCase):
-    def test_runtime_package_parses_with_python310_grammar(self):
+    def test_runtime_package_parses_with_python312_grammar(self):
         for package in ("paperseek", "paperseek_core"):
             for path in (ROOT / package).rglob("*.py"):
                 with self.subTest(path=path.relative_to(ROOT)):
-                    ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path), feature_version=(3, 10))
+                    ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path), feature_version=(3, 12))
 
     def test_project_metadata_is_release_ready(self):
         pyproject = read_text("pyproject.toml")
@@ -30,25 +30,25 @@ class PackagingTest(unittest.TestCase):
         self.assertNotRegex(pyproject, re.compile(r"^wos-search\s*=", re.MULTILINE))
         self.assertNotRegex(pyproject, re.compile(r"^wos-search-web\s*=", re.MULTILINE))
 
-    def test_python310_and_harness_dependencies_are_declared(self):
+    def test_python312_and_optional_harness_dependency_are_declared(self):
         pyproject = read_text("pyproject.toml")
         ci = read_text(".github/workflows/ci.yml")
         assert_contains_all(
             self,
             pyproject,
             (
-                'requires-python = ">=3.10"',
-                '"Programming Language :: Python :: 3.10"',
-                '"Programming Language :: Python :: 3.11"',
+                'requires-python = ">=3.12"',
                 '"Programming Language :: Python :: 3.12"',
-                '"langchain-core>=1.5"',
-                '"langgraph>=1.2"',
                 '"pydantic-ai-slim>=2"',
             ),
         )
+        self.assertNotIn('"langchain-core', pyproject)
+        self.assertNotIn('"langgraph', pyproject)
         self.assertNotIn('"Programming Language :: Python :: 3.8"', pyproject)
         self.assertNotIn('"Programming Language :: Python :: 3.9"', pyproject)
-        assert_contains_all(self, ci, ('python-version: ["3.10", "3.11", "3.12"]',))
+        assert_contains_all(self, ci, ('python-version: ["3.12"]',))
+        self.assertNotIn('"3.10"', ci)
+        self.assertNotIn('"3.11"', ci)
         self.assertNotIn('"3.8"', ci)
         self.assertNotIn('"3.9"', ci)
 
@@ -81,7 +81,6 @@ class PackagingTest(unittest.TestCase):
             "https://github.com/Yupu-Wang/paper-hub",
             "https://github.com/bytedance/pasa",
             "https://github.com/pydantic/pydantic-ai",
-            "https://github.com/langchain-ai/langgraph",
             "THIRD_PARTY_NOTICES.md",
         )
         internal_reference_links = (
@@ -104,12 +103,12 @@ class PackagingTest(unittest.TestCase):
             (
                 "Apache License 2.0",
                 "PydanticAI",
-                "LangGraph",
                 "PaperHub",
                 "Runtime dependencies",
                 "PaperHub integration",
             ),
         )
+        self.assertNotIn("LangGraph", notice)
         self.assertNotIn("MiroFish", notice)
         self.assertNotIn("clarivate/wosstarter_python_client", notice)
         self.assertNotIn("bytedance/pasa", notice)

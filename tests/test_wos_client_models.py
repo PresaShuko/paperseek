@@ -102,15 +102,37 @@ class WosClientModelTest(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "Unauthorized")
         self.assertEqual(raised.exception.body, "response body")
 
+    def test_documents_api_omits_limit_when_caller_does_not_set_it(self):
+        client = ApiClient(Configuration(api_key={"ClarivateApiKeyAuth": "test-key"}))
+        client.session = FakeSession([FakeResponse({"metadata": {"total": 0}, "hits": []})])
+
+        DocumentsApi(client).documents_get(q="TS=(governance)", db="WOS")
+
+        self.assertEqual(client.session.calls[0][2]["params"], {"q": "TS=(governance)", "db": "WOS"})
+
     def test_uid_endpoint_parses_single_document(self):
         client = ApiClient(Configuration(api_key={"ClarivateApiKeyAuth": "test-key"}))
         client.session = FakeSession([FakeResponse({"uid": "WOS:2", "title": "Single result"})])
 
-        result = DocumentsApi(client).documents_uid_get("WOS:2", db="WOS")
+        result = DocumentsApi(client).documents_uid_get("WOS:2", db="WOS", detail="full")
 
         self.assertEqual(result.uid, "WOS:2")
         self.assertEqual(client.session.calls[0][1], "https://api.clarivate.com/apis/wos-starter/v1/documents/WOS:2")
-        self.assertEqual(client.session.calls[0][2]["params"], {"db": "WOS"})
+        self.assertEqual(client.session.calls[0][2]["params"], {"db": "WOS", "detail": "full"})
+
+    def test_uid_http_variants_preserve_detail_parameter(self):
+        payload = {"uid": "WOS:3", "title": "Detailed result"}
+        client = ApiClient(Configuration(api_key={"ClarivateApiKeyAuth": "test-key"}))
+        client.session = FakeSession([FakeResponse(payload), FakeResponse(payload)])
+        api = DocumentsApi(client)
+
+        response = api.documents_uid_get_with_http_info(uid="WOS:3", db="WOS", detail="short")
+        raw = api.documents_uid_get_without_preload_content(uid="WOS:3", detail="full")
+
+        self.assertEqual(response.data.uid, "WOS:3")
+        self.assertEqual(raw.status_code, 200)
+        self.assertEqual(client.session.calls[0][2]["params"], {"db": "WOS", "detail": "short"})
+        self.assertEqual(client.session.calls[1][2]["params"], {"detail": "full"})
 
     def test_wos_adapter_does_not_ship_generated_client_templates(self):
         client_dir = ROOT / "paperseek_core" / "client"

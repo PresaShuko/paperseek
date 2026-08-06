@@ -158,12 +158,9 @@ class OpenAIChatClient(LLMClient):
     def _chat(self, messages, temperature=0.3, response_format=None, max_tokens=None):
         url = f"{self.base_url}/chat/completions"
         started = time.perf_counter()
-        kimi_coding_endpoint = self.model == "kimi-for-coding" and "api.kimi.com/coding" in self.base_url
         deepseek_endpoint = "api.deepseek.com" in self.base_url and self.model.startswith("deepseek-")
-        if kimi_coding_endpoint:
-            temperature = 0.6
         body = {"model": self.model, "messages": messages, "temperature": temperature}
-        if kimi_coding_endpoint or (not self.thinking_enabled and deepseek_endpoint):
+        if not self.thinking_enabled and deepseek_endpoint:
             body["thinking"] = {"type": "disabled"}
         if response_format:
             body["response_format"] = response_format
@@ -178,7 +175,7 @@ class OpenAIChatClient(LLMClient):
                     url,
                     headers=_auth_headers(api_key),
                     json=body,
-                    timeout=self.timeout_seconds,
+                    timeout=(10, self.timeout_seconds),
                 )
                 self.last_response_info = {
                     "method": "POST",
@@ -279,7 +276,7 @@ class OpenAIResponsesClient(LLMClient):
                     url,
                     headers=_auth_headers(api_key),
                     json=body,
-                    timeout=self.timeout_seconds,
+                    timeout=(10, self.timeout_seconds),
                 )
                 self.last_response_info = {
                     "method": "POST",
@@ -388,7 +385,7 @@ class AnthropicClient(LLMClient):
                         "Content-Type": "application/json",
                     },
                     json=body,
-                    timeout=self.timeout_seconds,
+                    timeout=(10, self.timeout_seconds),
                 )
                 self.last_response_info = {
                     "method": "POST",

@@ -15,7 +15,7 @@ from paperseek.search_agent import SearchCancelled
 from paperseek.history import HistoryStore
 from paperseek.llm_client import LLMError
 from paperseek.web_app import app
-from paperseek.web_app import SearchRequest, _config_from_payload, _register_cancel_event, _unregister_cancel_event
+from paperseek.web_app import SearchRequest, _RUN_EXECUTOR, _config_from_payload
 from tests.helpers import CONFIG_ENV_KEYS, fake_harness_search_result, temporary_env
 
 
@@ -243,15 +243,15 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(detail["ranking_steps"][0]["status"], "processing")
 
     def test_cancel_endpoint_sets_active_run_event(self):
-        cancel_event = Event()
-        _register_cancel_event("run_cancel_test", cancel_event)
+        run = _RUN_EXECUTOR.create()
+        run.bind("run_cancel_test")
         try:
             response = self.client.post("/api/search/run_cancel_test/cancel")
         finally:
-            _unregister_cancel_event("run_cancel_test", cancel_event)
+            run.close()
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(cancel_event.is_set())
+        self.assertTrue(run.is_cancelled())
 
     def test_cancel_endpoint_rejects_inactive_run(self):
         response = self.client.post("/api/search/run_not_active/cancel")
@@ -368,7 +368,7 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(config.llm_provider, "deepseek")
             self.assertEqual(config.llm_model, "deepseek-test")
             self.assertEqual(config.discipline_fields, ("17", "14"))
-            self.assertEqual(config.search_loop_backend, "auto")
+            self.assertEqual(config.search_loop_backend, "native")
 
     def test_config_from_payload_applies_search_loop_backend(self):
         payload = SearchRequest(
@@ -465,7 +465,7 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["llm_provider"], "deepseek")
-            self.assertEqual(payload["search_loop_backend"], "auto")
+            self.assertEqual(payload["search_loop_backend"], "native")
             self.assertEqual(payload["search_budget"], "fast")
             self.assertTrue(payload["query_portfolio_enabled"])
             self.assertEqual(payload["query_portfolio_max"], 3)

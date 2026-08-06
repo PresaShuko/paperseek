@@ -66,53 +66,7 @@ class LLMProviderTest(unittest.TestCase):
 
         self.assertEqual(config.ranking_concurrency, 16)
 
-    def test_kimi_coding_low_budget_disables_thinking_and_forces_supported_temperature(self):
-        class FakeResponse:
-            status_code = 200
-            headers = {}
 
-            def raise_for_status(self):
-                return None
-
-            def json(self):
-                return {
-                    "choices": [{"message": {"content": "clean answer"}, "finish_reason": "stop"}],
-                    "usage": {"completion_tokens": 12},
-                }
-
-        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
-            client = OpenAIChatClient(
-                "sk-test",
-                model="kimi-for-coding",
-                base_url="https://api.kimi.com/coding/v1",
-                thinking_enabled=False,
-            )
-            self.assertEqual(client.chat([{"role": "user", "content": "ping"}], temperature=0), "clean answer")
-
-        self.assertEqual(post.call_args.args[0], "https://api.kimi.com/coding/v1/chat/completions")
-        self.assertEqual(post.call_args.kwargs["json"]["temperature"], 0.6)
-        self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
-        self.assertEqual(client.last_response_info["finish_reason"], "stop")
-        self.assertEqual(client.last_response_info["completion_tokens"], 12)
-
-    def test_kimi_coding_globally_disables_thinking(self):
-        class FakeResponse:
-            status_code = 200
-            headers = {}
-
-            def json(self):
-                return {"choices": [{"message": {"content": "clean answer"}}]}
-
-        with patch("paperseek_core.llm.requests.post", return_value=FakeResponse()) as post:
-            client = OpenAIChatClient(
-                "sk-test",
-                model="kimi-for-coding",
-                base_url="https://api.kimi.com/coding/v1",
-            )
-            client.chat([{"role": "user", "content": "ping"}])
-
-        self.assertEqual(post.call_args.kwargs["json"]["temperature"], 0.6)
-        self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})
 
     def test_openai_chat_rotates_key_pool_on_retryable_status(self):
         class FakeResponse:

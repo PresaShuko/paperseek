@@ -24,10 +24,6 @@ RANKING_RETRY_SAME_TIER = "retry_same_tier"
 CITATION_RETRY_REDUCED = "retry_reduced"
 CITATION_SKIP_EXPANSION = "skip_citation_expansion"
 
-FrontierActionType = Literal["search", "read", "expand_backward", "expand_forward", "enrich"]
-FrontierActionStatus = Literal["pending", "running", "done", "failed", "skipped"]
-
-
 class QueryLoopSnapshot(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -44,11 +40,6 @@ class QueryLoopSnapshot(BaseModel):
     hit_count: int = 0
     top_titles: List[str] = Field(default_factory=list)
     intent_terms: List[str] = Field(default_factory=list)
-    selector_observed_count: int = 0
-    selector_include_count: int = 0
-    selector_uncertain_count: int = 0
-    selector_exclude_count: int = 0
-    selector_missing_concepts: List[str] = Field(default_factory=list)
 
     @property
     def consecutive_zero_results(self) -> int:
@@ -248,124 +239,12 @@ class CandidateEvidence(BaseModel):
     source_ranks: Dict[str, int] = Field(default_factory=dict)
     citation_paths: List[CandidateCitationPath] = Field(default_factory=list)
     concept_coverage: Dict[str, float] = Field(default_factory=dict)
-    selector_label: str = "unseen"
-    selector_relevance_score: float | None = None
-    selector_concept_coverage: Dict[str, float] = Field(default_factory=dict)
-    selector_missing_concepts: List[str] = Field(default_factory=list)
-    selector_evidence: List[str] = Field(default_factory=list)
-    selector_recommended_actions: List[str] = Field(default_factory=list)
-    selector_reason_codes: List[str] = Field(default_factory=list)
-    selector_input_hash: str = ""
     ranking_gate_label: str = "unseen"
     ranking_gate_reason_codes: List[str] = Field(default_factory=list)
     retrieval_score: float | None = None
     rerank_score: float | None = None
     llm_score: float | None = None
     lifecycle: List[CandidateLifecycleEvent] = Field(default_factory=list)
-
-
-class SelectorDecision(BaseModel):
-    candidate_id: str = Field(min_length=1)
-    label: Literal["include", "exclude", "uncertain"]
-    relevance_score: float = Field(ge=0.0, le=1.0)
-    concept_coverage: Dict[str, float] = Field(default_factory=dict)
-    missing_concepts: List[str] = Field(default_factory=list)
-    evidence: List[str] = Field(default_factory=list)
-    recommended_actions: List[str] = Field(default_factory=list)
-    reason_codes: List[str] = Field(default_factory=list)
-
-
-class SelectorBatch(BaseModel):
-    decisions: List[SelectorDecision] = Field(default_factory=list)
-    llm_calls: int = 0
-    cache_hits: int = 0
-    fallback_count: int = 0
-    errors: List[str] = Field(default_factory=list)
-
-    def label_counts(self) -> Dict[str, int]:
-        counts = {"include": 0, "uncertain": 0, "exclude": 0}
-        for decision in self.decisions:
-            counts[decision.label] = counts.get(decision.label, 0) + 1
-        return counts
-
-
-class FrontierAction(BaseModel):
-    action_id: str = Field(min_length=1)
-    action_type: FrontierActionType
-    source: str = ""
-    query: str = ""
-    candidate_id: str = ""
-    priority: float = 0.0
-    expected_gain: float = Field(default=0.0, ge=0.0)
-    concept_gap_coverage: float = Field(default=0.0, ge=0.0)
-    source_diversity_gain: float = Field(default=0.0, ge=0.0)
-    citation_seed_quality: float = Field(default=0.0, ge=0.0)
-    estimated_cost: float = Field(default=1.0, ge=0.0)
-    duplicate_risk: float = Field(default=0.0, ge=0.0)
-    failure_penalty: float = Field(default=0.0, ge=0.0)
-    depth: int = Field(default=0, ge=0)
-    status: FrontierActionStatus = "pending"
-    reason_codes: List[str] = Field(default_factory=list)
-
-
-class FrontierOutcome(BaseModel):
-    action_id: str
-    status: Literal["done", "failed", "skipped"]
-    candidates_seen: int = Field(default=0, ge=0)
-    added_unique: int = Field(default=0, ge=0)
-    include_count: int = Field(default=0, ge=0)
-    uncertain_count: int = Field(default=0, ge=0)
-    exclude_count: int = Field(default=0, ge=0)
-    newly_relevant_count: int | None = Field(default=None, ge=0)
-    concept_gap_reduction: int = Field(default=0, ge=0)
-    elapsed_ms: int = Field(default=0, ge=0)
-    error: str = ""
-
-
-class FrontierCycleResult(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    scheduled: bool = False
-    action: FrontierAction | None = None
-    execution: Any = None
-    outcome: FrontierOutcome | None = None
-    stop_reason: str = ""
-    backend_used: str = "native"
-
-
-class FrontierBudget(BaseModel):
-    max_source_requests: int = Field(default=12, ge=0)
-    max_reader_requests: int = Field(default=8, ge=0)
-    max_citation_requests: int = Field(default=8, ge=0)
-    max_tool_requests: int = Field(default=0, ge=0)
-    max_candidates: int = Field(default=3000, ge=0)
-    max_wall_seconds: float = Field(default=300.0, ge=0.0)
-    source_requests: int = Field(default=0, ge=0)
-    reader_requests: int = Field(default=0, ge=0)
-    citation_requests: int = Field(default=0, ge=0)
-    tool_requests: int = Field(default=0, ge=0)
-    candidate_count: int = Field(default=0, ge=0)
-
-
-class ActionFrontierState(BaseModel):
-    actions: List[FrontierAction] = Field(default_factory=list)
-    outcomes: List[FrontierOutcome] = Field(default_factory=list)
-    budget: FrontierBudget = Field(default_factory=FrontierBudget)
-    round_index: int = 0
-    low_yield_rounds: int = 0
-    started_at_monotonic: float = 0.0
-    elapsed_seconds: float = Field(default=0.0, ge=0.0)
-    stop_reason: str = ""
-
-
-class CrawlerState(BaseModel):
-    concept_gaps: Dict[str, int] = Field(default_factory=dict)
-    concept_coverage: Dict[str, float] = Field(default_factory=dict)
-    selector_counts: Dict[str, int] = Field(default_factory=dict)
-    planned_actions: int = 0
-    completed_actions: int = 0
-    decisions: List[Dict[str, Any]] = Field(default_factory=list)
-    stop_reason: str = ""
 
 
 class CandidateQueueState(BaseModel):
@@ -408,8 +287,6 @@ class SearchRunState(BaseModel):
     citation_traversal_observations: List[CitationTraversalObservation] = Field(default_factory=list)
     citation_recovery_decisions: List[CitationRecoveryDecision] = Field(default_factory=list)
     candidate_queue: CandidateQueueState = Field(default_factory=CandidateQueueState)
-    action_frontier: ActionFrontierState = Field(default_factory=ActionFrontierState)
-    crawler_state: CrawlerState = Field(default_factory=CrawlerState)
     search_plan: Dict[str, Any] = Field(default_factory=dict)
     query_portfolio: List[QueryPortfolioExecution] = Field(default_factory=list)
     terminal_status: str = ""
@@ -440,12 +317,6 @@ class SearchRunState(BaseModel):
 
     def with_candidate_queue(self, queue: CandidateQueueState) -> "SearchRunState":
         return self.model_copy(update={"candidate_queue": queue})
-
-    def with_action_frontier(self, frontier: ActionFrontierState) -> "SearchRunState":
-        return self.model_copy(update={"action_frontier": frontier})
-
-    def with_crawler_state(self, crawler: CrawlerState) -> "SearchRunState":
-        return self.model_copy(update={"crawler_state": crawler})
 
     def with_search_plan(self, search_plan: Dict[str, Any]) -> "SearchRunState":
         return self.model_copy(update={"search_plan": dict(search_plan or {})})

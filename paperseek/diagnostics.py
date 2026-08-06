@@ -25,7 +25,7 @@ from paperseek.providers import (
     PubMedProvider,
     SemanticScholarProvider,
 )
-from paperseek_core.agent import _wos_result_from_json
+from paperseek_core.sources.wos import result_from_json as _wos_result_from_json
 from paperseek.source_metadata import get_source_metadata, list_source_metadata, require_source_metadata
 
 

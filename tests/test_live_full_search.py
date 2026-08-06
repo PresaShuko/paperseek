@@ -108,7 +108,7 @@ class LiveFullSearchTest(unittest.TestCase):
         if not _apply_live_llm(config):
             self.skipTest("no supported live LLM key found")
         config.data_source = source
-        config.search_loop_backend = os.environ.get("PAPERSEEK_LIVE_FULL_BACKEND", "auto").strip().lower() or "auto"
+        config.search_loop_backend = os.environ.get("PAPERSEEK_LIVE_FULL_BACKEND", "native").strip().lower() or "native"
         config.target_min = 1
         config.target_max = 10
         config.max_iterations = int(os.environ.get("PAPERSEEK_LIVE_FULL_MAX_ITERATIONS", "1"))
@@ -149,7 +149,7 @@ class LiveFullSearchTest(unittest.TestCase):
                 self.assertTrue(result.get("final_query"), result)
                 self.assertGreaterEqual(len(result.get("history") or []), 1)
                 self.assertIn("search_loop", result)
-                self.assertIn(result["search_loop"].get("backend_used"), {"native", "langgraph"})
+                self.assertEqual(result["search_loop"].get("backend_used"), "native")
                 self.assertIn("search_state", result)
                 self.assertGreaterEqual(len(result["search_state"].get("observations") or []), 1)
                 self.assertIn("ranked", result)

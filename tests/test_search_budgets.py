@@ -36,10 +36,6 @@ class SearchBudgetTest(unittest.TestCase):
             "citation_seed_count",
             "citation_per_seed",
             "citation_max_records",
-            "candidate_selector_max_llm_calls",
-            "crawler_max_reader_requests",
-            "crawler_max_citation_requests",
-            "crawler_max_wall_seconds",
         )
         for field_name in strictly_increasing:
             values = [getattr(item, field_name) for item in ordered]

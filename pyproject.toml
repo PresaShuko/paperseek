@@ -7,7 +7,7 @@ name = "paperseek"
 version = "0.3.0"
 description = "LLM based Literature Search Agent"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [
@@ -24,8 +24,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
@@ -37,8 +35,6 @@ dependencies = [
     "typing-extensions>=4.7",
     "fastapi>=0.100",
     "uvicorn>=0.23",
-    "langchain-core>=1.5",
-    "langgraph>=1.2",
 ]
 
 [project.optional-dependencies]

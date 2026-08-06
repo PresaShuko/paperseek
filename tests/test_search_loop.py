@@ -2,11 +2,9 @@ import json
 import re
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from paperseek_core.client import ApiException
 from paperseek_core.agent import PaperSeekAgent, SearchCancelled
-from paperseek_core.harness.langgraph_loop import LangGraphQueryLoopRunner
 from paperseek_core.harness import (
     ACTION_ACCEPT,
     ACTION_ACCEPT_HIGH,
@@ -96,21 +94,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual(decision.action, ACTION_ACCEPT)
         self.assertTrue(decision.terminal)
 
-    def test_selector_majority_exclusion_redirects_query_before_count_acceptance(self):
-        decision = SearchLoopController("native").decide(snapshot(
-            total=25,
-            selector_observed_count=5,
-            selector_include_count=0,
-            selector_uncertain_count=1,
-            selector_exclude_count=4,
-            selector_missing_concepts=["intervention selection"],
-        ))
-
-        self.assertEqual(decision.action, ACTION_NARROW)
-        self.assertFalse(decision.terminal)
-        self.assertIn("CandidateSelector", decision.reason)
-        self.assertIn("intervention selection", decision.adjustment)
-
     def test_accepts_pool_sized_results_without_more_narrowing(self):
         decision = SearchLoopController("native").decide(snapshot(total=1200, target_max=50, retrieval_pool_max=3000))
         self.assertEqual(decision.action, ACTION_ACCEPT_POOL)
@@ -189,10 +172,8 @@ class SearchLoopControllerTest(unittest.TestCase):
         ))
         self.assertEqual(decision.action, ACTION_EMPTY)
 
-    def test_langgraph_backend_falls_back_cleanly_when_graph_build_fails(self):
-        with patch("paperseek_core.harness.langgraph_loop.LangGraphQueryLoopRunner.__init__", side_effect=RuntimeError("graph build failed")):
-            controller = SearchLoopController("langgraph")
-
+    def test_removed_langgraph_backend_falls_back_to_native(self):
+        controller = SearchLoopController("langgraph")
         self.assertEqual(controller.summary()["backend_used"], "native")
         self.assertIn("fallback_reason", controller.summary())
 
@@ -206,34 +187,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         controller = SearchLoopController("experimental")
 
         self.assertEqual(controller.summary()["backend_used"], "native")
-        self.assertIn("Unknown backend", controller.summary()["fallback_reason"])
-
-    def test_langgraph_runner_compiles_graphs_lazily(self):
-        controller = SearchLoopController("langgraph")
-        if controller.summary()["backend_used"] != "langgraph":
-            self.skipTest("LangGraph backend is unavailable")
-
-        runner = controller.runner
-        self.assertEqual(getattr(runner, "_graphs", None), {})
-
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-        controller.evaluate(state, snapshot(query="AI governance", total=7))
-
-        self.assertEqual(set(runner._graphs), {"evaluate"})
-
-    def test_langgraph_lazy_graph_failure_falls_back_to_native_evaluate(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-        snap = snapshot(query="AI governance", total=7)
-
-        with patch.object(LangGraphQueryLoopRunner, "_build_graph", side_effect=RuntimeError("compile failed")):
-            controller = SearchLoopController("langgraph")
-            if controller.summary()["backend_used"] != "langgraph":
-                self.skipTest("LangGraph backend is unavailable")
-            graph_state, graph_decision = controller.evaluate(state, snap)
-
-        native_state, native_decision = SearchLoopController("native").evaluate(state, snap)
-        self.assertEqual(graph_decision.model_dump(), native_decision.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
+        self.assertIn("no longer supported", controller.summary()["fallback_reason"])
 
     def test_native_evaluate_appends_validation_observation_and_decision(self):
         controller = SearchLoopController("native")
@@ -252,36 +206,7 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual(updated.observations[0].top_titles, ["AI Governance", "Responsible AI"])
         self.assertEqual(updated.decisions[0].action, ACTION_ACCEPT_POOL)
 
-    def test_langgraph_evaluate_matches_native_state_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-        snap = snapshot(query="AI governance", total=0, hit_count=0, top_titles=[])
 
-        native_state, native_decision = SearchLoopController("native").evaluate(state, snap)
-        graph_state, graph_decision = SearchLoopController("langgraph").evaluate(state, snap)
-
-        self.assertEqual(graph_decision.action, native_decision.action)
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
-
-    def test_langgraph_title_drift_matches_native_state_trace(self):
-        state = SearchRunState(question="overseas Chinese investment", source="openalex", current_query="overseas Chinese investment")
-        snap = snapshot(
-            query='"overseas Chinese" investment crowding',
-            total=25,
-            hit_count=3,
-            intent_terms=["overseas", "chinese", "investment", "crowding"],
-            top_titles=[
-                "Air pollution and regional innovation in European cities",
-                "Local government debt and municipal fiscal stress",
-                "Environmental regulation intensity and green growth",
-            ],
-        )
-
-        native_state, native_decision = SearchLoopController("native").evaluate(state, snap)
-        graph_state, graph_decision = SearchLoopController("langgraph").evaluate(state, snap)
-
-        self.assertEqual(graph_decision.action, native_decision.action)
-        self.assertEqual(graph_decision.action, ACTION_NARROW)
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_preflight_records_invalid_query_before_source_request(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="")
@@ -295,15 +220,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual(updated.current_query, '("AI governance" OR "AI policy"')
         self.assertEqual(updated.validations[0].issue, validation.issue)
 
-    def test_langgraph_preflight_matches_native_state_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="")
-        query = "AI governance"
-
-        native_state, native_validation = SearchLoopController("native").preflight(state, query)
-        graph_state, graph_validation = SearchLoopController("langgraph").preflight(state, query)
-
-        self.assertEqual(graph_validation.model_dump(), native_validation.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_native_source_search_returns_result_and_keeps_state(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="")
@@ -336,19 +252,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual(updated.errors[0].status, 400)
         self.assertTrue(updated.errors[0].retryable)
 
-    def test_langgraph_source_search_matches_native_error_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="")
-
-        def fail(query):
-            raise ProviderError("openalex", "rate limited", status=429, query=query)
-
-        native_state, native_result, native_error = SearchLoopController("native").source_search(state, "AI governance", fail)
-        graph_state, graph_result, graph_error = SearchLoopController("langgraph").source_search(state, "AI governance", fail)
-
-        self.assertIsNone(native_result)
-        self.assertIsNone(graph_result)
-        self.assertEqual(type(graph_error), type(native_error))
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_native_recovery_repairs_retryable_provider_error(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="bad query")
@@ -412,27 +315,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertTrue(decision.retryable)
         self.assertEqual(updated.recovery_decisions[0].action, RECOVERY_BROADEN_QUERY)
 
-    def test_langgraph_recovery_matches_native_decision_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="bad query")
-        exc = ProviderError("openalex", "Invalid query parameters error.", status=400, query="bad query")
-
-        native_state, native_decision = SearchLoopController("native").recover_source_error(
-            state,
-            exc,
-            query="bad query",
-            repair_attempts=0,
-            max_repair_attempts=2,
-        )
-        graph_state, graph_decision = SearchLoopController("langgraph").recover_source_error(
-            state,
-            exc,
-            query="bad query",
-            repair_attempts=0,
-            max_repair_attempts=2,
-        )
-
-        self.assertEqual(graph_decision.model_dump(), native_decision.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_native_records_ranking_batch_error_and_lower_concurrency_decision(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
@@ -500,33 +382,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertTrue(decision.retryable)
         self.assertEqual(updated.ranking_recovery_decisions[0].next_concurrency, 16)
 
-    def test_langgraph_ranking_recovery_matches_native_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-        exc = RuntimeError("LLM API error (429): too many requests")
-
-        native_state, native_observation = SearchLoopController("native").observe_ranking_batch_error(
-            state,
-            exc,
-            step_id="llm_reranking",
-            batch_index=1,
-            batch_count=4,
-            concurrency=32,
-            candidate_count=8,
-            rate_limited=True,
-        )
-        graph_state, graph_observation = SearchLoopController("langgraph").observe_ranking_batch_error(
-            state,
-            exc,
-            step_id="llm_reranking",
-            batch_index=1,
-            batch_count=4,
-            concurrency=32,
-            candidate_count=8,
-            rate_limited=True,
-        )
-
-        self.assertEqual(graph_observation.model_dump(), native_observation.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_native_plans_citation_expansion_roles(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
@@ -544,26 +399,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual((decision.relevance_quota, decision.impact_quota, decision.recent_quota), (3, 1, 2))
         self.assertEqual(updated.citation_planning_decisions[0].candidate_count, 100)
 
-    def test_langgraph_citation_planning_matches_native_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-
-        native_state, native_decision = SearchLoopController("native").plan_citation_expansion(
-            state,
-            candidate_count=100,
-            seed_ranking_count=64,
-            configured_seed_count=30,
-            configured_depth=5,
-        )
-        graph_state, graph_decision = SearchLoopController("langgraph").plan_citation_expansion(
-            state,
-            candidate_count=100,
-            seed_ranking_count=64,
-            configured_seed_count=30,
-            configured_depth=5,
-        )
-
-        self.assertEqual(graph_decision.model_dump(), native_decision.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_native_candidate_queue_records_origins_and_duplicates(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
@@ -595,23 +430,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual(updated.candidate_queue.keys, ["doi:10.1/example", "uid:W1", "uid:W2"])
         self.assertEqual(updated.candidate_queue.records[0]["title"], "Existing paper")
 
-    def test_langgraph_candidate_queue_matches_native_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-        keys = ["uid:W1", "uid:W1", "uid:W2"]
-
-        native_state, native_event = SearchLoopController("native").update_candidate_queue(
-            state,
-            candidate_keys=keys,
-            origin="retrieval",
-        )
-        graph_state, graph_event = SearchLoopController("langgraph").update_candidate_queue(
-            state,
-            candidate_keys=keys,
-            origin="retrieval",
-        )
-
-        self.assertEqual(graph_event.model_dump(), native_event.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
     def test_native_citation_recovery_retries_with_reduced_budget_then_skips(self):
         state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
@@ -656,33 +474,6 @@ class SearchLoopControllerTest(unittest.TestCase):
         self.assertEqual(updated.citation_recovery_decisions[0].action, CITATION_RETRY_REDUCED)
         self.assertEqual(updated.citation_recovery_decisions[1].action, CITATION_SKIP_EXPANSION)
 
-    def test_langgraph_citation_recovery_matches_native_trace(self):
-        state = SearchRunState(question="AI governance", source="openalex", current_query="AI governance")
-        exc = ProviderError("openalex", "temporary citation failure", status=503, query="AI governance")
-
-        native_state, native_decision = SearchLoopController("native").recover_citation_error(
-            state,
-            exc,
-            seed_count=6,
-            depth=2,
-            per_seed=4,
-            max_records=160,
-            retry_attempts=0,
-            max_retries=1,
-        )
-        graph_state, graph_decision = SearchLoopController("langgraph").recover_citation_error(
-            state,
-            exc,
-            seed_count=6,
-            depth=2,
-            per_seed=4,
-            max_records=160,
-            retry_attempts=0,
-            max_retries=1,
-        )
-
-        self.assertEqual(graph_decision.model_dump(), native_decision.model_dump())
-        self.assertEqual(graph_state.model_dump(), native_state.model_dump())
 
 
 class AgentSearchLoopIntegrationTest(unittest.TestCase):
@@ -711,7 +502,7 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
         with self.assertRaises(SearchCancelled):
             agent._rank_results("AI governance", documents)
 
-    def test_agent_langgraph_loop_runs_across_supported_sources_without_network(self):
+    def test_agent_native_loop_runs_across_supported_sources_without_network(self):
         sources = ("openalex", "crossref", "arxiv", "semanticscholar", "pubmed", "googlescholar", "paperhub")
 
         class FakeLLM:
@@ -760,7 +551,7 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                     serper_api_key="serper-test",
                     retrieval_pool_max=3000,
                     retrieval_pool_min=5,
-                    search_loop_backend="langgraph",
+                    search_loop_backend="native",
                 )
                 agent = PaperSeekAgent(config, FakeLLM())
                 provider = UniversalProvider(source)
@@ -773,7 +564,7 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
                 self.assertEqual(provider.queries[0]["query"], "graph neural networks")
                 self.assertEqual(result["source"], source)
                 self.assertEqual(result["history"][0]["action"], ACTION_ACCEPT)
-                self.assertEqual(result["search_loop"]["backend_used"], "langgraph")
+                self.assertEqual(result["search_loop"]["backend_used"], "native")
                 self.assertEqual(result["search_state"]["source"], source)
                 self.assertEqual(result["search_state"]["observations"][0]["total"], 7)
 
@@ -1030,7 +821,7 @@ class AgentSearchLoopIntegrationTest(unittest.TestCase):
             "paperhub",
             "wos",
         )
-        backends = ("native", "langgraph")
+        backends = ("native",)
 
         class FakeLLM:
             def __init__(self):

@@ -380,7 +380,6 @@ const runtimeTranslations = {
       "WoS rejected the query syntax; generated a broader replacement query.": "WoS 拒绝了检索式语法；已生成更宽的替代检索式。",
       "Candidate ledger": "候选账本",
       "Ledger details retained": "保留的账本明细",
-      "Uncertain candidates": "待定候选",
       "Selected for LLM": "送入 LLM",
       "Final output candidates": "最终输出候选",
       "Truncated before LLM": "LLM 前截断",
@@ -1932,9 +1931,6 @@ function renderSearchLoopAudit(data, mode = "search") {
   const queueKeys = Array.isArray(queue.keys) ? queue.keys : [];
   const ledger = queue.ledger && typeof queue.ledger === "object" ? queue.ledger : {};
   const ledgerSummary = queue.ledger_summary && typeof queue.ledger_summary === "object" ? queue.ledger_summary : {};
-  const selectorCounts = ledgerSummary.selector_counts && typeof ledgerSummary.selector_counts === "object"
-    ? ledgerSummary.selector_counts
-    : {};
   const lifecycleCounts = ledgerSummary.lifecycle_candidate_counts && typeof ledgerSummary.lifecycle_candidate_counts === "object"
     ? ledgerSummary.lifecycle_candidate_counts
     : {};
@@ -1943,7 +1939,6 @@ function renderSearchLoopAudit(data, mode = "search") {
     : {};
   const ledgerTotal = Number(ledgerSummary.total_candidates ?? Object.keys(ledger).length) || queueKeys.length;
   const ledgerRetained = Number(ledgerSummary.serialized_candidates ?? Object.keys(ledger).length) || 0;
-  const uncertainCandidates = Number(selectorCounts.uncertain || 0);
   const selectedForLlm = Number(lifecycleCounts.selected_for_llm || 0);
   const finalOutputCandidates = Number(lifecycleCounts.final_output || 0);
   const observations = Array.isArray(state.observations) ? state.observations : [];
@@ -1976,7 +1971,6 @@ function renderSearchLoopAudit(data, mode = "search") {
       `${translatedRuntimeText("Duplicate candidates")}: ${queue.duplicate_count || 0}`,
       `${translatedRuntimeText("Candidate ledger")}: ${ledgerTotal}`,
       `${translatedRuntimeText("Ledger details retained")}: ${ledgerRetained}`,
-      `${translatedRuntimeText("Uncertain candidates")}: ${uncertainCandidates}`,
     ];
   if (mode === "ranking") {
     detailLines.push(

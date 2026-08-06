@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://pypi.org/project/paperseek/"><img alt="PyPI" src="https://img.shields.io/pypi/v/paperseek?color=3775A9&label=PyPI"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
   <a href="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml/badge.svg"></a>
@@ -52,12 +52,12 @@
 
 - Added a structured SearchPlan that identifies core concepts, required and optional facets, relation constraints, and ambiguities before compiling a source-specific query. Query generation and revision now use validated JSON contracts and retry malformed or source-invalid output before contacting a provider.
 - Added a bounded Query Portfolio and candidate ledger. PaperSeek plans at least three complementary views, selects useful non-duplicate views within the active budget, and records candidate provenance, deduplication, and recovery decisions.
-- Reworked the search loop as an explicit state machine with a native runner and an optional LangGraph backend. Stops, failures, and transient network errors preserve partial results and checkpoints so a run can resume from the latest safe stage.
+- Reworked the search loop as an explicit state machine driven by the native runner. Stops, failures, and transient network errors preserve partial results and checkpoints so a run can resume from the latest safe stage.
 - Added `fast`, `medium`, `high`, and `max` search budgets. The default `fast` mode limits requests, while higher budgets expand query, retrieval, ranking, and citation capacity together. Search budgets no longer change a model service's own reasoning settings.
 - Reworked the Web UI into a progressive audit view: the active stage opens automatically, completed stages collapse to useful summaries, and error or recovery details remain available on demand. Completed searches stay on the workflow page until the user opens Results or Citation Map.
-- The retrieval workflow draws on PASA's Crawler/Selector split and candidate queue. Pydantic, PydanticAI, and LangGraph support the typed contracts and optional state-graph backend, while the computer-science conference source continues to use the PaperHub integration with the author's permission.
+- The retrieval workflow draws on PASA's search-planning, candidate-queue, and evidence-expansion ideas. Pydantic provides typed contracts, while PydanticAI can strictly validate model output. The computer-science conference source continues to use the PaperHub integration with the author's permission.
 - WoS Starter now uses a lighter adapter while keeping existing usage compatible and reporting authentication, query-parameter, and upstream errors more clearly.
-- The minimum supported Python version is now 3.10. See the [v0.3.0 release notes](docs/v0.3.0.md) for upgrade steps, configuration changes, and compatibility boundaries.
+- The minimum supported Python version is now 3.12. See the [v0.3.0 release notes](docs/v0.3.0.md) for upgrade steps, configuration changes, and compatibility boundaries.
 
 ### v0.2.1 - Hosted Service and Model Routing
 
@@ -510,7 +510,7 @@ Most parameters already have code defaults. After copying `.env.example`, a norm
 | `SEARCH_BUDGET` | `fast` | Unified search budget: `fast`, `medium`, `high`, or `max`. |
 | `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | User-facing target range; the minimum drives sparse-result recovery, while the maximum is not a forced narrowing or display cap. |
 | `MAX_ITERATIONS` | `5` | Query-revision soft limit for `fast`; an explicit value overrides the preset. |
-| `SEARCH_LOOP_BACKEND` | `auto` | Query-loop controller backend: `auto` uses the stable built-in controller; `native` explicitly uses the built-in controller; `langgraph` explicitly enables the LangGraph state machine. |
+| `SEARCH_LOOP_BACKEND` | `native` | Query-loop controller backend. `auto` remains a compatibility value and uses the same built-in controller. |
 | `EXPAND_CITATIONS` | `true` | Enable OpenAlex citation expansion. |
 | `FETCH_ABSTRACTS` | `false` | Try external DOI metadata for abstracts. |
 | `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | Citation expansion size for `fast`; explicit values override the preset. |
@@ -640,7 +640,7 @@ For standalone Skill distribution, copy `skills/paperseek/`. `paperseek.py` firs
 
 PaperSeek provides an optional MCP (Model Context Protocol) server that exposes literature search, configuration diagnostics, source connectivity tests, and search history as MCP tools for MCP-compatible AI agents.
 
-Install the MCP optional dependency (requires Python 3.10+):
+Install the MCP optional dependency (requires Python 3.12+):
 
 ```bash
 python -m pip install "paperseek[mcp]"
@@ -701,9 +701,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. Report security iss
 Thanks to the following open-source projects for supporting or informing PaperSeek's public features:
 
 - [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub): integrated with the author's permission to provide computer science top-conference search support.
-- [bytedance/pasa](https://github.com/bytedance/pasa): crawler/selector separation, candidate queues, and citation-expansion scheduling.
+- [bytedance/pasa](https://github.com/bytedance/pasa): search planning, candidate queues, and evidence-expansion design.
 - [pydantic/pydantic](https://github.com/pydantic/pydantic) and [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai): typed data contracts and bounded structured-output retries through an optional adapter.
-- [langchain-ai/langchain](https://github.com/langchain-ai/langchain) and [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph): an optional state-graph backend used through their public Python APIs; PaperSeek's native runner remains the default.
 
 ## License
 

@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://pypi.org/project/paperseek/"><img alt="PyPI" src="https://img.shields.io/pypi/v/paperseek?color=3775A9&label=PyPI"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
   <a href="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml/badge.svg"></a>
@@ -52,12 +52,12 @@
 
 - 新增结构化检索计划：先识别核心概念、必要条件、可选条件、关系约束和歧义，再为所选数据源生成可校验的查询；查询生成与修订统一使用结构化 JSON 契约，格式或源语法不合格时会在请求数据源前重试。
 - 新增有界 Query Portfolio 与候选账本。主查询之外至少规划三个互补视角，并按预算选择有效、非重复视角执行；每个候选记录来源、去重和恢复信息，便于审计召回过程。
-- 检索循环改为显式状态机，支持原生执行器和可选 LangGraph 后端；停止、失败和网络波动会保留部分结果与检查点，允许从最近阶段恢复，而不是重新开始整个检索。
+- 检索循环改为由原生执行器驱动的显式状态机；停止、失败和网络波动会保留部分结果与检查点，允许从最近阶段恢复，而不是重新开始整个检索。
 - 新增 `fast`、`medium`、`high`、`max` 检索预算。默认 `fast` 控制请求量；更高预算会同步扩大查询、召回、排序和引用扩展容量。检索预算不再更改模型服务自身的思考设置。
 - Web UI 改为渐进式过程展示：当前阶段自动展开，已完成阶段折叠为摘要，错误和恢复审计按需展开；检索完成后仍停留在流程页，由用户决定何时查看结果或引用图谱。
-- 检索流程设计参考 PASA 的 Crawler / Selector 分工与候选队列；结构化数据契约和可选状态图由 Pydantic、PydanticAI 与 LangGraph 支持；计算机顶会数据源继续基于经作者同意的 PaperHub 集成。
+- 检索流程设计参考 PASA 的检索规划、候选队列和证据扩展思路；结构化数据契约由 Pydantic 支持，PydanticAI 可用于严格校验模型输出；计算机顶会数据源继续基于经作者同意的 PaperHub 集成。
 - WoS Starter 改用更轻量的适配层，现有调用方式保持兼容，并提供更清晰的鉴权、查询参数和上游错误提示。
-- Python 最低版本调整为 3.10。升级、配置变化和兼容边界见 [v0.3.0 更新说明](docs/v0.3.0.md)。
+- Python 最低版本调整为 3.12。升级、配置变化和兼容边界见 [v0.3.0 更新说明](docs/v0.3.0.md)。
 
 ### v0.2.1 - 在线服务与模型路由更新
 
@@ -510,7 +510,7 @@ A -> B  表示 A 引用了 B
 | `SEARCH_BUDGET` | `fast` | 统一检索预算：`fast`、`medium`、`high`、`max`。 |
 | `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | 用户期望结果范围；最小值参与过小结果恢复，最大值不作为强制收窄或展示上限。 |
 | `MAX_ITERATIONS` | `5` | `fast` 的查询调整软预算；显式配置时覆盖预算预设。 |
-| `SEARCH_LOOP_BACKEND` | `auto` | 查询调度后端：`auto` 使用稳定的内置控制器；`native` 显式使用内置控制器；`langgraph` 显式启用 LangGraph 状态机。 |
+| `SEARCH_LOOP_BACKEND` | `native` | 查询调度后端。`auto` 作为兼容值也使用稳定的内置控制器。 |
 | `EXPAND_CITATIONS` | `true` | 是否启用 OpenAlex 引用扩展。 |
 | `FETCH_ABSTRACTS` | `false` | 是否尝试从外部 DOI 元数据补摘要。 |
 | `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | `fast` 的引用扩展规模；显式配置时覆盖预算预设。 |
@@ -640,7 +640,7 @@ skills/paperseek/scripts/paperseek_skill_runtime.py
 
 PaperSeek 提供可选的 MCP（Model Context Protocol）服务器，将文献检索、配置诊断、数据源测试和历史记录暴露为 MCP 工具，供支持 MCP 的 AI agent 直接调用。
 
-安装 MCP 可选依赖（需要 Python 3.10+）：
+安装 MCP 可选依赖（需要 Python 3.12+）：
 
 ```bash
 python -m pip install "paperseek[mcp]"
@@ -701,9 +701,8 @@ PaperSeek 当前处于 alpha 阶段。CLI、Web UI、OpenAlex、arXiv、Semantic
 感谢以下开源项目为 PaperSeek 的公开功能提供支持或设计参考：
 
 - [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub)：经作者同意后集成，用于提供计算机顶会检索支持。
-- [bytedance/pasa](https://github.com/bytedance/pasa)：参考 Crawler / Selector 分工、候选队列和引用扩展调度。
+- [bytedance/pasa](https://github.com/bytedance/pasa)：参考检索规划、候选队列和证据扩展设计。
 - [pydantic/pydantic](https://github.com/pydantic/pydantic) 与 [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai)：用于类型化数据契约，并通过可选适配器提供有界结构化输出重试。
-- [langchain-ai/langchain](https://github.com/langchain-ai/langchain) 与 [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)：通过公开 Python API 提供可选状态图执行后端；默认仍使用 PaperSeek 原生执行器。
 
 ## 开源协议
 

@@ -34,7 +34,7 @@ PaperSeek 是一个 LLM based Literature Search Agent。它面向研究者、学
 
 最小运行条件：
 
-- Python `3.10` 或更高版本。
+- Python `3.12` 或更高版本。
 - 可访问互联网，用于请求文献数据源和 LLM API。
 - 一个 LLM 服务商的 API Key；如果使用本地 Ollama，可不需要云端 LLM Key。
 - 推荐准备 OpenAlex API Key；OpenAlex 可匿名测试基础接口，但语义召回仅在配置 Key 后启用。
@@ -171,7 +171,7 @@ paperseek smoke --source openalex --query "machine learning"
 
 | 项目 | 要求 |
 | --- | --- |
-| Python | `>=3.10` |
+| Python | `>=3.12` |
 | 操作系统 | Windows、macOS、Linux 均可运行 |
 | 网络 | 需要访问 LLM API 和选定文献数据源 |
 | 浏览器 | Web UI 使用本地浏览器打开 `127.0.0.1:8765` |
@@ -184,8 +184,6 @@ PaperSeek 的核心依赖包括：
 - `fastapi`
 - `uvicorn`
 - `python-dateutil`
-- `langchain-core`
-- `langgraph`
 
 ### 从 PyPI 安装（推荐）
 
@@ -570,7 +568,7 @@ Web UI 运行时：
 | `TARGET_MIN` | `5` | 目标最少结果数。 |
 | `TARGET_MAX` | `50` | 用户期望结果上界和排序参考，不作为强制收窄或展示上限。 |
 | `MAX_ITERATIONS` | `5` | `fast` 的查询调整软上限；显式配置时覆盖预算预设。 |
-| `SEARCH_LOOP_BACKEND` | `auto` | 查询调度后端：`auto` 使用稳定的内置控制器；`native` 显式使用内置控制器；`langgraph` 显式启用 LangGraph 状态机。 |
+| `SEARCH_LOOP_BACKEND` | `native` | 查询调度后端。`auto` 作为兼容值也使用稳定的内置控制器。 |
 | `PAPERSEEK_PYDANTICAI_QUERY_RETRY` | `auto` | 查询式格式重试后端；安装 `paperseek[harness]` 后，`auto` 会让坏 JSON / 脏输出重试走 PydanticAI schema 校验，否则自动回落到原生 JSON 重试。可设为 `off` 关闭。 |
 | `EXPAND_CITATIONS` | `true` | 是否启用 OpenAlex 引用扩展。 |
 | `FETCH_ABSTRACTS` | `false` | 是否尝试 DOI 外部摘要补全。 |
@@ -1217,7 +1215,7 @@ paperseek search "responsible AI governance" --source openalex --json > results.
 | `--min` | 目标最少结果数。 |
 | `--max` | 用户期望的目标最大值，用于查询调整参考，不作为最终展示或导出的硬上限。 |
 | `--iterations` | 最大查询调整轮数。 |
-| `--search-loop-backend` | 查询调度后端：`auto`、`langgraph` 或 `native`。 |
+| `--search-loop-backend` | 查询调度后端：`native`；`auto` 为兼容值。 |
 | `--output`, `-o` | `text` 或 `json`。 |
 | `--json` | `--output json` 快捷方式。 |
 | `--verbose`, `-v` | 打印中间查询信息。 |
@@ -1897,7 +1895,7 @@ PaperSeek 提供可选的 MCP（Model Context Protocol）服务器。它和 Skil
 - Skill 是一组可复制到 agent 平台的说明与自包含 runtime。
 - MCP Server 是一个长期运行的 stdio 服务，供支持 MCP 的客户端通过工具调用 PaperSeek。
 
-MCP Server 复用完整 PaperSeek 包和 `PaperSeekAgent` 核心逻辑，因此支持 LLM 检索、配置诊断、数据源 smoke test 和本地历史记录。PaperSeek 当前统一要求 Python 3.10+。
+MCP Server 复用完整 PaperSeek 包和 `PaperSeekAgent` 核心逻辑，因此支持 LLM 检索、配置诊断、数据源 smoke test 和本地历史记录。PaperSeek 当前统一要求 Python 3.12+。
 
 ### 安装 MCP 可选依赖
 
@@ -2341,7 +2339,7 @@ paperseek search "your question" --source openalex --json > papers.json
 
 ### MCP Server 是必须安装的吗？
 
-不是。普通 CLI、Web UI、Docker、Vercel 和 ModelScope 创空间部署都不需要 MCP。只有当你要让 Claude Desktop、Cursor 或其他 MCP-compatible agent 通过工具调用 PaperSeek 时，才需要安装 `paperseek[mcp]` 并运行 `paperseek-mcp`。PaperSeek 当前统一要求 Python 3.10+。
+不是。普通 CLI、Web UI、Docker、Vercel 和 ModelScope 创空间部署都不需要 MCP。只有当你要让 Claude Desktop、Cursor 或其他 MCP-compatible agent 通过工具调用 PaperSeek 时，才需要安装 `paperseek[mcp]` 并运行 `paperseek-mcp`。PaperSeek 当前统一要求 Python 3.12+。
 
 ### Web UI 会保存我的 Key 吗？
 

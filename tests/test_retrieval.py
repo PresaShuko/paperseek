@@ -158,6 +158,47 @@ class RetrievalFusionTest(unittest.TestCase):
         self.assertEqual(set(metadata["retrieval_lanes"]), {RetrievalLane.RELEVANCE, RetrievalLane.RECENT})
 
 
+class CrossrefEnrichmentTest(unittest.TestCase):
+    def test_enrichment_is_disabled_by_default(self):
+        agent = PaperSeekAgent(config(retrieval_crossref_enrichment=False), FakeLLM())
+        document = record("A", "Paper", year=None, doi="10.1000/example")
+        with patch("paperseek_core.retrieval_clients.requests.get") as request:
+            result = agent.external_retrieval.enrich_crossref([document])
+        self.assertIs(result[0], document)
+        request.assert_not_called()
+
+    def test_enrichment_fills_missing_citations_and_year(self):
+        agent = PaperSeekAgent(config(retrieval_crossref_enrichment=True), FakeLLM())
+        document = record("A", "Paper", year=None, doi="10.1000/example")
+        response = FakeResponse(
+            {
+                "message": {
+                    "is-referenced-by-count": 12,
+                    "published-online": {"date-parts": [[2023, 4, 2]]},
+                }
+            }
+        )
+        with patch("paperseek_core.retrieval_clients.requests.get", return_value=response) as request:
+            result = agent.external_retrieval.enrich_crossref([document])
+        self.assertIs(result[0], document)
+        self.assertEqual(document.citations[0].db, "Crossref")
+        self.assertEqual(document.citations[0].count, 12)
+        self.assertEqual(document.source.publish_year, 2023)
+        request.assert_called_once_with(
+            "https://api.crossref.org/works/10.1000/example",
+            headers={"Accept": "application/json", "User-Agent": "paperseek/1.0"},
+            timeout=20,
+        )
+
+    def test_enrichment_skips_records_without_doi(self):
+        agent = PaperSeekAgent(config(retrieval_crossref_enrichment=True), FakeLLM())
+        document = record("A", "Paper", year=None)
+        with patch("paperseek_core.retrieval_clients.requests.get") as request:
+            result = agent.external_retrieval.enrich_crossref([document])
+        self.assertIs(result[0], document)
+        request.assert_not_called()
+
+
 class ProviderLaneTest(unittest.TestCase):
     def test_arxiv_recent_lane_uses_submitted_date_sort(self):
         captured = {}
@@ -305,14 +346,13 @@ class RetrievalAgentTest(unittest.TestCase):
         self.assertEqual(evidence.concept_coverage["primary_prior"], 0.5)
         self.assertEqual(evidence.rerank_score, 3.2)
         self.assertEqual(evidence.llm_score, 9.0)
-        self.assertEqual(evidence.selector_label, "unseen")
         self.assertEqual(evidence.ranking_gate_label, "selected")
         self.assertEqual(
             [event.action for event in evidence.lifecycle],
             ["added", "selected_for_llm", "llm_scored", "final_output"],
         )
 
-    def test_candidate_ledger_keeps_ranking_gate_separate_from_relevance_selector(self):
+    def test_candidate_ledger_records_ranking_gate_decisions(self):
         first = record("W1", "First result")
         second = record("W2", "Second result")
         agent = PaperSeekAgent(config(expand_citations=False), FakeLLM())
@@ -322,8 +362,6 @@ class RetrievalAgentTest(unittest.TestCase):
 
         first_evidence = agent.search_run_state.candidate_queue.ledger[document_key(first)]
         second_evidence = agent.search_run_state.candidate_queue.ledger[document_key(second)]
-        self.assertEqual(first_evidence.selector_label, "unseen")
-        self.assertEqual(second_evidence.selector_label, "unseen")
         self.assertEqual(first_evidence.ranking_gate_label, "selected")
         self.assertEqual(second_evidence.ranking_gate_label, "truncated")
         self.assertIn("ranking_candidate_limit", second_evidence.ranking_gate_reason_codes)
@@ -340,38 +378,6 @@ class RetrievalAgentTest(unittest.TestCase):
         self.assertEqual([document.uid for document in candidates], ["W1", "W2"])
         remembered_evidence = agent.search_run_state.candidate_queue.ledger[document_key(remembered)]
         self.assertEqual(remembered_evidence.origins, ["query_iteration:1", "retrieval"])
-
-    def test_selector_include_is_prioritized_before_llm_candidate_limit(self):
-        first = record("W1", "First local result")
-        second = record("W2", "Second local result")
-        selected_by_selector = record("W3", "Positive selector match")
-        agent = PaperSeekAgent(
-            config(expand_citations=False, candidate_selector_enabled=True),
-            FakeLLM(),
-        )
-        agent.search_plan = object()
-        candidates = agent._enqueue_candidate_queue(
-            [first, second, selected_by_selector],
-            "retrieval",
-        )
-        queue = agent.search_run_state.candidate_queue
-        key = document_key(selected_by_selector)
-        ledger = dict(queue.ledger)
-        ledger[key] = ledger[key].model_copy(
-            update={"selector_label": "include", "selector_relevance_score": 0.9}
-        )
-        agent.search_run_state = agent.search_run_state.with_candidate_queue(
-            queue.model_copy(update={"ledger": ledger})
-        )
-
-        prioritized = agent._prioritize_selector_includes(candidates)
-        agent._record_candidate_gate(prioritized, prioritized[:1], 1)
-
-        self.assertEqual([document.uid for document in prioritized], ["W3", "W1", "W2"])
-        evidence = agent.search_run_state.candidate_queue.ledger[key]
-        self.assertEqual(evidence.ranking_gate_label, "selected")
-        self.assertIn("selector_include_priority", evidence.ranking_gate_reason_codes)
-        self.assertEqual(evidence.lifecycle[-1].origin, "candidate_selector")
 
     def test_search_state_payload_summarizes_and_bounds_candidate_ledger(self):
         documents = [record(f"W{index}", f"Candidate {index}") for index in range(520)]
@@ -390,7 +396,6 @@ class RetrievalAgentTest(unittest.TestCase):
         self.assertEqual(summary["total_candidates"], 520)
         self.assertEqual(summary["serialized_candidates"], 512)
         self.assertEqual(summary["omitted_candidates"], 8)
-        self.assertEqual(summary["selector_counts"], {"unseen": 520})
         self.assertEqual(summary["ranking_gate_counts"], {"truncated": 518, "selected": 2})
         self.assertEqual(summary["lifecycle_candidate_counts"]["selected_for_llm"], 2)
         self.assertEqual(summary["lifecycle_candidate_counts"]["final_output"], 1)
@@ -795,7 +800,7 @@ class RetrievalAgentTest(unittest.TestCase):
             })
 
         docs = [record("a", "graph retrieval"), record("b", "platform governance")]
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             scores = agent._external_embedding_scores("graph retrieval", docs)
 
         self.assertEqual(captured["url"], "https://uni-api.cstcloud.cn/v1/embeddings")
@@ -824,7 +829,7 @@ class RetrievalAgentTest(unittest.TestCase):
             return FakeResponse(payload={"data": data})
 
         docs = [record("a", "graph retrieval"), record("b", "platform governance")]
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             scores = agent._external_embedding_scores("graph retrieval", docs)
 
         self.assertEqual([call["url"] for call in calls], ["https://integrate.api.nvidia.com/v1/embeddings"] * 2)
@@ -857,7 +862,7 @@ class RetrievalAgentTest(unittest.TestCase):
                 ]
             })
 
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             scores = agent._external_embedding_scores("graph retrieval", [record("a", "graph retrieval")])
 
         self.assertEqual(models, ["qwen3-embedding:8b", "bge-large-zh:latest"])
@@ -881,7 +886,7 @@ class RetrievalAgentTest(unittest.TestCase):
                 return FakeResponse(payload={"error": "limited"}, status_code=429, text="limited")
             return FakeResponse(payload={"data": [{"index": 0, "embedding": [1.0, 0.0]}, {"index": 1, "embedding": [1.0, 0.0]}]})
 
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             scores = agent._external_embedding_scores("graph retrieval", [record("a", "graph retrieval")])
 
         self.assertEqual(calls, ["Bearer sk-a", "Bearer sk-b"])
@@ -902,7 +907,7 @@ class RetrievalAgentTest(unittest.TestCase):
             return FakeResponse(payload={"results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.2}]})
 
         docs = [record("a", "less relevant"), record("b", "more relevant")]
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             reranked = agent._apply_external_reranker("graph retrieval", docs)
 
         self.assertEqual([doc.uid for doc in reranked], ["b", "a"])
@@ -924,7 +929,7 @@ class RetrievalAgentTest(unittest.TestCase):
             return FakeResponse(payload={"rankings": [{"index": 1, "logit": 4.7}, {"index": 0, "logit": -1.0}]})
 
         docs = [record("a", "less relevant"), record("b", "more relevant")]
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             reranked = agent._apply_external_reranker("graph retrieval", docs)
 
         self.assertEqual(captured["url"], "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking")
@@ -950,7 +955,7 @@ class RetrievalAgentTest(unittest.TestCase):
             captured["url"] = url
             return FakeResponse(payload={"rankings": [{"index": 0, "logit": 1.0}]})
 
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             agent._apply_external_reranker("graph retrieval", [record("a", "relevant")])
 
         self.assertEqual(captured["url"], "http://localhost:8000/v1/ranking")
@@ -974,7 +979,7 @@ class RetrievalAgentTest(unittest.TestCase):
             return FakeResponse(payload={"results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.2}]})
 
         docs = [record("a", "less relevant"), record("b", "more relevant")]
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             reranked = agent._apply_external_reranker("graph retrieval", docs)
 
         self.assertEqual(models, ["qwen3-reranker:8b", "bge-reranker-v2-m3"])
@@ -999,7 +1004,7 @@ class RetrievalAgentTest(unittest.TestCase):
             return FakeResponse(payload={"rankings": [{"index": 1, "logit": 4.0}, {"index": 0, "logit": 1.0}]})
 
         docs = [record("a", "less relevant"), record("b", "more relevant")]
-        with patch("paperseek_core.agent.requests.post", fake_post):
+        with patch("paperseek_core.retrieval_clients.requests.post", fake_post):
             reranked = agent._apply_external_reranker("graph retrieval", docs)
 
         self.assertEqual(calls, ["Bearer nv-a", "Bearer nv-b"])
@@ -1027,7 +1032,7 @@ class RetrievalAgentTest(unittest.TestCase):
     def test_modelscope_reranker_is_skipped(self):
         agent = PaperSeekAgent(config(retrieval_reranker_provider="modelscope", llm_api_key="sk-test"), FakeLLM())
         docs = [record("a", "graph retrieval")]
-        with patch("paperseek_core.agent.requests.post") as post:
+        with patch("paperseek_core.retrieval_clients.requests.post") as post:
             self.assertEqual(agent._apply_external_reranker("graph retrieval", docs), docs)
         post.assert_not_called()
 

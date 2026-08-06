@@ -41,23 +41,7 @@ class SearchConfig:
     query_portfolio_enabled: bool = True
     query_portfolio_max: int = _DEFAULT_BUDGET.query_portfolio_max
     query_portfolio_limit: int = _DEFAULT_BUDGET.query_portfolio_limit
-    search_loop_backend: str = "auto"
-    crawler_enabled: bool = False
-    crawler_sources: tuple[str, ...] = field(default_factory=tuple)
-    candidate_selector_enabled: bool = False
-    citation_feedback_enabled: bool = False
-    crawler_intermediate_selector_enabled: bool = False
-    candidate_selector_batch_size: int = 12
-    candidate_selector_concurrency: int = 2
-    candidate_selector_max_llm_calls: int = _DEFAULT_BUDGET.candidate_selector_max_llm_calls
-    candidate_selector_max_attempts: int = 2
-    candidate_selector_exclude_score_max: float = 0.25
-    candidate_selector_keep_uncertain: bool = True
-    crawler_selector_sample_size: int = 24
-    crawler_max_reader_requests: int = _DEFAULT_BUDGET.crawler_max_reader_requests
-    crawler_max_citation_requests: int = _DEFAULT_BUDGET.crawler_max_citation_requests
-    crawler_max_wall_seconds: float = _DEFAULT_BUDGET.crawler_max_wall_seconds
-    crawler_low_yield_round_limit: int = 2
+    search_loop_backend: str = "native"
 
 
 @dataclass
@@ -118,22 +102,6 @@ class RuntimeConfig:
     query_portfolio_max: int
     query_portfolio_limit: int
     search_loop_backend: str
-    crawler_enabled: bool
-    crawler_sources: tuple[str, ...]
-    candidate_selector_enabled: bool
-    citation_feedback_enabled: bool
-    crawler_intermediate_selector_enabled: bool
-    candidate_selector_batch_size: int
-    candidate_selector_concurrency: int
-    candidate_selector_max_llm_calls: int
-    candidate_selector_max_attempts: int
-    candidate_selector_exclude_score_max: float
-    candidate_selector_keep_uncertain: bool
-    crawler_selector_sample_size: int
-    crawler_max_reader_requests: int
-    crawler_max_citation_requests: int
-    crawler_max_wall_seconds: float
-    crawler_low_yield_round_limit: int
     llm_provider: str
     llm_api_type: str
     llm_model: str
@@ -194,22 +162,6 @@ def build_runtime_config(
         query_portfolio_max=search.query_portfolio_max,
         query_portfolio_limit=search.query_portfolio_limit,
         search_loop_backend=search.search_loop_backend,
-        crawler_enabled=search.crawler_enabled,
-        crawler_sources=tuple(search.crawler_sources or ()),
-        candidate_selector_enabled=search.candidate_selector_enabled,
-        citation_feedback_enabled=search.citation_feedback_enabled,
-        crawler_intermediate_selector_enabled=search.crawler_intermediate_selector_enabled,
-        candidate_selector_batch_size=search.candidate_selector_batch_size,
-        candidate_selector_concurrency=search.candidate_selector_concurrency,
-        candidate_selector_max_llm_calls=search.candidate_selector_max_llm_calls,
-        candidate_selector_max_attempts=search.candidate_selector_max_attempts,
-        candidate_selector_exclude_score_max=search.candidate_selector_exclude_score_max,
-        candidate_selector_keep_uncertain=search.candidate_selector_keep_uncertain,
-        crawler_selector_sample_size=search.crawler_selector_sample_size,
-        crawler_max_reader_requests=search.crawler_max_reader_requests,
-        crawler_max_citation_requests=search.crawler_max_citation_requests,
-        crawler_max_wall_seconds=search.crawler_max_wall_seconds,
-        crawler_low_yield_round_limit=search.crawler_low_yield_round_limit,
         llm_provider=(llm.provider or "openai").lower(),
         llm_api_type=(llm.api_type or "openai_responses").lower(),
         llm_model=llm.model,

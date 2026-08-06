@@ -10,8 +10,6 @@ PaperSeek 使用 Apache License 2.0 发布。本页列出 PaperSeek 使用的第
 | --- | --- | --- |
 | [Pydantic](https://github.com/pydantic/pydantic) | [MIT](https://github.com/pydantic/pydantic/blob/main/LICENSE) | Typed configuration, search plans, checkpoints, and search-state contracts. |
 | [PydanticAI](https://github.com/pydantic/pydantic-ai) | [MIT](https://github.com/pydantic/pydantic-ai/blob/main/LICENSE) | Optional `paperseek[harness]` support for bounded structured-output retries. |
-| [LangChain Core](https://github.com/langchain-ai/langchain) | [MIT](https://github.com/langchain-ai/langchain/blob/master/LICENSE) | Runnable interface used by the optional graph backend. |
-| [LangGraph](https://github.com/langchain-ai/langgraph) | [MIT](https://github.com/langchain-ai/langgraph/blob/main/LICENSE) | Optional explicit state-graph execution backend. |
 
 These packages are installed as separate Python distributions and retain their own license and copyright notices.
 

@@ -11,6 +11,7 @@ from typing import Any, Iterable, Optional, Union
 from zoneinfo import ZoneInfo
 
 from paperseek.config import AgentConfig
+from paperseek.persistence import apply_sqlite_migrations
 
 
 DISABLED_VALUES = {"0", "false", "no", "off"}
@@ -199,9 +200,6 @@ def safe_search_params_from_config(config: AgentConfig) -> dict[str, Any]:
         "query_portfolio_max": getattr(config, "query_portfolio_max", 3),
         "query_portfolio_limit": getattr(config, "query_portfolio_limit", 100),
         "search_loop_backend": getattr(config, "search_loop_backend", "auto"),
-        "crawler_enabled": getattr(config, "crawler_enabled", False),
-        "candidate_selector_enabled": getattr(config, "candidate_selector_enabled", False),
-        "citation_feedback_enabled": getattr(config, "citation_feedback_enabled", False),
         "has_wos_api_key": bool(config.wos_api_key),
         "has_openalex_api_key": bool(config.openalex_api_key),
         "has_openalex_email": bool(config.openalex_email),
@@ -252,6 +250,10 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
+def _row_value(row: sqlite3.Row, key: str, default: Any = None) -> Any:
+    return row[key] if key in row.keys() else default
+
+
 def _authors_from_paper(paper: dict[str, Any]) -> list[str]:
     authors = paper.get("authors")
     if isinstance(authors, list):
@@ -287,6 +289,13 @@ class HistoryStore:
 
     def _now(self) -> str:
         return history_now(self._timezone_name, self._utc_offset_minutes)
+
+    def _lease_deadline(self, lease_seconds: int) -> str:
+        seconds = max(5, min(int(lease_seconds or 60), 3600))
+        return (
+            datetime.now(_history_timezone(self._timezone_name, self._utc_offset_minutes))
+            + timedelta(seconds=seconds)
+        ).isoformat(timespec="seconds")
 
     def _connect(self) -> sqlite3.Connection:
         if not self.enabled:
@@ -327,92 +336,7 @@ class HistoryStore:
             conn.close()
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS search_runs (
-                id TEXT PRIMARY KEY,
-                question TEXT NOT NULL,
-                source TEXT,
-                final_query TEXT,
-                db TEXT,
-                field TEXT,
-                total INTEGER,
-                iterations INTEGER,
-                status TEXT NOT NULL,
-                error_message TEXT,
-                params_json TEXT,
-                history_json TEXT,
-                citation_map_json TEXT,
-                created_at TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                finished_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS search_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT NOT NULL,
-                event_type TEXT,
-                stage TEXT,
-                status TEXT,
-                message TEXT,
-                payload_json TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(run_id) REFERENCES search_runs(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS search_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT NOT NULL,
-                rank INTEGER,
-                paper_uid TEXT,
-                source TEXT,
-                title TEXT,
-                authors_json TEXT,
-                year INTEGER,
-                venue TEXT,
-                doi TEXT,
-                url TEXT,
-                abstract TEXT,
-                citation_count INTEGER,
-                relevance_score REAL,
-                relevance_reason TEXT,
-                raw_json TEXT,
-                FOREIGN KEY(run_id) REFERENCES search_runs(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS search_checkpoints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                stage TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(run_id) REFERENCES search_runs(id) ON DELETE CASCADE,
-                UNIQUE(run_id, sequence)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_search_runs_created_at ON search_runs(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_search_events_run_id ON search_events(run_id);
-            CREATE INDEX IF NOT EXISTS idx_search_results_run_id ON search_results(run_id);
-            CREATE INDEX IF NOT EXISTS idx_search_checkpoints_run_id ON search_checkpoints(run_id, sequence DESC);
-            """
-        )
-        self._ensure_column(conn, "search_runs", "history_json", "TEXT")
-        self._ensure_column(conn, "search_runs", "search_loop_json", "TEXT")
-        self._ensure_column(conn, "search_runs", "search_state_json", "TEXT")
-        self._ensure_column(conn, "search_runs", "ranking_steps_json", "TEXT")
-
-    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-        if not re.match(r"^[a-zA-Z0-9_]+$", table):
-            raise ValueError(f"Invalid table name: {table}")
-        if not re.match(r"^[a-zA-Z0-9_]+$", column):
-            raise ValueError(f"Invalid column name: {column}")
-        if not re.match(r"^[a-zA-Z0-9_ ]+$", definition):
-            raise ValueError(f"Invalid column definition: {definition}")
-
-        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in columns:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        apply_sqlite_migrations(conn)
 
     def create_run(self, question: str, params: Optional[dict[str, Any]] = None) -> str:
         if not self.enabled:
@@ -434,11 +358,58 @@ class HistoryStore:
         return run_id
 
     def record_event(self, run_id: str, event: dict[str, Any]) -> None:
+        self._record_event(run_id, event, owner_id="")
+
+    def record_claimed_event(
+        self,
+        run_id: str,
+        owner_id: str,
+        event: dict[str, Any],
+    ) -> bool:
+        return self._record_event(
+            run_id,
+            event,
+            owner_id=str(owner_id or "").strip(),
+        )
+
+    def _record_event(
+        self,
+        run_id: str,
+        event: dict[str, Any],
+        *,
+        owner_id: str,
+    ) -> bool:
         if not self.enabled or not run_id:
-            return
+            return False
         safe_event = redact_secrets(event or {})
+        now = self._now()
         try:
             with self._connection() as conn:
+                if owner_id:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO search_events (
+                            run_id, event_type, stage, status, message, payload_json, created_at
+                        )
+                        SELECT ?, ?, ?, ?, ?, ?, ?
+                        FROM search_runs
+                        WHERE id = ? AND claimed_by = ? AND lease_expires_at > ?
+                          AND status NOT IN ('success', 'cancelled')
+                        """,
+                        (
+                            run_id,
+                            str(safe_event.get("type", "")),
+                            str(safe_event.get("stage", "")),
+                            str(safe_event.get("status", "")),
+                            str(safe_event.get("message", "")),
+                            _json_dumps(safe_event),
+                            now,
+                            run_id,
+                            owner_id,
+                            now,
+                        ),
+                    )
+                    return cursor.rowcount == 1
                 conn.execute(
                     """
                     INSERT INTO search_events (
@@ -452,27 +423,75 @@ class HistoryStore:
                         str(safe_event.get("status", "")),
                         str(safe_event.get("message", "")),
                         _json_dumps(safe_event),
-                        self._now(),
+                        now,
                     ),
                 )
         except Exception:
-            return
+            return False
+        return True
 
     def save_checkpoint(self, run_id: str, checkpoint: dict[str, Any]) -> None:
+        self._save_checkpoint(run_id, checkpoint, owner_id="")
+
+    def save_claimed_checkpoint(
+        self,
+        run_id: str,
+        owner_id: str,
+        checkpoint: dict[str, Any],
+    ) -> bool:
+        return self._save_checkpoint(
+            run_id,
+            checkpoint,
+            owner_id=str(owner_id or "").strip(),
+        )
+
+    def _save_checkpoint(
+        self,
+        run_id: str,
+        checkpoint: dict[str, Any],
+        *,
+        owner_id: str,
+    ) -> bool:
         if not self.enabled or not run_id:
-            return
+            return False
         safe_checkpoint = redact_secrets(checkpoint or {})
         try:
             sequence = max(0, int(safe_checkpoint.get("sequence") or 0))
             stage = str(safe_checkpoint.get("stage") or "").strip()
         except (TypeError, ValueError):
-            return
+            return False
         if not stage:
-            return
+            return False
+        now = self._now()
         try:
             with self._connection() as conn:
                 if not self._checkpoint_schema_available:
-                    return
+                    return False
+                if owner_id:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO search_checkpoints (run_id, sequence, stage, payload_json, created_at)
+                        SELECT ?, ?, ?, ?, ?
+                        FROM search_runs
+                        WHERE id = ? AND claimed_by = ? AND lease_expires_at > ?
+                          AND status NOT IN ('success', 'cancelled')
+                        ON CONFLICT(run_id, sequence) DO UPDATE SET
+                            stage = excluded.stage,
+                            payload_json = excluded.payload_json,
+                            created_at = excluded.created_at
+                        """,
+                        (
+                            run_id,
+                            sequence,
+                            stage,
+                            _json_dumps(safe_checkpoint),
+                            now,
+                            run_id,
+                            owner_id,
+                            now,
+                        ),
+                    )
+                    return cursor.rowcount == 1
                 conn.execute(
                     """
                     INSERT INTO search_checkpoints (run_id, sequence, stage, payload_json, created_at)
@@ -482,10 +501,11 @@ class HistoryStore:
                         payload_json = excluded.payload_json,
                         created_at = excluded.created_at
                     """,
-                    (run_id, sequence, stage, _json_dumps(safe_checkpoint), self._now()),
+                    (run_id, sequence, stage, _json_dumps(safe_checkpoint), now),
                 )
         except Exception:
-            return
+            return False
+        return True
 
     def latest_checkpoint(self, run_id: str) -> Optional[dict[str, Any]]:
         if not self.enabled or not run_id:
@@ -529,23 +549,133 @@ class HistoryStore:
         except Exception:
             return
 
-    def complete_run(self, run_id: str, payload: dict[str, Any]) -> None:
+    def claim_run(self, run_id: str, owner_id: str, lease_seconds: int = 60) -> bool:
+        owner = str(owner_id or "").strip()
+        if not self.enabled or not run_id or not owner:
+            return False
+        now = self._now()
+        expires_at = self._lease_deadline(lease_seconds)
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE search_runs
+                SET claimed_by = ?, lease_expires_at = ?, heartbeat_at = ?,
+                    status = 'running', error_message = NULL, finished_at = NULL,
+                    attempt_count = CASE
+                        WHEN claimed_by = ? AND lease_expires_at > ? THEN attempt_count
+                        ELSE COALESCE(attempt_count, 0) + 1
+                    END
+                WHERE id = ?
+                  AND status NOT IN ('success', 'cancelled')
+                  AND (
+                    claimed_by IS NULL OR claimed_by = '' OR claimed_by = ?
+                    OR lease_expires_at IS NULL OR lease_expires_at <= ?
+                  )
+                """,
+                (owner, expires_at, now, owner, now, run_id, owner, now),
+            )
+            return cursor.rowcount == 1
+
+    def renew_run_lease(self, run_id: str, owner_id: str, lease_seconds: int = 60) -> bool:
+        owner = str(owner_id or "").strip()
+        if not self.enabled or not run_id or not owner:
+            return False
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE search_runs
+                SET lease_expires_at = ?, heartbeat_at = ?
+                WHERE id = ? AND claimed_by = ?
+                  AND lease_expires_at > ?
+                  AND status NOT IN ('success', 'cancelled')
+                """,
+                (
+                    self._lease_deadline(lease_seconds),
+                    self._now(),
+                    run_id,
+                    owner,
+                    self._now(),
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def release_run(self, run_id: str, owner_id: str) -> bool:
+        owner = str(owner_id or "").strip()
+        if not self.enabled or not run_id or not owner:
+            return False
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE search_runs
+                SET claimed_by = NULL, lease_expires_at = NULL
+                WHERE id = ? AND claimed_by = ?
+                """,
+                (run_id, owner),
+            )
+            return cursor.rowcount == 1
+
+    def cancel_run(self, run_id: str, message: str = "") -> bool:
+        return self._cancel_run(run_id, message, owner_id="")
+
+    def cancel_claimed_run(
+        self,
+        run_id: str,
+        owner_id: str,
+        message: str = "",
+    ) -> bool:
+        return self._cancel_run(
+            run_id,
+            message,
+            owner_id=str(owner_id or "").strip(),
+        )
+
+    def _cancel_run(self, run_id: str, message: str, *, owner_id: str) -> bool:
         if not self.enabled or not run_id:
-            return
+            return False
+        now = self._now()
+        owner_clause = " AND claimed_by = ? AND lease_expires_at > ?" if owner_id else ""
+        with self._connection() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE search_runs
+                SET status = 'cancelled', error_message = ?, finished_at = ?,
+                    claimed_by = NULL, lease_expires_at = NULL
+                WHERE id = ? AND status NOT IN ('success', 'cancelled'){owner_clause}
+                """,
+                (
+                    str(message or "Search cancelled by user."),
+                    now,
+                    run_id,
+                    *((owner_id, now) if owner_id else ()),
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def complete_run(self, run_id: str, payload: dict[str, Any]) -> None:
+        self._complete_run(run_id, payload, owner_id="")
+
+    def complete_claimed_run(self, run_id: str, owner_id: str, payload: dict[str, Any]) -> bool:
+        return self._complete_run(run_id, payload, owner_id=str(owner_id or "").strip())
+
+    def _complete_run(self, run_id: str, payload: dict[str, Any], *, owner_id: str) -> bool:
+        if not self.enabled or not run_id:
+            return False
         safe_payload = redact_secrets(payload or {})
         ranked = list(safe_payload.get("ranked") or [])
+        now = self._now()
+        owner_clause = " AND claimed_by = ? AND lease_expires_at > ?" if owner_id else ""
         try:
             with self._connection() as conn:
-                conn.execute("DELETE FROM search_results WHERE run_id = ?", (run_id,))
-                conn.execute(
-                    """
+                cursor = conn.execute(
+                    f"""
                     UPDATE search_runs
                     SET source = ?, final_query = ?, db = ?, field = ?, total = ?, iterations = ?,
                         status = ?, error_message = NULL, history_json = ?, search_loop_json = ?,
-                        search_state_json = ?, citation_map_json = ?, ranking_steps_json = ?, finished_at = ?
-                    WHERE id = ?
+                        search_state_json = ?, citation_map_json = ?, ranking_steps_json = ?,
+                        finished_at = ?, claimed_by = NULL, lease_expires_at = NULL
+                    WHERE id = ?{owner_clause}
                     """,
-                    (
+                    (*(
                         safe_payload.get("source", ""),
                         safe_payload.get("final_query", ""),
                         safe_payload.get("db", ""),
@@ -558,24 +688,54 @@ class HistoryStore:
                         _json_dumps(safe_payload.get("search_state") or {}),
                         _json_dumps(safe_payload.get("citation_map") or {}),
                         _json_dumps(safe_payload.get("ranking_steps") or []),
-                        self._now(),
+                        now,
                         run_id,
-                    ),
+                    ), *((owner_id, now) if owner_id else ())),
                 )
+                if cursor.rowcount != 1:
+                    return False
+                conn.execute("DELETE FROM search_results WHERE run_id = ?", (run_id,))
                 self._insert_results(conn, run_id, ranked)
                 if self._checkpoint_schema_available:
                     conn.execute("DELETE FROM search_checkpoints WHERE run_id = ?", (run_id,))
         except Exception:
-            return
+            return False
+        return True
 
     def fail_run(self, run_id: str, error_message: str, payload: Optional[dict[str, Any]] = None) -> None:
+        self._fail_run(run_id, error_message, payload, owner_id="")
+
+    def fail_claimed_run(
+        self,
+        run_id: str,
+        owner_id: str,
+        error_message: str,
+        payload: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        return self._fail_run(
+            run_id,
+            error_message,
+            payload,
+            owner_id=str(owner_id or "").strip(),
+        )
+
+    def _fail_run(
+        self,
+        run_id: str,
+        error_message: str,
+        payload: Optional[dict[str, Any]],
+        *,
+        owner_id: str,
+    ) -> bool:
         if not self.enabled or not run_id:
-            return
+            return False
         safe_payload = redact_secrets(payload or {})
+        now = self._now()
+        owner_clause = " AND claimed_by = ? AND lease_expires_at > ?" if owner_id else ""
         try:
             with self._connection() as conn:
-                conn.execute(
-                    """
+                cursor = conn.execute(
+                    f"""
                     UPDATE search_runs
                     SET source = COALESCE(NULLIF(?, ''), source),
                         final_query = COALESCE(NULLIF(?, ''), final_query),
@@ -590,10 +750,10 @@ class HistoryStore:
                         search_state_json = COALESCE(?, search_state_json),
                         citation_map_json = COALESCE(?, citation_map_json),
                         ranking_steps_json = COALESCE(?, ranking_steps_json),
-                        finished_at = ?
-                    WHERE id = ?
+                        finished_at = ?, claimed_by = NULL, lease_expires_at = NULL
+                    WHERE id = ?{owner_clause}
                     """,
-                    (
+                    (*(
                         safe_payload.get("source", ""),
                         safe_payload.get("final_query", ""),
                         safe_payload.get("db", ""),
@@ -607,12 +767,13 @@ class HistoryStore:
                         _json_dumps(safe_payload.get("search_state")) if "search_state" in safe_payload else None,
                         _json_dumps(safe_payload.get("citation_map")) if "citation_map" in safe_payload else None,
                         _json_dumps(safe_payload.get("ranking_steps")) if "ranking_steps" in safe_payload else None,
-                        self._now(),
+                        now,
                         run_id,
-                    ),
+                    ), *((owner_id, now) if owner_id else ())),
                 )
+                return cursor.rowcount == 1
         except Exception:
-            return
+            return False
 
     def list_runs(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         if not self.enabled:
@@ -740,6 +901,10 @@ class HistoryStore:
             "created_at": row["created_at"],
             "started_at": row["started_at"],
             "finished_at": row["finished_at"] or "",
+            "claimed_by": _row_value(row, "claimed_by", "") or "",
+            "lease_expires_at": _row_value(row, "lease_expires_at", "") or "",
+            "heartbeat_at": _row_value(row, "heartbeat_at", "") or "",
+            "attempt_count": int(_row_value(row, "attempt_count", 0) or 0),
             "result_count": row["result_count"],
             "event_count": row["event_count"],
             "checkpoint_count": row["checkpoint_count"],

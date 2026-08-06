@@ -82,9 +82,8 @@ def fake_harness_search_result(question: str = "graph neural networks", source: 
                     "uid:w1": {
                         "candidate_id": "uid:w1",
                         "title": "Graph Neural Network Robustness",
-                        "selector_label": "include",
                         "lifecycle": [
-                            {"stage": "candidate_selector", "action": "selected_for_llm", "origin": "local_fused_rank"},
+                            {"stage": "ranking_gate", "action": "selected_for_llm", "origin": "local_fused_rank"},
                             {"stage": "results", "action": "final_output", "origin": "ranked_output"},
                         ],
                     }
@@ -93,7 +92,6 @@ def fake_harness_search_result(question: str = "graph neural networks", source: 
                     "total_candidates": 1,
                     "serialized_candidates": 1,
                     "omitted_candidates": 0,
-                    "selector_counts": {"include": 1},
                     "lifecycle_candidate_counts": {"selected_for_llm": 1, "final_output": 1},
                     "citation_candidate_count": 0,
                 },
