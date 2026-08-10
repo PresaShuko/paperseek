@@ -1,0 +1,26 @@
+{
+  "total": 1,
+  "data": [
+    {
+      "paperId": "S2-FIXTURE",
+      "corpusId": 42,
+      "title": "Graph Learning Evidence",
+      "abstract": "Semantic Scholar abstract.",
+      "year": 2024,
+      "publicationDate": "2024-03-01",
+      "venue": "Graph Journal",
+      "publicationVenue": {"name": "Graph Journal"},
+      "publicationTypes": ["JournalArticle"],
+      "authors": [{"name": "Ada Lovelace"}],
+      "url": "https://www.semanticscholar.org/paper/S2-FIXTURE",
+      "externalIds": {
+        "DOI": "10.1234/semantic.fixture",
+        "PubMed": "456",
+        "ArXiv": "2401.00002"
+      },
+      "citationCount": 7,
+      "fieldsOfStudy": ["Computer Science"],
+      "openAccessPdf": {"url": "https://example.org/semantic.pdf"}
+    }
+  ]
+}

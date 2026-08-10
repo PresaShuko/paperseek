@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00001v1</id>
+    <title>Graph Retrieval</title>
+    <summary>Graph retrieval abstract.</summary>
+    <published>2024-01-01T00:00:00Z</published>
+    <author><name>Ada Lovelace</name></author>
+    <link href="http://arxiv.org/abs/2401.00001v1" rel="alternate"/>
+    <link href="http://arxiv.org/pdf/2401.00001v1" title="pdf" type="application/pdf"/>
+    <arxiv:doi>10.1234/arxiv.fixture</arxiv:doi>
+    <arxiv:primary_category term="cs.IR"/>
+  </entry>
+</feed>

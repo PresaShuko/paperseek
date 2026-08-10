@@ -1,0 +1,20 @@
+{
+  "message": {
+    "total-results": 1,
+    "items": [
+      {
+        "DOI": "10.1234/crossref.fixture",
+        "title": ["AI Governance Evidence"],
+        "author": [{"given": "Ada", "family": "Lovelace"}],
+        "published-print": {"date-parts": [[2023, 7, 1]]},
+        "container-title": ["Journal of AI Governance"],
+        "type": "journal-article",
+        "is-referenced-by-count": 9,
+        "URL": "https://doi.org/10.1234/crossref.fixture",
+        "abstract": "<jats:p>Crossref abstract.</jats:p>",
+        "ISSN": ["1234-5678"],
+        "ISBN": ["978-1-23456-789-0"]
+      }
+    ]
+  }
+}

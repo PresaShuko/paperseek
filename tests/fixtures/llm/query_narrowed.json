@@ -1,0 +1,4 @@
+{
+  "query": "all:\"AI governance\" AND all:accountability AND all:\"public agency\"",
+  "rationale": "Added the public-agency context as one narrowing group."
+}

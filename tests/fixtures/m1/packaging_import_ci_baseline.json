@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "milestone": "M1",
+  "repository": {
+    "branch": "refactor/v0.3.0-architecture-cutover",
+    "head": "5525a58bd72e5f1cd18b681a25d0eea72e6b24ef"
+  },
+  "purpose": "Characterize the legacy packaging, imports, and CI inputs before the M1 backend/web skeleton is introduced.",
+  "files": {
+    ".github/workflows/ci.yml": {
+      "bytes": 1373,
+      "sha256": "C768C5AE6AD1DC1C7B227F12096A1C12DE51C9F78DB4B0EFE26328D2086CE9DB"
+    },
+    "package-lock.json": {
+      "bytes": 87793,
+      "sha256": "EE02982A87A58C5CEAE10E28392D9C672A5D4568FA5B9F1E7528EE701B252C0A"
+    },
+    "package.json": {
+      "bytes": 269,
+      "sha256": "A8073789638301A476026E8ADEBBF6E7101228ADC9B58D3C91A9C2BDA2B2EC94"
+    },
+    "pyproject.toml": {
+      "bytes": 1801,
+      "sha256": "EF5D355EC89CC42DBAD616A619289BBE3D43F3D3B9A3D864C932635EDDA9A21F"
+    },
+    "requirements.txt": {
+      "bytes": 125,
+      "sha256": "F15983F8A4F2787E6CA217D1ECE401BEDA3742703F3AC135E70C352C3CA4B277"
+    },
+    "tests/test_architecture_boundaries.py": {
+      "bytes": 1071,
+      "sha256": "5314B510559940A242AC12C1D84E3D07299A243CFF0DD4958A579028D1846C62"
+    }
+  },
+  "legacy_packages": {
+    "paperseek": {
+      "python_files": 34,
+      "init_sha256": "B33A48EDBAD8DE2FAD4D0B18A5D8A30AD20763487AA4E7A6D2E2FBC83EBE0B8E"
+    },
+    "paperseek_core": {
+      "python_files": 64,
+      "init_sha256": "35BB42F8C7847C5331DA2704D19EAC86F78296947C24C09955AA11DDFBE9513C"
+    }
+  },
+  "project": {
+    "name": "paperseek",
+    "version": "0.3.0",
+    "requires_python": ">=3.12",
+    "package_include": [
+      "paperseek*",
+      "paperseek_core*"
+    ],
+    "scripts": {
+      "paperseek": "paperseek.cli:main",
+      "paperseek-mcp": "paperseek.mcp_server:main",
+      "paperseek-web": "paperseek.web_app:main"
+    }
+  },
+  "legacy_core_forbidden_import_roots": [
+    "fastapi",
+    "paperseek",
+    "supabase"
+  ],
+  "legacy_core_forbidden_import_violations": [],
+  "prechange_target_paths_absent": {
+    "backend": true,
+    "web": true
+  },
+  "prechange_verification": {
+    "tests": "20 passed, 182 subtests passed",
+    "installed_cli_help": true,
+    "installed_cli_source_count": 8
+  }
+}

@@ -1,0 +1,269 @@
+"""Canonical final-result and artifact-draft assembly."""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+from typing import Any
+
+from pydantic import BaseModel
+
+from paperseek_core.models import (
+    ArtifactDraft,
+    FinalPaperResult,
+    RankedPaper,
+    ResearchAssemblyRequest,
+    ResearchResult,
+)
+
+
+def _dump(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    return value
+
+
+class FinalResultAssembler:
+    def assemble(self, request: ResearchAssemblyRequest) -> ResearchResult:
+        ranked = [self._paper(index, item) for index, item in enumerate(request.items, 1)]
+        provenance = {
+            item.document.uid: dict(item.provenance)
+            for item in request.items
+            if item.document.uid
+        }
+        result = ResearchResult(
+            question=request.question,
+            search_intent=request.search_plan.audit_summary(),
+            search_plan=request.search_plan.model_dump(mode="json"),
+            query_view_selection=[_dump(item) for item in request.query_view_selection],
+            query_portfolio=[_dump(item) for item in request.query_portfolio],
+            query_iteration_memory=[_dump(item) for item in request.query_iteration_memory],
+            source=request.source,
+            final_query=request.final_query,
+            db=request.source.upper(),
+            total=request.total,
+            iterations=request.iterations,
+            history=[_dump(item) for item in request.history],
+            search_state=request.search_state,
+            citation_map=request.citation_map,
+            ranking_steps=request.ranking_steps,
+            ranked=ranked,
+            warnings=list(dict.fromkeys(request.warnings)),
+            provenance_by_identity=provenance,
+        )
+        return result.model_copy(update={"artifacts": self._artifacts(result)})
+
+    @staticmethod
+    def _paper(rank: int, item: RankedPaper) -> FinalPaperResult:
+        document = item.document
+        source = document.source
+        links_model = document.links
+        links = links_model.model_dump(mode="json") if links_model else {}
+        authors = [
+            author.display_name or author.wos_standard
+            for author in (document.names.authors if document.names else [])
+            if author.display_name or author.wos_standard
+        ]
+        keywords = list(document.keywords.author_keywords if document.keywords else [])
+        citation_count = sum(int(citation.count or 0) for citation in document.citations)
+        publication_type = document.types[0] if document.types else ""
+        venue = source.source_title if source else ""
+        year = source.publish_year if source else None
+        doi = document.identifiers.doi if document.identifiers else ""
+        url = links.get("record") or links.get("landing_page") or document.uid
+        provenance = item.provenance
+        return FinalPaperResult(
+            rank=rank,
+            source=venue,
+            id=url,
+            title=document.title,
+            authors=authors,
+            year=year,
+            venue=venue,
+            publication_type=publication_type,
+            doi=doi,
+            url=url,
+            pdf_url=links.get("pdf") or "",
+            abstract=document.abstract,
+            keywords="; ".join(keywords),
+            citation_count=citation_count,
+            relevance_score=item.score,
+            relevance_reason=item.reasoning,
+            source_rank=int(provenance.get("source_rank") or rank),
+            retrieval_score=float(provenance.get("retrieval_score") or 0),
+            retrieval_lanes=list(provenance.get("retrieval_lanes") or []),
+            source_raw_id=document.uid,
+            links=links,
+            keywords_text="; ".join(keywords),
+            authors_text="; ".join(authors),
+            score=item.score,
+            provider=document.provider,
+            uid=document.uid,
+            publish_year=year,
+            document_types=list(document.types),
+            citations=str(citation_count),
+            reasoning=item.reasoning,
+        )
+
+    def _artifacts(self, result: ResearchResult) -> list[ArtifactDraft]:
+        public = result.public_payload()
+        export = {
+            "question": result.question,
+            "search_intent": result.search_intent,
+            "search_plan": result.search_plan,
+            "query_view_selection": result.query_view_selection,
+            "query_portfolio": result.query_portfolio,
+            "query_iteration_memory": result.query_iteration_memory,
+            "source": result.source,
+            "query": result.final_query,
+            "database": result.db,
+            "final_query": result.final_query,
+            "db": result.db,
+            "field": None,
+            "total_results": result.total,
+            "total": result.total,
+            "iterations": result.iterations,
+            "history": result.history,
+            "search_state": result.search_state,
+            "citation_map": result.citation_map,
+            "ranking_steps": result.ranking_steps,
+            "ranked": [item.model_dump(mode="json") for item in result.ranked],
+        }
+        if result.warnings:
+            export["warnings"] = list(result.warnings)
+        return [
+            ArtifactDraft(
+                kind="final_result",
+                filename="final_result.json",
+                media_type="application/json",
+                content=json.dumps(public, ensure_ascii=False, indent=2) + "\n",
+            ),
+            ArtifactDraft(
+                kind="export_json",
+                filename="export.json",
+                media_type="application/json",
+                content=json.dumps(export, ensure_ascii=False, indent=2) + "\n",
+            ),
+            ArtifactDraft(
+                kind="export_csv",
+                filename="export.csv",
+                media_type="text/csv",
+                content=self._csv(result.ranked),
+            ),
+            ArtifactDraft(
+                kind="candidate_pool",
+                filename="candidate_pool.jsonl",
+                media_type="application/x-ndjson",
+                content=self._candidate_pool(result),
+            ),
+            ArtifactDraft(
+                kind="citation_map",
+                filename="citation_map.json",
+                media_type="application/json",
+                content=json.dumps(result.citation_map, ensure_ascii=False, indent=2) + "\n",
+            ),
+        ]
+
+    @staticmethod
+    def _csv(items: list[FinalPaperResult]) -> str:
+        fields = [
+            "rank",
+            "score",
+            "title",
+            "authors",
+            "publish_year",
+            "source",
+            "provider",
+            "document_types",
+            "citations",
+            "doi",
+            "keywords",
+            "abstract",
+            "reasoning",
+            "record_url",
+            "pdf_url",
+        ]
+        output = io.StringIO(newline="")
+        output.write(",".join(fields) + "\n")
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\n")
+        for item in items:
+            writer.writerow(
+                [
+                    item.rank,
+                    FinalResultAssembler._number(item.score),
+                    item.title,
+                    item.authors_text,
+                    item.publish_year or "",
+                    item.source,
+                    item.provider,
+                    "; ".join(item.document_types),
+                    item.citations,
+                    item.doi,
+                    item.keywords_text,
+                    item.abstract,
+                    item.reasoning,
+                    item.url,
+                    item.pdf_url,
+                ]
+            )
+        return output.getvalue()
+
+    @staticmethod
+    def _number(value: float) -> str:
+        return str(int(value)) if float(value).is_integer() else str(value)
+
+    @staticmethod
+    def _candidate_pool(result: ResearchResult) -> str:
+        queue = result.search_state.get("candidate_queue") or {}
+        keys = list(queue.get("keys") or [])
+        ledger = dict(queue.get("ledger") or {})
+        if keys and ledger:
+            rows = [
+                {
+                    "record_type": "summary",
+                    "keys": keys,
+                    "ledger_summary": queue.get("ledger_summary") or {},
+                    "origin_counts": queue.get("origin_counts") or {},
+                    "duplicate_count": int(queue.get("duplicate_count") or 0),
+                },
+                *[
+                    {"record_type": "candidate", **ledger[key]}
+                    for key in keys
+                    if key in ledger
+                ],
+            ]
+        else:
+            rows = [
+                {
+                    "record_type": "summary",
+                    "keys": [item.uid for item in result.ranked],
+                    "ledger_summary": {
+                        "serialized_candidates": len(result.ranked),
+                        "total_candidates": len(result.ranked),
+                    },
+                    "origin_counts": {},
+                    "duplicate_count": 0,
+                },
+                *[
+                    {
+                        "record_type": "candidate",
+                        "candidate_id": item.uid,
+                        "title": item.title,
+                        "doi": item.doi,
+                        "year": item.publish_year,
+                        "origins": result.provenance_by_identity.get(item.uid, {}).get("origins", []),
+                        "retrieval_lanes": item.retrieval_lanes,
+                        "retrieval_score": item.retrieval_score,
+                        "llm_score": item.score,
+                    }
+                    for item in result.ranked
+                ],
+            ]
+        return "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+            for row in rows
+        )
+
+
+__all__ = ["FinalResultAssembler"]

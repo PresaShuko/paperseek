@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "request": {
+    "url_template": "https://api.crossref.org/works/{doi}",
+    "timeout_seconds": 10,
+    "attempt_every_ranked_doi": true
+  },
+  "cleaning": {
+    "input": "<jats:p>Updated &amp; verified abstract with sufficient detail.</jats:p>",
+    "output": "Updated & verified abstract with sufficient detail.",
+    "minimum_length_exclusive": 20
+  },
+  "cache": {
+    "successful_response": true,
+    "missing_response": true,
+    "failed_response": true
+  },
+  "result_semantics": {
+    "success_replaces_display_abstract": true,
+    "failure_preserves_provider_metadata": true,
+    "missing_doi_skips_request": true,
+    "old_failure_visibility": "silent",
+    "required_failure_visibility": "structured_warning"
+  }
+}

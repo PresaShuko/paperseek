@@ -1,0 +1,11 @@
+{
+  "built_at": "2026-07-20T15:35:26+08:00",
+  "shards": [
+    {
+      "conference": "ICLR",
+      "year": 2025,
+      "count": 2,
+      "file": "shards/iclr.fixture.json"
+    }
+  ]
+}

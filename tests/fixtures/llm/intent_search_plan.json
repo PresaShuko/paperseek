@@ -1,0 +1,113 @@
+{
+  "intent": "Find evidence on how transparent AI decision systems affect accountability in public agencies.",
+  "question_type": "specific_relation",
+  "core_concepts": [
+    "transparent AI decision systems",
+    "accountability",
+    "public agencies"
+  ],
+  "must_have_facets": [
+    "AI decision systems",
+    "accountability"
+  ],
+  "optional_facets": [
+    "transparency",
+    "public administration"
+  ],
+  "required_relation": "effect of transparent AI decision systems on accountability",
+  "likely_synonyms": [
+    "algorithmic decision making",
+    "automated decision systems"
+  ],
+  "adjacent_concepts": [
+    "algorithmic auditing",
+    "explainable AI"
+  ],
+  "boundaries": [
+    "private-sector recommendation systems"
+  ],
+  "adjustment_strategy": "Keep accountability mandatory while varying established AI-governance terminology.",
+  "ambiguities": [
+    "accountability may refer to procedural or outcome accountability"
+  ],
+  "query_views": [
+    {
+      "view_id": "direct_governance",
+      "view_type": "direct_terminology",
+      "purpose": "Use direct governance and accountability terminology.",
+      "concept_groups": [
+        {
+          "label": "AI systems",
+          "terms": [
+            "AI decision systems",
+            "automated decision systems"
+          ],
+          "required": true,
+          "field_hint": "all"
+        },
+        {
+          "label": "accountability",
+          "terms": [
+            "accountability",
+            "algorithmic accountability"
+          ],
+          "required": true,
+          "field_hint": "all"
+        }
+      ],
+      "exclusions": []
+    },
+    {
+      "view_id": "audit_mechanisms",
+      "view_type": "mechanism_method",
+      "purpose": "Cover auditing and transparency mechanisms.",
+      "concept_groups": [
+        {
+          "label": "mechanism",
+          "terms": [
+            "algorithmic auditing",
+            "AI transparency"
+          ],
+          "required": true,
+          "field_hint": "all"
+        },
+        {
+          "label": "public sector",
+          "terms": [
+            "public agencies",
+            "public administration"
+          ],
+          "required": true,
+          "field_hint": "all"
+        }
+      ],
+      "exclusions": []
+    },
+    {
+      "view_id": "evidence_reviews",
+      "view_type": "evidence_synthesis",
+      "purpose": "Find reviews of accountable public-sector AI.",
+      "concept_groups": [
+        {
+          "label": "evidence",
+          "terms": [
+            "systematic review",
+            "evidence synthesis"
+          ],
+          "required": true,
+          "field_hint": "all"
+        },
+        {
+          "label": "topic",
+          "terms": [
+            "public sector AI accountability",
+            "government algorithm accountability"
+          ],
+          "required": true,
+          "field_hint": "all"
+        }
+      ],
+      "exclusions": []
+    }
+  ]
+}

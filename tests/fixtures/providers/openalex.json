@@ -1,0 +1,30 @@
+{
+  "meta": {"count": 1, "page": 3, "per_page": 25},
+  "results": [
+    {
+      "id": "https://openalex.org/W123",
+      "doi": "https://doi.org/10.1234/openalex.fixture",
+      "title": "AI Governance Evidence",
+      "publication_year": 2024,
+      "publication_date": "2024-02-01",
+      "type": "article",
+      "authorships": [
+        {"author": {"display_name": "Ada Lovelace"}}
+      ],
+      "primary_location": {
+        "source": {"display_name": "Journal of AI Governance"},
+        "landing_page_url": "https://example.org/openalex/W123",
+        "pdf_url": "https://example.org/openalex/W123.pdf"
+      },
+      "cited_by_count": 12,
+      "abstract_inverted_index": {
+        "Governance": [0],
+        "evidence": [1]
+      },
+      "keywords": [{"display_name": "AI governance"}],
+      "ids": {"pmid": "https://pubmed.ncbi.nlm.nih.gov/123"},
+      "primary_topic": {"field": {"id": "https://openalex.org/fields/17"}},
+      "referenced_works": ["https://openalex.org/W100"]
+    }
+  ]
+}

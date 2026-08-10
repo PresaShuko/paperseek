@@ -9,7 +9,7 @@ from paperseek.config import (
     default_model,
 )
 from paperseek_core.llm import OpenAIChatClient, create_llm_client, format_modelscope_quota
-from tests.helpers import read_text, temporary_env
+from tests.helpers import temporary_env
 
 
 class LLMProviderTest(unittest.TestCase):
@@ -240,44 +240,6 @@ class LLMProviderTest(unittest.TestCase):
                 self.assertEqual(reloaded.DEFAULT_LLM_MAX_TOKENS, 0)
         finally:
             importlib.reload(core_llm)
-
-    def test_modelscope_provider_is_available_in_web_ui(self):
-        html = read_text("paperseek/static/index.html")
-        app_js = read_text("paperseek/static/app.js")
-        self.assertIn('value="modelscope"', html)
-        self.assertIn("Qwen/Qwen3-235B-A22B-Instruct-2507", app_js)
-        self.assertIn("https://api-inference.modelscope.cn/v1", app_js)
-
-    def test_web_ui_exposes_language_switch(self):
-        html = read_text("paperseek/static/index.html")
-        app_js = read_text("paperseek/static/app.js")
-        self.assertIn('data-language="en"', html)
-        self.assertIn('data-language="zh"', html)
-        self.assertIn("paperseek.ui.language", app_js)
-        self.assertIn("开始检索", app_js)
-        self.assertIn("高级设置", app_js)
-
-    def test_cstcloud_provider_is_available_in_web_ui(self):
-        html = read_text("paperseek/static/index.html")
-        app_js = read_text("paperseek/static/app.js")
-        self.assertIn('value="cstcloud"', html)
-        self.assertIn("deepseek-v4-flash", app_js)
-        self.assertIn("https://uni-api.cstcloud.cn/v1", app_js)
-
-    def test_nvidia_provider_is_available_in_web_ui(self):
-        html = read_text("paperseek/static/index.html")
-        app_js = read_text("paperseek/static/app.js")
-        self.assertIn('value="nvidia"', html)
-        self.assertIn("nvidia/llama-3.3-nemotron-super-49b-v1.5", app_js)
-        self.assertIn("nvidia/nv-embedqa-e5-v5", app_js)
-        self.assertIn("nv-rerank-qa-mistral-4b:1", app_js)
-
-    def test_openrouter_retrieval_is_available_in_web_ui(self):
-        html = read_text("paperseek/static/index.html")
-        app_js = read_text("paperseek/static/app.js")
-        self.assertIn('value="openrouter"', html)
-        self.assertIn("openai/text-embedding-3-small", app_js)
-        self.assertIn("jinaai/jina-reranker-v2-base-multilingual", app_js)
 
     def test_ranking_llm_timeout_defaults_to_preview_safe_value(self):
         with temporary_env(clear=("RANKING_LLM_TIMEOUT_SECONDS",)):

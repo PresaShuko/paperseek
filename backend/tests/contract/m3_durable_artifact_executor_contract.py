@@ -1,0 +1,395 @@
+from __future__ import annotations
+
+import asyncio
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
+from importlib.resources import files
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+from unittest.mock import patch
+from uuid import uuid4
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import text
+
+from paperseek_app.errors import (
+    ArtifactConflict,
+    ArtifactIntegrityError,
+    ArtifactPersistenceError,
+    RunPersistenceError,
+)
+from paperseek_app.execution import WorkflowExecution
+from paperseek_app.models import (
+    ArtifactRole,
+    ArtifactVisibility,
+    ArtifactWrite,
+    PendingEvent,
+    RunStatus,
+    RunVersions,
+)
+from paperseek_app.services import RunService
+from paperseek_community.artifacts import FileArtifactStore
+from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
+from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
+from paperseek_community.persistence.migrate import database_url
+from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_core.models import CheckpointDraft, QueryLoopBudget, ResearchWorkflowRequest
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "m1_fixed_source.json"
+
+
+class MutableClock:
+    def __init__(self) -> None:
+        self.value = datetime(2026, 8, 10, 1, 0, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.value
+
+
+def _upgrade_to(database: Path, revision: str) -> None:
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(files("paperseek_community.migrations")),
+    )
+    config.set_main_option(
+        "sqlalchemy.url",
+        database_url(database).render_as_string(hide_password=False).replace("%", "%%"),
+    )
+    command.upgrade(config, revision)
+
+
+class M3DurableArtifactExecutorContractTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.data_dir = Path(self.temp.name)
+        self.database = self.data_dir / "paperseek.db"
+        self.clock = MutableClock()
+        migrate_database(self.database)
+        self.store = FileArtifactStore(self.data_dir)
+        self.uow = SQLiteRunUnitOfWork(self.database, clock=self.clock)
+        self.addCleanup(self.uow.close)
+        self.service = RunService(self.uow, self.store)
+        self.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+    def _create_run(self):
+        return self.service.create_run(
+            self.fixture["question"],
+            self.fixture["source"],
+            {"fixture_id": self.fixture["fixture_id"]},
+        )
+
+    @staticmethod
+    def _execution(_run, _cancellation) -> WorkflowExecution:
+        source = FixedSourceAdapter.from_file(FIXTURE)
+        return WorkflowExecution(
+            llm=FixedLLMAdapter(source.fixture.llm_responses),
+            source=source,
+            abstracts=source,
+            request=ResearchWorkflowRequest(
+                question=source.fixture.question,
+                query_budget=QueryLoopBudget(
+                    target_min=1,
+                    target_max=50,
+                    retrieval_pool_min=1,
+                    query_portfolio_enabled=False,
+                ),
+            ),
+        )
+
+    def _executor(self, service: RunService | None = None) -> EmbeddedRunExecutor:
+        return EmbeddedRunExecutor(
+            service or self.service,
+            self._execution,
+            owner_id="embedded-worker",
+            lease_seconds=60,
+        )
+
+    def test_alembic_upgrades_m1_database_without_losing_runs_and_enables_sqlite_guards(self) -> None:
+        database = self.data_dir / "upgrade-from-m1.db"
+        _upgrade_to(database, "0001_m1_run_vertical")
+        existing_id = str(uuid4())
+        now = self.clock().isoformat(timespec="microseconds")
+        versions = RunVersions()
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute(
+                """
+                INSERT INTO runs (
+                    id, question, source, status, config_json, current_step,
+                    attempt, lease_generation, last_event_sequence,
+                    workflow_version, engine_version, prompt_version,
+                    config_schema_version, artifact_schema_version,
+                    error_code, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, '{}', '', 0, 0, 0, ?, ?, ?, ?, ?, '', ?, ?)
+                """,
+                (
+                    existing_id,
+                    "persisted before M3",
+                    "openalex",
+                    RunStatus.QUEUED.value,
+                    versions.workflow_version,
+                    versions.engine_version,
+                    versions.prompt_version,
+                    versions.config_schema_version,
+                    versions.artifact_schema_version,
+                    now,
+                    now,
+                ),
+            )
+            connection.commit()
+
+        migrate_database(database)
+        upgraded = SQLiteRunUnitOfWork(database, clock=self.clock)
+        self.addCleanup(upgraded.close)
+
+        upgraded_run = upgraded.get_run(existing_id)
+        self.assertEqual(upgraded_run.question, "persisted before M3")
+        self.assertGreater(upgraded_run.deadline_at, upgraded_run.created_at)
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 6)
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'run%'"
+                )
+            }
+            checkpoint_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(run_checkpoints)")
+            }
+            result_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(run_results)")
+            }
+            run_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(runs)")
+            }
+        self.assertEqual(
+            tables,
+            {
+                "runs",
+                "run_events",
+                "run_checkpoints",
+                "run_results",
+                "run_artifacts",
+                "run_cleanup_jobs",
+                "run_submissions",
+                "run_credentials",
+            },
+        )
+        self.assertIn("state_artifact_id", checkpoint_columns)
+        self.assertIn("record_artifact_id", result_columns)
+        self.assertIn("cancel_requested_at", run_columns)
+        self.assertIn("deadline_at", run_columns)
+        self.assertIn("deleted_at", run_columns)
+        self.assertIn("warning_codes_json", run_columns)
+        with upgraded.engine.connect() as connection:
+            self.assertEqual(connection.execute(text("PRAGMA foreign_keys")).scalar_one(), 1)
+            self.assertEqual(connection.execute(text("PRAGMA journal_mode")).scalar_one(), "wal")
+            self.assertEqual(connection.execute(text("PRAGMA busy_timeout")).scalar_one(), 10000)
+
+    def test_file_store_is_atomic_immutable_and_integrity_checked(self) -> None:
+        run_id = str(uuid4())
+        draft = ArtifactWrite(
+            run_id=run_id,
+            kind="candidate_pool",
+            role=ArtifactRole.RECOVERY,
+            visibility=ArtifactVisibility.INTERNAL,
+            filename="batch-1.jsonl",
+            media_type="application/x-ndjson",
+            schema_version=1,
+            content=b'{"uid":"fixed-001"}\n',
+        )
+
+        stored = self.store.put(draft)
+        expected = (
+            self.data_dir
+            / "artifacts"
+            / "runs"
+            / run_id
+            / "candidate_pool"
+            / "1"
+            / "batch-1.jsonl"
+        )
+        self.assertEqual(stored, self.store.put(draft))
+        self.assertEqual(expected.read_bytes(), draft.content)
+        self.assertEqual(self.store.read(stored), draft.content)
+        self.assertEqual(stored.size, len(draft.content))
+        self.assertEqual(len(stored.sha256), 64)
+
+        with self.assertRaises(ArtifactConflict):
+            self.store.put(draft.model_copy(update={"content": b"different"}))
+
+        failed = draft.model_copy(update={"filename": "link-failure.jsonl"})
+        with patch(
+            "paperseek_community.artifacts.files.os.link",
+            side_effect=OSError("synthetic link failure"),
+        ):
+            with self.assertRaises(ArtifactPersistenceError):
+                self.store.put(failed)
+        self.assertFalse(expected.with_name("link-failure.jsonl").exists())
+        self.assertEqual(list((self.data_dir / "artifacts" / ".tmp").glob("*")), [])
+
+        expected.write_bytes(b"tampered")
+        with self.assertRaises(ArtifactIntegrityError):
+            self.store.read(stored)
+        expected.write_bytes(draft.content)
+        self.store.delete(stored)
+        self.store.delete(stored)
+        self.assertFalse(expected.exists())
+
+        with self.assertRaises(ArtifactPersistenceError):
+            self.store.put(draft.model_copy(update={"filename": "../escape.jsonl"}))
+        self.assertFalse((self.data_dir / "escape.jsonl").exists())
+
+    def test_checkpoint_pointer_commits_after_recovery_artifact_and_rolls_back_together(self) -> None:
+        run = self._create_run()
+        lease = self.service.claim_run(run.id, "checkpoint-worker", lease_seconds=60)
+        first = CheckpointDraft(
+            step_key="retrieve.lane",
+            idempotency_key="m3-checkpoint-first",
+            state={"completed_lanes": ["relevance"], "candidate_count": 1},
+            workflow_version=run.versions.workflow_version,
+        )
+        persisted = self.service.append_checkpoint(
+            lease,
+            [PendingEvent(event_type="retrieval.progress", stage="retrieval")],
+            first,
+        )
+
+        self.assertTrue(persisted.state_artifact_id)
+        self.assertEqual(self.uow.get_checkpoint(run.id).state, {})
+        self.assertEqual(self.service.get_checkpoint(run.id).state, first.state)
+        artifacts = self.service.list_artifacts(run.id)
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0].role, ArtifactRole.RECOVERY)
+        self.assertEqual(artifacts[0].visibility, ArtifactVisibility.INTERNAL)
+        self.assertEqual(json.loads(self.store.read(artifacts[0])), first.state)
+
+        before_events = self.service.list_events(run.id)
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.execute(
+                """
+                CREATE TRIGGER fail_m3_checkpoint
+                BEFORE INSERT ON run_checkpoints
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced checkpoint failure');
+                END
+                """
+            )
+        second = CheckpointDraft(
+            step_key="rank_results.batch",
+            idempotency_key="m3-checkpoint-second",
+            state={"completed_batch_ids": ["batch-1"]},
+            workflow_version=run.versions.workflow_version,
+        )
+        with self.assertRaises(RunPersistenceError):
+            self.service.append_checkpoint(
+                lease,
+                [PendingEvent(event_type="ranking.progress", stage="ranking")],
+                second,
+            )
+
+        self.assertEqual(self.service.get_checkpoint(run.id).idempotency_key, first.idempotency_key)
+        self.assertEqual(self.service.list_events(run.id), before_events)
+        self.assertEqual(len(self.service.list_artifacts(run.id)), 1)
+        checkpoint_files = list(
+            (self.data_dir / "artifacts" / "runs" / run.id / "checkpoint" / "1").glob("*.json")
+        )
+        self.assertEqual(len(checkpoint_files), 2)
+
+    def test_new_executor_instance_claims_preexisting_queued_run_and_commits_required_artifacts(self) -> None:
+        queued = self._create_run()
+        self.uow.close()
+
+        restarted_uow = SQLiteRunUnitOfWork(self.database, clock=self.clock)
+        self.addCleanup(restarted_uow.close)
+        restarted_service = RunService(restarted_uow, FileArtifactStore(self.data_dir))
+        completed = asyncio.run(self._executor(restarted_service).run_once())
+
+        self.assertIsNotNone(completed)
+        self.assertEqual(completed.id, queued.id)
+        self.assertEqual(completed.status, RunStatus.COMPLETED)
+        self.assertEqual(completed.attempt, 1)
+        self.assertEqual(completed.lease_generation, 1)
+        required = [
+            item
+            for item in restarted_service.list_artifacts(queued.id)
+            if item.role is ArtifactRole.COMPLETION_REQUIRED
+        ]
+        self.assertEqual(
+            {item.filename for item in required},
+            {
+                "final_result.json",
+                "export.json",
+                "export.csv",
+                "candidate_pool.jsonl",
+                "citation_map.json",
+            },
+        )
+        final_artifact = next(item for item in required if item.filename == "final_result.json")
+        results = restarted_service.get_results(queued.id)
+        self.assertEqual({item.record_artifact_id for item in results}, {final_artifact.id})
+        self.assertEqual(asyncio.run(self._executor(restarted_service).run_once()), None)
+
+    def test_completion_artifact_reference_failure_rolls_back_success_and_marks_failed(self) -> None:
+        run = self._create_run()
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.execute(
+                """
+                CREATE TRIGGER fail_completion_artifact_reference
+                BEFORE INSERT ON run_artifacts
+                WHEN NEW.role = 'completion_required'
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced completion artifact failure');
+                END
+                """
+            )
+
+        detail = asyncio.run(self._executor().run_once())
+
+        self.assertEqual(detail.id, run.id)
+        self.assertEqual(detail.status, RunStatus.FAILED)
+        self.assertEqual(detail.error_code, "artifact_commit_failed")
+        self.assertEqual(self.service.get_results(run.id), [])
+        self.assertFalse(
+            any(
+                item.role is ArtifactRole.COMPLETION_REQUIRED
+                for item in self.service.list_artifacts(run.id)
+            )
+        )
+        event_types = [item.event_type for item in self.service.list_events(run.id)]
+        self.assertNotIn("run.completed", event_types)
+        self.assertEqual(event_types[-1], "run.failed")
+
+    def test_conflicting_required_file_never_reports_success(self) -> None:
+        run = self._create_run()
+        self.store.put(
+            ArtifactWrite(
+                run_id=run.id,
+                kind="final_result",
+                role=ArtifactRole.COMPLETION_REQUIRED,
+                visibility=ArtifactVisibility.USER,
+                filename="final_result.json",
+                media_type="application/json",
+                schema_version=1,
+                content=b'{"not":"the result"}\n',
+            )
+        )
+
+        detail = asyncio.run(self._executor().run_once())
+
+        self.assertEqual(detail.status, RunStatus.FAILED)
+        self.assertEqual(detail.error_code, "artifact_persistence_failed")
+        self.assertEqual(self.service.get_results(run.id), [])
+        self.assertFalse(
+            any(event.event_type.startswith("run.completed") for event in self.service.list_events(run.id))
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

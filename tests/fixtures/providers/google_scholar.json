@@ -1,0 +1,21 @@
+{
+  "searchInformation": {"totalResults": "11"},
+  "organic": [
+    {
+      "id": "GS-FIXTURE",
+      "title": "AI Governance and Accountability",
+      "link": "https://example.org/google-scholar",
+      "pdfUrl": "https://example.org/google-scholar.pdf",
+      "snippet": "A Google Scholar result snippet.",
+      "year": 2024,
+      "publicationInfo": {
+        "summary": "Ada Lovelace - Journal of AI Policy, 2024",
+        "authors": [{"name": "Ada Lovelace"}]
+      },
+      "citedBy": {
+        "total": 12,
+        "link": "https://scholar.google.com/scholar?cites=fixture"
+      }
+    }
+  ]
+}

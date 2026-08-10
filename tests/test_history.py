@@ -3,11 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from paperseek.config import AgentConfig
 from paperseek.history import HistoryStore, result_payload_from_search_result, safe_search_params_from_config
-from paperseek.web_app import app
 from tests.helpers import temporary_env
 
 
@@ -177,48 +174,6 @@ class HistoryStoreTest(unittest.TestCase):
 
             self.assertIsNotNone(detail)
             self.assertIn("-05:00", detail["created_at"])
-
-class HistoryApiTest(unittest.TestCase):
-    def test_history_endpoint_reads_configured_local_database(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with temporary_env({
-                "PAPERSEEK_HISTORY_DB": str(Path(tmp) / "paperseek.db"),
-                "PAPERSEEK_HISTORY_ENABLED": "true",
-            }):
-                store = HistoryStore()
-                run_id = store.create_run("responsible AI", {"data_source": "openalex"})
-                store.fail_run(run_id, "Missing LLM key")
-
-                client = TestClient(app)
-                response = client.get("/api/history")
-                self.assertEqual(response.status_code, 200)
-                payload = response.json()
-                self.assertEqual(payload["history"][0]["id"], run_id)
-                self.assertEqual(payload["history"][0]["status"], "error")
-
-                detail = client.get(f"/api/history/{run_id}").json()
-                self.assertEqual(detail["error_message"], "Missing LLM key")
-
-    def test_clear_history_requires_explicit_confirmation(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with temporary_env({
-                "PAPERSEEK_HISTORY_DB": str(Path(tmp) / "paperseek.db"),
-                "PAPERSEEK_HISTORY_ENABLED": "true",
-            }):
-                store = HistoryStore()
-                run_id = store.create_run("platform governance", {"data_source": "openalex"})
-                self.assertTrue(run_id)
-
-                client = TestClient(app)
-                response = client.delete("/api/history")
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(len(store.list_runs()), 1)
-
-                confirmed = client.delete("/api/history?confirm=true")
-                self.assertEqual(confirmed.status_code, 200)
-                self.assertEqual(confirmed.json()["deleted"], 1)
-                self.assertEqual(store.list_runs(), [])
-
 
 if __name__ == "__main__":
     unittest.main()
