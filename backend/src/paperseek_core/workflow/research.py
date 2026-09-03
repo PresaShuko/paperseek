@@ -24,13 +24,17 @@ from paperseek_core.models import (
 )
 from paperseek_core.ports import (
     AbstractPort,
+    CandidateMetadataPort,
     CancellationToken,
+    EmbeddingPort,
     LLMPort,
+    RerankPort,
     SourcePort,
     WorkflowObserver,
 )
 from paperseek_core.query_loop import QueryLoopPipeline
-from paperseek_core.ranking import RankingPipeline, document_key
+from paperseek_core.document_identity import document_key
+from paperseek_core.ranking import RankingPipeline
 from paperseek_core.retrieval import RetrievalPipeline
 
 
@@ -42,12 +46,18 @@ class ResearchWorkflow:
         source: SourcePort,
         observer: WorkflowObserver,
         abstracts: AbstractPort | None = None,
+        candidate_metadata: CandidateMetadataPort | None = None,
+        embedding: EmbeddingPort | None = None,
+        reranker: RerankPort | None = None,
         cancellation: CancellationToken = NEVER_CANCELLED,
     ) -> None:
         self.llm = llm
         self.source = source
         self.observer = observer
         self.abstracts = abstracts
+        self.candidate_metadata = candidate_metadata
+        self.embedding = embedding
+        self.reranker = reranker
         self.cancellation = cancellation
 
     async def run(self, request: ResearchWorkflowRequest) -> ResearchResult:
@@ -56,6 +66,19 @@ class ResearchWorkflow:
             "workflow.started",
             {"source": self.source.name, "question_length": len(request.question)},
         )
+        recovery = {
+            "query": int(resume.query is not None),
+            "retrieval": int(
+                resume.retrieval is not None
+                or bool(resume.retrieval_completed_lanes)
+                or bool(resume.retrieval_lane_results)
+            ),
+            "citation": int(resume.citation is not None),
+            "ranking": int(bool(resume.ranking_scores) or bool(resume.ranking_completed_batch_ids)),
+            "enrichment": int(resume.enrichment is not None),
+        }
+        if any(recovery.values()):
+            self._event("workflow.recovery", recovery)
         query = await QueryLoopPipeline(
             self.llm,
             self.source,
@@ -72,11 +95,15 @@ class ResearchWorkflow:
                 update={
                     "resume_lane_results": resume.retrieval_lane_results,
                     "completed_lanes": resume.retrieval_completed_lanes,
+                    "crossref_metadata_enrichment": request.crossref_metadata_enrichment,
                 }
             )
             retrieval = await RetrievalPipeline(
                 self.source,
                 self.observer,
+                candidate_metadata=self.candidate_metadata,
+                embedding=self.embedding,
+                reranker=self.reranker,
                 cancellation=self.cancellation,
             ).run(retrieval_request)
         self.cancellation.raise_if_cancelled()
@@ -210,6 +237,7 @@ class ResearchWorkflow:
     ) -> QueryLoopRequest:
         return QueryLoopRequest(
             question=request.question,
+            source_context=request.source_context,
             budget=request.query_budget,
             resume=resume.query,
         )

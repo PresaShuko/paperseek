@@ -1,7 +1,11 @@
 import type {
   CitationMap,
+  DiagnosticResult,
+  DiagnosticSubmission,
   PaperResult,
+  ResultPage,
   RunDetail,
+  RunAudit,
   RunEvent,
   SearchSubmission,
   SourceDescriptor,
@@ -9,12 +13,24 @@ import type {
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string) {
+    super(code);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, init);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const code = payload?.error?.code || `http_${response.status}`;
-    throw new Error(code);
+    throw new ApiError(response.status, code);
   }
   return response.json() as Promise<T>;
 }
@@ -22,6 +38,14 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   async sources(): Promise<SourceDescriptor[]> {
     return (await json<{ sources: SourceDescriptor[] }>("/api/v1/sources")).sources;
+  },
+
+  diagnostics(payload: DiagnosticSubmission): Promise<DiagnosticResult> {
+    return json<DiagnosticResult>("/api/v1/diagnostics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   },
 
   submit(payload: SearchSubmission, idempotencyKey: string): Promise<RunDetail> {
@@ -35,29 +59,62 @@ export const api = {
     });
   },
 
-  run(runId: string): Promise<RunDetail> {
-    return json<RunDetail>(`/api/v1/runs/${runId}`);
+  run(runId: string, signal?: AbortSignal): Promise<RunDetail> {
+    return json<RunDetail>(`/api/v1/runs/${runId}`, { signal });
   },
 
-  async results(runId: string): Promise<PaperResult[]> {
-    return (await json<{ results: PaperResult[] }>(`/api/v1/runs/${runId}/results`)).results;
+  cancel(runId: string, signal?: AbortSignal): Promise<RunDetail> {
+    return json<RunDetail>(`/api/v1/runs/${runId}/cancel`, { method: "POST", signal });
   },
 
-  citationMap(runId: string): Promise<CitationMap> {
-    return json<CitationMap>(`/api/v1/runs/${runId}/citation-map`);
+  resultPage(runId: string, cursor?: string, signal?: AbortSignal): Promise<ResultPage> {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    return json<ResultPage>(`/api/v1/runs/${runId}/results${query}`, { signal });
   },
 
-  async history(): Promise<RunDetail[]> {
-    return (await json<{ items: RunDetail[] }>("/api/v1/history")).items;
+  async results(runId: string, signal?: AbortSignal): Promise<PaperResult[]> {
+    return (await this.resultPage(runId, undefined, signal)).results || [];
+  },
+
+  citationMap(runId: string, signal?: AbortSignal): Promise<CitationMap> {
+    return json<CitationMap>(`/api/v1/runs/${runId}/citation-map`, { signal });
+  },
+
+  audit(runId: string, signal?: AbortSignal): Promise<RunAudit> {
+    return json<RunAudit>(`/api/v1/runs/${runId}/audit`, { signal });
+  },
+
+  async history(cursor?: string, signal?: AbortSignal): Promise<{ items: RunDetail[]; next_cursor: string | null }> {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    return json<{ items: RunDetail[]; next_cursor?: string | null }>(`/api/v1/history${query}`, { signal }).then(
+      (page) => ({ items: page.items || [], next_cursor: page.next_cursor ?? null }),
+    );
+  },
+
+  deleteHistoryRun(runId: string): Promise<{ run_id: string; status: string }> {
+    return json<{ run_id: string; status: string }>(`/api/v1/history/${runId}`, { method: "DELETE" });
   },
 
   exportUrl(runId: string, format: "csv" | "json"): string {
     return `${apiBase}/api/v1/runs/${runId}/export?format=${format}`;
   },
 
-  async events(runId: string, onEvent: (event: RunEvent) => void): Promise<void> {
+  logUrl(runId: string): string {
+    return `${apiBase}/api/v1/runs/${runId}/logs`;
+  },
+
+  async events(
+    runId: string,
+    afterSequence: number,
+    onEvent: (event: RunEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const response = await fetch(`${apiBase}/api/v1/runs/${runId}/events`, {
-      headers: { Accept: "text/event-stream" },
+      headers: {
+        Accept: "text/event-stream",
+        "Last-Event-ID": String(afterSequence),
+      },
+      signal,
     });
     if (!response.ok || !response.body) throw new Error(`events_http_${response.status}`);
     const reader = response.body.getReader();
@@ -69,12 +126,17 @@ export const api = {
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() || "";
       for (const frame of frames) {
-        const data = frame
-          .split(/\r?\n/)
+        const lines = frame.split(/\r?\n/);
+        const id = lines.find((line) => line.startsWith("id:"))?.slice(3).trim();
+        const data = lines
           .filter((line) => line.startsWith("data:"))
           .map((line) => line.slice(5).trimStart())
           .join("\n");
-        if (data) onEvent(JSON.parse(data) as RunEvent);
+        if (data) {
+          const event = JSON.parse(data) as RunEvent;
+          if (id !== undefined && Number(id) !== event.sequence) throw new Error("event_cursor_mismatch");
+          onEvent(event);
+        }
       }
       if (done) break;
     }

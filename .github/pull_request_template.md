@@ -19,10 +19,11 @@ Select all that apply:
 
 List the checks you ran:
 
-- [ ] `python -m compileall -q paperseek skills/paperseek/scripts`
+- [ ] `uv run --directory backend --locked python -m compileall -q src`
 - [ ] `python -m unittest discover -s tests`
-- [ ] `python -m pytest -q`
-- [ ] `node --check paperseek/static/app.js`
+- [ ] `uv run --directory backend --locked python -m unittest discover -s tests/contract -p "*contract.py"`
+- [ ] `uv run --directory backend --locked python -m unittest discover -s tests/integration -p "*.py"`
+- [ ] `npm --prefix web run typecheck && npm --prefix web run build`
 - [ ] Manual smoke test:
 
 ## Notes

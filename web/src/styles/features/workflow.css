@@ -1,0 +1,482 @@
+/* Workflow stages — §6: numbered stage + one-line summary + disclosure icon;
+   only the current stage carries the orange accent; statuses use text/icon + color */
+
+.workflow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Four stages are segments of one workflow panel, not floating cards (§6) */
+.stage-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.stage-card--active {
+  border-color: var(--color-accent);
+}
+
+.stage-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.stage-summary::-webkit-details-marker {
+  display: none;
+}
+
+.stage-number {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  font-size: var(--text-meta);
+  font-weight: 700;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+.stage-card--active .stage-number {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-surface);
+}
+
+.stage-card[data-state="complete"] .stage-number {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.stage-card[data-state="failed"] .stage-number {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.stage-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.stage-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.stage-summary-line {
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.stage-elapsed {
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage-body {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Compact step rows inside a stage (§6.3): completed steps compress to one line */
+.step-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+.step-row:last-child {
+  border-bottom: 0;
+}
+
+.step-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.step-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.step-icon--done {
+  color: var(--color-success);
+}
+
+.step-icon--current {
+  color: var(--color-accent);
+}
+
+.step-icon--failed,
+.step-icon--degraded {
+  color: var(--color-danger);
+}
+
+.step-icon--pending {
+  color: var(--color-text-muted);
+}
+
+.step-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.step-detail {
+  flex: none;
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-detail--accent {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.step-progress {
+  flex: 0 1 160px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-surface-subtle);
+  overflow: hidden;
+}
+
+.step-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transition: width var(--duration) var(--easing);
+}
+
+@media (max-width: 480px) {
+  .step-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: var(--space-1) var(--space-3);
+    align-items: center;
+  }
+
+  .step-icon {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .step-name {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .step-detail {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .step-progress {
+    grid-column: 2;
+    grid-row: 3;
+    width: 100%;
+  }
+}
+
+/* Audit detail blocks inside a stage body: structured key/value, no raw JSON wall */
+.audit-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.audit-block h4 {
+  font-size: var(--text-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.audit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.audit-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-subtle);
+  min-width: 0;
+}
+
+.structured-event-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.structured-event-row > span {
+  color: var(--color-text-muted);
+}
+
+.audit-item code,
+.audit-raw {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Stage-four completion entries (§6): in-place, no auto navigation */
+.stage-entries {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+/* Failed-stage recovery actions: only operations that really exist (§6) */
+.stage-recovery {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* System log (§6.4): collapsed by default, monospace, stable order, export entry */
+.log-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.log-card > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  list-style: none;
+}
+
+.log-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.log-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  min-width: 0;
+}
+
+.log-body {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.log-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.log-content {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.log-content .log-line--error {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+/* Run sidebar summary (left pane of /runs/:id) */
+.run-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.run-panel-primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.run-panel > .badge {
+  align-self: flex-start;
+}
+
+.run-panel-question {
+  font-size: var(--text-section-title);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.run-panel-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+}
+
+.run-panel-facts .fact {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.run-panel-facts .fact dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+}
+
+.run-panel-facts .fact dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.run-diagnostics {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+}
+
+.run-diagnostics > summary {
+  min-height: var(--control-h);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.run-diagnostics code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.run-warnings {
+  list-style: none;
+  padding: var(--space-3);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  font-size: var(--text-meta);
+}
+
+/* Connection notice (§10.6): connection is not run state */
+.connection-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+}
+
+/* Mobile-only slim sticky stage bar (§12.5): content element, not a topbar status */
+.mobile-stage-bar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-stage-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    min-height: var(--touch-target);
+    padding: 0 var(--space-4);
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text);
+    text-align: left;
+    width: 100%;
+  }
+
+  .mobile-stage-bar .stage-elapsed {
+    margin-left: auto;
+  }
+}

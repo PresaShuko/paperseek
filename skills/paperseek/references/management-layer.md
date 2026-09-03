@@ -1,131 +1,49 @@
 # Management Layer Reference
 
-Use this reference when checking whether PaperSeek is installed, configured, healthy, or ready for a live literature search. These commands support readiness and troubleshooting; they do not perform a full literature task by themselves.
+## Installation
 
-## Skill Script Launcher
-
-The Skill includes:
+Install the Community package from a release or from this repository's only active Python source:
 
 ```bash
-python skills/paperseek/scripts/paperseek.py
+python -m pip install -e ./backend
+paperseek version
+paperseek doctor --json
 ```
 
-This script is a package-aware launcher with a self-contained fallback runtime. It first tries the full PaperSeek Python package. If the package is not importable, it falls back to `scripts/paperseek_skill_runtime.py`, which can run core `search`, `smoke`, `sources`, `doctor`, `config`, and `history path` commands without third-party dependencies.
+The Skill does not contain a standalone fallback runtime. If `paperseek` is unavailable, install it rather than running source files from `skills/`.
 
-Use the launcher when a standalone Skill distribution needs a stable script entrypoint:
+## Current configuration
+
+Use only current `PAPERSEEK_*` environment names. Common deployment settings are:
+
+- `PAPERSEEK_DATABASE`
+- `PAPERSEEK_LLM_API_TYPE`, `PAPERSEEK_LLM_BASE_URL`, `PAPERSEEK_LLM_MODEL`, `PAPERSEEK_LLM_API_KEY`
+- `PAPERSEEK_OPENALEX_API_KEY`, `PAPERSEEK_SEMANTIC_SCHOLAR_API_KEY`, `PAPERSEEK_PUBMED_API_KEY`
+- `PAPERSEEK_GOOGLE_SCHOLAR_API_KEY`, `PAPERSEEK_WOS_API_KEY`, `PAPERSEEK_WOS_DB`
+
+Never copy secret values into chat, logs, Skill files, documentation, or tests. Doctor reports configuration status and setting names without echoing values.
+
+For a v0.2 env file, perform the explicit one-time conversion:
 
 ```bash
-python skills/paperseek/scripts/paperseek.py --help
-python skills/paperseek/scripts/paperseek.py search "platform governance and user innovation" --source openalex --json
-python skills/paperseek/scripts/paperseek.py doctor
-python skills/paperseek/scripts/paperseek.py smoke --source openalex --query "machine learning" --json
+paperseek migrate --legacy-env .env.v0.2 --output-env .env
 ```
 
-If the full package is not importable:
+Review the name-only report, then load the new file. Runtime settings do not permanently read old names.
+
+## Local service
 
 ```bash
-python skills/paperseek/scripts/paperseek.py --install-help
+paperseek migrate --database paperseek.db
+paperseek serve --database paperseek.db --host 127.0.0.1 --port 8765
 ```
 
-When the Skill is distributed separately from the repository, the bundled runtime can still search OpenAlex/Crossref/WoS directly. Install the full PaperSeek package only when the user needs the Web UI, citation maps, full history commands, or exact package parity. If the package source exists locally but is not importable, set:
+Health endpoints are `/health` and `/ready`; product endpoints are under `/api/v1`. The Vue application uses run-scoped routes such as `/runs/{run_id}`, `/runs/{run_id}/results`, and `/runs/{run_id}/citation-map`.
 
-```bash
-PAPERSEEK_PROJECT_ROOT=/path/to/paperseek
-```
+Use `paperseek serve --no-worker` only when a separate `paperseek worker` process owns execution for the same database.
 
-## Health Commands
+## Diagnostics
 
-```bash
-python skills/paperseek/scripts/paperseek.py --help
-python skills/paperseek/scripts/paperseek.py doctor
-python skills/paperseek/scripts/paperseek.py doctor --json
-python skills/paperseek/scripts/paperseek.py sources
-python skills/paperseek/scripts/paperseek.py sources --json
-python skills/paperseek/scripts/paperseek.py smoke --source openalex --query "machine learning" --json
-paperseek history list
-paperseek config list
-```
+`paperseek doctor --json` is a static readiness check. A warning may mean an optional credential or recommended contact email is absent; a failure means required local configuration or storage is unusable. It does not treat live third-party network success as a default hard requirement.
 
-| Command | Purpose | Use when |
-| --- | --- | --- |
-| `paperseek doctor` | Static configuration diagnostics without live source requests | First use, uncertain setup, or before a real search |
-| `paperseek doctor --json` | Machine-readable diagnostics | Agent needs to decide next action |
-| `paperseek smoke --source SOURCE --query QUERY --json` | Minimal live request to one literature source | Network, source availability, or key validity is uncertain |
-| `paperseek sources --json` | Source capability registry | Need to know supported fields and source limits |
-| `paperseek history list` | Local saved-run index | User asks to recall prior searches on this self-hosted instance |
-| `paperseek config list` | Masked user-level config view | Need to check whether values are configured |
-
-## Configuration Sources
-
-Priority:
-
-1. Shell environment variables.
-2. User-level PaperSeek config under `~/.config/paperseek/config.json` unless `PAPERSEEK_CONFIG_FILE` or `PAPERSEEK_CONFIG_DIR` overrides it.
-3. CLI flags.
-4. Built-in defaults.
-
-The Web UI uses request/session values only. It does not save API keys or endpoint settings.
-
-Local search history is separate from user-level config. It is stored in SQLite under `~/.paperseek/paperseek.db` by default and can be disabled with `PAPERSEEK_HISTORY_ENABLED=false`.
-
-## User-Level Config
-
-Use these only when the user wants CLI configuration saved locally:
-
-```bash
-paperseek config path
-paperseek config keys
-paperseek config set LLM_PROVIDER deepseek
-paperseek config set LLM_API_TYPE openai_chat
-paperseek config set LLM_BASE_URL https://api.deepseek.com
-paperseek config set LLM_API_KEY YOUR_KEY
-paperseek config list
-paperseek config unset LLM_API_KEY
-```
-
-Never write real keys into Skill files, README, tests, logs, or chat. `paperseek config list` masks secret values; still avoid copying secret-like output unless necessary.
-
-## Web UI
-
-Start the UI:
-
-```bash
-paperseek-web
-```
-
-The Web UI requires the full PaperSeek package. The standalone Skill runtime is CLI-only.
-
-Fallback:
-
-```bash
-python -m paperseek.web_app
-```
-
-Default URL:
-
-```text
-http://127.0.0.1:8765/
-```
-
-If the port is busy, run uvicorn manually with another port:
-
-```bash
-python -m uvicorn paperseek.web_app:app --host 127.0.0.1 --port 8766
-```
-
-The Web UI provides `Check Config`, which calls `/api/diagnostics` and does not perform a live literature source request.
-
-## Interpreting Doctor
-
-Statuses:
-
-- `pass`: usable.
-- `warning`: usable but degraded or recommended config is missing.
-- `fail`: required config or command contract is broken.
-
-Common findings:
-
-- Missing `LLM_API_KEY`: required unless provider is `ollama`.
-- Missing `OPENALEX_API_KEY`: warning; live test may still work, but stable use should configure it.
-- Missing `CROSSREF_EMAIL`: warning; Crossref polite-pool email is recommended.
-- WoS marked temporarily unavailable: prefer OpenAlex while Clarivate access is being verified.
+For an agent tool client, install the exact matched `paperseek-mcp` release and use its durable run tools. The MCP distribution is not part of the Community default Compose service.

@@ -8,6 +8,7 @@ from typing import Any
 import xml.etree.ElementTree as ET
 
 from paperseek_core.models import PaperAuthor, PaperIdentifiers, PaperKeywords, PaperLinks, PaperNames, PaperRecord, PaperSource
+from paperseek_core.disciplines import apply_arxiv_category_filter
 from paperseek_core.sources.contracts import SourceCapabilities, SourceError, SourceSearchMetadata, SourceSearchRequest, SourceSearchResult
 from paperseek_core.sources.http import AsyncHttpTransport
 from paperseek_core.sources.normalization import normalize_doi
@@ -29,6 +30,7 @@ class ArxivSource:
             metadata_fields=("title", "names", "source", "identifiers", "abstract", "keywords"),
             supports_abstracts=True,
             supports_pdf_links=True,
+            supports_hard_field_filter=True,
             api_key="not_required",
             max_page_size=100,
             max_lane_limit=200,
@@ -42,7 +44,10 @@ class ArxivSource:
             raise SourceError(self.name, "arXiv search query is empty.")
         page_size = max(1, min(int(request.limit or 10), 100))
         params = {
-            "search_query": self._search_query(query),
+            "search_query": apply_arxiv_category_filter(
+                self._search_query(query),
+                request.field_ids,
+            ),
             "start": max(0, (int(request.page or 1) - 1) * page_size),
             "max_results": page_size,
             "sortBy": "submittedDate" if request.lane == "recent" else "relevance",

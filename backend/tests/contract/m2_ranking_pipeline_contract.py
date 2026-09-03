@@ -263,6 +263,12 @@ class M2RankingPipelineContractTest(unittest.TestCase):
         self.assertEqual(len(result.completed_batch_ids), 2)
         self.assertEqual(observer.events[0].event_type, "ranking.started")
         self.assertEqual(observer.events[-1].event_type, "ranking.completed")
+        self.assertEqual(observer.events[0].payload["llm_gate_candidate_count"], 4)
+        completed = [event.payload for event in observer.events if event.event_type == "ranking.batch_completed"]
+        self.assertEqual(completed[-1]["completed_batches"], 2)
+        self.assertEqual(completed[-1]["batch_count"], 2)
+        self.assertEqual(completed[-1]["scored_count"], 4)
+        self.assertEqual(completed[-1]["concurrency"], 4)
         self.assertEqual(result.warnings, [])
 
     def test_rate_limit_retries_failed_batch_at_lower_concurrency(self) -> None:

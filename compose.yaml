@@ -1,0 +1,17 @@
+name: paperseek
+
+services:
+  paperseek:
+    image: ghcr.io/mingfenghong/paperseek:${PAPERSEEK_VERSION:-latest}
+    command: ["serve", "--database", "/var/lib/paperseek/paperseek.db", "--host", "0.0.0.0", "--port", "8765"]
+    ports:
+      - "${PAPERSEEK_PORT:-8765}:8765"
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - paperseek-data:/var/lib/paperseek
+
+volumes:
+  paperseek-data:

@@ -144,6 +144,7 @@ class PersistedResult(AppModel):
     rank: int
     record: FinalPaperResult
     record_artifact_id: str
+    metadata_status: str = "not_requested"
 
 
 class ResultPage(AppModel):
@@ -187,6 +188,14 @@ class ArtifactContent(AppModel):
     sha256: str = Field(min_length=64, max_length=64)
     size: int = Field(ge=0)
     content: bytes
+
+
+class RunAudit(AppModel):
+    query_portfolio: list[dict[str, Any]] = Field(default_factory=list)
+    loop_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    candidate_queue: dict[str, Any] = Field(default_factory=dict)
+    candidate_lifecycle: dict[str, int] = Field(default_factory=dict)
+    recovery: dict[str, int] = Field(default_factory=dict)
 
 
 class DeletionReceipt(AppModel):

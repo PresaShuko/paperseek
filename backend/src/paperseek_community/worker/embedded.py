@@ -5,14 +5,14 @@ from collections.abc import Callable
 from paperseek_app.execution import CancellationScope, WorkflowExecution
 from paperseek_app.errors import RunOwnershipLost
 from paperseek_app.models import RunDetail
-from paperseek_app.services import RunService
+from paperseek_app.services import RunExecutionService
 from paperseek_core.ports import CancellationToken
 
 
 class EmbeddedRunExecutor:
     def __init__(
         self,
-        service: RunService,
+        service: RunExecutionService,
         resolve: Callable[[RunDetail, CancellationToken], WorkflowExecution],
         *,
         owner_id: str,
@@ -51,6 +51,9 @@ class EmbeddedRunExecutor:
                     source=execution.source,
                     request=execution.request,
                     abstracts=execution.abstracts,
+                    candidate_metadata=execution.candidate_metadata,
+                    embedding=execution.embedding,
+                    reranker=execution.reranker,
                     cancellation=cancellation,
                     cancellation_poll_seconds=self.cancellation_poll_seconds,
                     lease_seconds=self.lease_seconds,

@@ -1,0 +1,133 @@
+/* History — §13.3: desktop list + detail, mobile single column */
+
+.history-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 40%) 1fr;
+  gap: var(--space-4);
+  align-items: start;
+  min-height: 0;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.history-item--active {
+  border-color: var(--color-accent);
+}
+
+.history-open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.history-open strong {
+  overflow-wrap: anywhere;
+}
+
+.history-item-meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+}
+
+.history-item-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--text-meta);
+}
+
+.history-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.history-detail h3 {
+  overflow-wrap: anywhere;
+}
+
+.history-primary-detail,
+.history-technical-audit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.history-technical-audit {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.history-technical-audit > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h);
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.history-detail .run-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.history-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 320px;
+  overflow: auto;
+  font-size: var(--text-meta);
+}
+
+.history-event-list code {
+  font-family: var(--font-mono);
+}
+
+.history-detail-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .history-layout {
+    grid-template-columns: 1fr;
+  }
+}

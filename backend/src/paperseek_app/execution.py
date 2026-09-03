@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from paperseek_core.models import ResearchWorkflowRequest
-from paperseek_core.ports import AbstractPort, CancellationToken, LLMPort, SourcePort
+from paperseek_core.ports import AbstractPort, CandidateMetadataPort, CancellationToken, EmbeddingPort, LLMPort, RerankPort, SourcePort
 
 
 class CancellationScope:
@@ -33,6 +33,9 @@ class WorkflowExecution:
     source: SourcePort
     request: ResearchWorkflowRequest
     abstracts: AbstractPort | None = None
+    candidate_metadata: CandidateMetadataPort | None = None
+    embedding: EmbeddingPort | None = None
+    reranker: RerankPort | None = None
     close: Callable[[], Awaitable[None]] | None = None
 
 

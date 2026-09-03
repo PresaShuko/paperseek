@@ -19,7 +19,7 @@ from paperseek_core.models import (
 )
 from paperseek_core.execution import NEVER_CANCELLED
 from paperseek_core.ports import CancellationToken, CitationPort, WorkflowObserver
-from paperseek_core.ranking import document_key
+from paperseek_core.document_identity import document_key
 from paperseek_core.sources.contracts import SourceError
 
 

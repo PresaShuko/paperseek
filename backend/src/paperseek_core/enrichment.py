@@ -83,8 +83,10 @@ class AbstractEnrichmentPipeline:
                             "error_type": type(outcome).__name__,
                         },
                     )
+                    item.provenance["metadata_status"] = "degraded"
                 elif outcome.found and outcome.abstract:
                     abstract_by_uid[uid] = outcome.abstract
+                    item.provenance["metadata_status"] = "complete"
                 else:
                     warning = f"abstract_enrichment_unavailable:{doi}"
                     warnings.append(warning)
@@ -92,6 +94,7 @@ class AbstractEnrichmentPipeline:
                         "enrichment.degraded",
                         {"code": "abstract_enrichment_unavailable", "uid": uid},
                     )
+                    item.provenance["metadata_status"] = "unavailable"
             items = self._apply_abstracts(items, abstract_by_uid)
             warnings = list(dict.fromkeys(warnings))
             self._checkpoint(items, completed, abstract_by_uid, warnings)
@@ -100,6 +103,9 @@ class AbstractEnrichmentPipeline:
                 {
                     "completed_count": len(completed),
                     "request_count": len(pending),
+                    "current": len(completed),
+                    "total": len(pending),
+                    "concurrency": request.concurrency,
                     "warning_count": len(warnings),
                 },
             )
@@ -107,6 +113,10 @@ class AbstractEnrichmentPipeline:
             "enrichment.completed",
             {
                 "candidate_count": len(items),
+                "request_count": len(pending),
+                "current": len(completed),
+                "total": len(pending),
+                "concurrency": request.concurrency,
                 "enriched_count": len(abstract_by_uid),
                 "warning_count": len(warnings),
             },

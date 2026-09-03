@@ -1,0 +1,216 @@
+/* Citation map — §13.4/§8: legend with shape+text, keyboard-selectable nodes */
+
+.citation-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 34%);
+  gap: var(--space-4);
+  align-items: start;
+  min-height: 0;
+}
+
+.citation-map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.citation-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.citation-toolbar .spacer {
+  flex: 1;
+}
+
+.citation-legend {
+  list-style: none;
+  display: flex;
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  flex-wrap: wrap;
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+}
+
+.citation-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.legend-mark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 999px;
+  border: 2px solid var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.legend-mark--result {
+  border-color: var(--color-link);
+  background: var(--color-link-soft);
+}
+
+.legend-mark--seed {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.legend-mark--forward {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+  border-radius: 2px;
+}
+
+.legend-mark--backward {
+  border-color: var(--color-text-muted);
+  background: var(--color-surface-subtle);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.citation-graph {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.citation-graph svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 320px;
+  touch-action: none;
+}
+
+.citation-edge {
+  stroke: var(--color-border-strong);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.citation-edge marker path,
+.citation-graph marker path {
+  fill: var(--color-border-strong);
+}
+
+.citation-node {
+  cursor: pointer;
+}
+
+.citation-node .citation-hit-target {
+  fill: transparent;
+}
+
+.citation-node .citation-node-mark {
+  fill: var(--color-link-soft);
+  stroke: var(--color-link);
+  stroke-width: 2;
+}
+
+.citation-node[data-role~="seed"] .citation-node-mark {
+  fill: var(--color-accent-soft);
+  stroke: var(--color-accent);
+}
+
+.citation-node[data-role~="forward"] .citation-node-mark {
+  fill: var(--color-success-soft);
+  stroke: var(--color-success);
+}
+
+.citation-node[data-role~="backward"] .citation-node-mark {
+  fill: var(--color-surface-subtle);
+  stroke: var(--color-text-muted);
+}
+
+.citation-node[data-selected="true"] .citation-node-mark {
+  stroke-width: 4;
+}
+
+.citation-node:focus-visible {
+  outline: none;
+}
+
+.citation-node:focus-visible .citation-hit-target {
+  stroke: var(--color-link);
+  stroke-width: 2;
+  fill: none;
+}
+
+.citation-node text {
+  font-size: 11px;
+  fill: var(--color-text-muted);
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.citation-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.citation-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+.citation-detail-card .detail-meta {
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+}
+
+.citation-text-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.citation-text-list h3 {
+  font-size: var(--text-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.citation-text-list .node-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.citation-text-list .node-button:hover {
+  background: var(--color-surface-subtle);
+}
+
+.citation-text-list .node-button[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+@media (max-width: 900px) {
+  .citation-layout {
+    grid-template-columns: 1fr;
+  }
+}

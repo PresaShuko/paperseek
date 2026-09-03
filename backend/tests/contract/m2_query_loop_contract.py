@@ -18,14 +18,10 @@ from paperseek_core.models import (
     SearchPlan,
 )
 from paperseek_core.ports import LLMPort, SourcePort
-from paperseek_core.query_loop import (
-    QueryLoopController,
-    QueryLoopPipeline,
-    QueryPlanner,
-    compile_query_view,
-    parse_search_plan,
-    validate_source_query,
-)
+from paperseek_core.query_compiler import compile_query_view, validate_source_query
+from paperseek_core.query_parsing import parse_search_plan
+from paperseek_core.query_loop import QueryLoopPipeline
+from paperseek_core.query_planning import QueryLoopController, QueryPlanner
 from paperseek_core.sources.contracts import (
     SourceCapabilities,
     SourceError,
@@ -127,6 +123,34 @@ def m0_plan() -> SearchPlan:
 
 
 class M2QueryLoopContractTest(unittest.IsolatedAsyncioTestCase):
+    async def test_source_filter_context_reaches_user_messages_without_changing_system_prompts(self) -> None:
+        context = (
+            "\nResearch field/context hint: distributed systems.\n"
+            "Use this hint only to choose better source terms."
+        )
+        llm = FixtureLLM(
+            read_text("llm/intent_search_plan.json"),
+            read_text("llm/query_generated.json"),
+        )
+        planner = QueryPlanner(llm)
+        plan = await planner.plan(
+            QUESTION,
+            portfolio_required=True,
+            source_context=context,
+        )
+        await planner.propose(
+            "arxiv",
+            QUESTION,
+            plan,
+            operation="generate",
+            source_context=context,
+        )
+
+        self.assertEqual(llm.calls[0]["messages"][0]["content"], prompts.SYSTEM_SEARCH_INTENT_ANALYSIS)
+        self.assertEqual(llm.calls[1]["messages"][0]["content"], prompts.SYSTEM_ARXIV_QUERY_GENERATION)
+        self.assertIn(context, llm.calls[0]["messages"][1]["content"])
+        self.assertIn(context, llm.calls[1]["messages"][1]["content"])
+
     async def test_m0_prompt_hashes_search_plan_and_source_queries_are_exact(self) -> None:
         frozen = json.loads(read_text("baseline/frozen_search_semantics.json"))
         for name, expected in frozen["prompt_sha256"].items():
@@ -359,6 +383,34 @@ class M2QueryLoopContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.retrieval_request.ranking_candidate_limit, 256)
         self.assertEqual(observer.checkpoints[-1].step_key, "query.complete")
         self.assertEqual(observer.checkpoints[-1].workflow_version, "m2.query-loop.v1")
+        planned = next(event for event in observer.events if event.event_type == "query.planned")
+        self.assertEqual(planned.payload["intent"], golden["search_plan"]["intent"])
+        self.assertEqual(planned.payload["question_type"], golden["search_plan"]["question_type"])
+        self.assertEqual(planned.payload["current_query"], golden["final_query"])
+        self.assertEqual(planned.payload["query_views"], golden["search_plan"]["query_views"])
+        request_started = next(event for event in observer.events if event.event_type == "query.request_started")
+        self.assertEqual(request_started.payload["query"], golden["final_query"])
+        decision = next(event for event in observer.events if event.event_type == "query.progress")
+        self.assertEqual(
+            {
+                "query": decision.payload["query"],
+                "action": decision.payload["decision"],
+                "message": decision.payload["message"],
+                "reason": decision.payload["reason"],
+            },
+            {
+                "query": golden["final_query"],
+                "action": golden["history"][0]["action"],
+                "message": golden["history"][0]["message"],
+                "reason": golden["history"][0]["controller_reason"],
+            },
+        )
+        portfolio_events = [
+            event.payload
+            for event in observer.events
+            if event.event_type == "query.portfolio_recorded"
+        ]
+        self.assertEqual(portfolio_events, golden["query_portfolio"])
 
     async def test_broadened_query_and_iteration_memory_feed_retrieval_without_repeating_final_query(self) -> None:
         recovered = PaperRecord(uid="recovered", title="Recovered evidence", provider="openalex")

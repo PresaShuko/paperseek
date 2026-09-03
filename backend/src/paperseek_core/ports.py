@@ -5,6 +5,8 @@ from typing import Any, Protocol, runtime_checkable
 from paperseek_core.models import (
     AbstractFetchRequest,
     AbstractFetchResult,
+    CandidateMetadataEnrichmentRequest,
+    CandidateMetadataEnrichmentResult,
     CheckpointDraft,
     CitationSourceRequest,
     CitationSourceResult,
@@ -40,6 +42,14 @@ class AbstractPort(Protocol):
         self,
         request: AbstractFetchRequest,
     ) -> AbstractFetchResult: ...
+
+
+@runtime_checkable
+class CandidateMetadataPort(Protocol):
+    async def enrich_candidate_metadata(
+        self,
+        request: CandidateMetadataEnrichmentRequest,
+    ) -> CandidateMetadataEnrichmentResult: ...
 
 
 @runtime_checkable

@@ -1,708 +1,200 @@
-﻿<p align="center">
-  <img src="docs/assets/paperseek_logo_with_text.png" alt="PaperSeek" width="560">
-</p>
+<div align="center">
+  <img src="docs/assets/paperseek_logo_with_text.png" alt="PaperSeek" width="520">
+  <p>可停止、可恢复、可审计的学术论文检索工具。</p>
+</div>
 
-<p align="center">
-  <strong>AI-powered literature search and discovery at research speed.</strong>
-</p>
+# PaperSeek Community
 
-<p align="center">
-  输入一句研究问题，PaperSeek 自动生成检索式、迭代命中范围、扩展引用网络、排序候选论文，并导出可复核结果。
-  <br>
-  面向开题、综述、跨学科选题和日常文献追踪的开源检索工作流。
-</p>
+PaperSeek v0.3.0 把研究问题转换为结构化检索计划，在八个学术数据源上执行多路召回、引用扩展、摘要补全和排序，并将运行、事件、检查点、结果和 artifacts 持久化到本地 SQLite/文件系统。
 
-<p align="center">
-  <a href="https://www.paperseek.xyz/">在线版</a>
-  ·
-  <a href="https://docs.paperseek.xyz/">文档站</a>
-  ·
-  <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek">创空间</a>
-  ·
-  <a href="https://modelscope.cn/learn/434408">社区文章</a>
-  ·
-  <a href="https://modelscope.cn/skills/HongMingfeng/paperseek">Skill</a>
-  ·
-  <a href="#mcp-server">MCP</a>
-</p>
+v0.3.0 是 breaking architecture release。正式产品只有新的 Vue + FastAPI + application/core 路径；旧 Python 内部 API、旧命令、旧运行时和已移除配置值不提供兼容 fallback。
 
-<p align="center">
-  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white"></a>
-  <a href="https://pypi.org/project/paperseek/"><img alt="PyPI" src="https://img.shields.io/pypi/v/paperseek?color=3775A9&label=PyPI"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
-  <a href="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/MingfengHong/paperseek/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="#项目状态"><img alt="Status" src="https://img.shields.io/badge/status-alpha-orange"></a>
-  <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek"><img alt="ModelScope visits" src="https://img.shields.io/badge/ModelScope%20visits-2.6k-624AFF?logo=modelscope&logoColor=white"></a>
-</p>
+## 主要能力
 
-<p align="center">
-  <img src="docs/assets/paperseek-banner.png" alt="PaperSeek banner">
-</p>
-
-<p align="center">
-  <strong>语言：</strong>
-  简体中文
-  ·
-  <a href="README.en.md">English</a>
-</p>
-
-## 更新说明
-
-### v0.3.0 - 检索规划、可恢复循环与渐进式审计
-
-- 新增结构化检索计划：先识别核心概念、必要条件、可选条件、关系约束和歧义，再为所选数据源生成可校验的查询；查询生成与修订统一使用结构化 JSON 契约，格式或源语法不合格时会在请求数据源前重试。
-- 新增有界 Query Portfolio 与候选账本。主查询之外至少规划三个互补视角，并按预算选择有效、非重复视角执行；每个候选记录来源、去重和恢复信息，便于审计召回过程。
-- 检索循环改为由原生执行器驱动的显式状态机；停止、失败和网络波动会保留部分结果与检查点，允许从最近阶段恢复，而不是重新开始整个检索。
-- 新增 `fast`、`medium`、`high`、`max` 检索预算。默认 `fast` 控制请求量；更高预算会同步扩大查询、召回、排序和引用扩展容量。检索预算不再更改模型服务自身的思考设置。
-- Web UI 改为渐进式过程展示：当前阶段自动展开，已完成阶段折叠为摘要，错误和恢复审计按需展开；检索完成后仍停留在流程页，由用户决定何时查看结果或引用图谱。
-- 检索流程设计参考 PASA 的检索规划、候选队列和证据扩展思路；结构化数据契约由 Pydantic 支持，PydanticAI 可用于严格校验模型输出；计算机顶会数据源继续基于经作者同意的 PaperHub 集成。
-- WoS Starter 改用更轻量的适配层，现有调用方式保持兼容，并提供更清晰的鉴权、查询参数和上游错误提示。
-- Python 最低版本调整为 3.12。升级、配置变化和兼容边界见 [v0.3.0 更新说明](docs/v0.3.0.md)。
-
-### v0.2.1 - 在线服务与模型路由更新
-
-- 在线版 PaperSeek Service 开放 Semantic Scholar、PubMed 和 Crossref 数据源；Crossref 不需要 API Key。
-- 在线版更新模型服务：PaperSeek Service 可直接选择 Auto、GPT-5.6 Luna、Gemini 3.5 Flash、DeepSeek V4 Flash 或 GPT-OSS-120B；Auto 的模型回退由在线端点统一处理。
-- 补充在线版 PaperSeek Service、Third-party Service 与 Bring your own Key / BYOK 使用边界说明。
-
-### v0.2.0 - 多源检索与多路召回
-
-- 新增 arXiv、Semantic Scholar、PubMed、Google Scholar（通过 Serper）、计算机顶会和 Crossref 数据源。
-- 检索流程升级为按数据源生成检索式、意图识别、多轮结果反馈和轻量多路召回预重排。
-- 新增轻量多路召回预重排：在 LLM 打分前，按数据源能力综合相关性、高影响力/引用、时效性和本地质量信号，并用 RRF、BM25/词项覆盖和本地 hashing embedding 融合；可选接入 OpenAI-compatible embedding/reranker。
-- 更新了在线版的用户注册与登录系统。现在 PaperSeek 默认使用邮箱注册与登录，支持 GitHub、ModelScope、Hugging Face 等站点的 OAuth，并为登录用户提供高达每日 20 次成功检索的免费额度。
-
-### v0.1.1 - 界面语言、历史与学科筛选
-
-- Web UI 支持 `EN` / `中文` 语言切换，语言选择会保存在当前浏览器中，见 [#10](https://github.com/MingfengHong/paperseek/issues/10)。
-- 新增本地历史记录保存，记录检索运行、日志事件、检索式和结果，便于回看并恢复结果视图，见 [#2](https://github.com/MingfengHong/paperseek/issues/2)。
-- 优化 CSV 与日志导出文件名，使用研究问题主题和本地时间生成更容易辨认的文件名，见 [#3](https://github.com/MingfengHong/paperseek/issues/3)。
-- 支持 OpenAlex Field 学科分类筛选，并将所选学科传递给引用扩展，减少结果池偏离所选领域的情况。
-
-## 为什么需要 PaperSeek
-
-文献检索的难点在于判断检索是否完整、准确，尤其是在同义词、跨学科术语和不同数据库检索规则并存时。PaperSeek 把自然语言研究意图转成可执行、可观察、可回看的检索流程，让每一步生成、调整和排序都有迹可循。
-
-PaperSeek 专注于第一轮候选文献发现和元数据整理，帮助研究者把检索过程、候选集和排序依据整理成可复查的数据。
-
-## PaperSeek 会做什么
-
-- **理解研究问题**：从中文或英文研究问题生成适配 OpenAlex、arXiv、Semantic Scholar、PubMed、Google Scholar（通过 Serper）、计算机顶会、Crossref 或 WoS Starter 的检索查询。
-- **规划互补检索视角**：先把问题整理成可审计的 SearchPlan，再在受控请求预算内执行互补 Query Portfolio，减少单一命名体系造成的漏检。
-- **自动校准检索式**：结合命中数量和前排题名是否符合研究意图调整查询。默认采用 `fast` 检索预算；只有连续零结果或候选过少时才有限延长，宽但相关的结果直接进入有界多路召回。
-- **结构化候选集**：整理题名、作者、期刊、年份、DOI、摘要、引用数、关键词和链接等元数据。
-- **排序并解释相关性**：用 LLM 对候选论文打分，并给出简短评分理由。
-- **扩展引用网络**：通过 OpenAlex 扩展高匹配论文的参考文献和被引论文，并展示 Citation Map。
-- **按数据源限定领域**：在研究问题下方选择数据源，再使用 OpenAlex Field、WoS Category 或 arXiv Category 等可靠原生过滤；无可靠硬过滤的数据源使用领域文本提示辅助生成检索式。
-- **保留可复核过程**：在 Web UI 中查看意图、查询视角、候选来源、排序阶段、引用图和本地历史记录；停止或失败后可从最近检查点继续，并可导出 CSV。
-
-## 选择使用方式
-
-- **在线版**：直接访问 [paperseek.xyz](https://www.paperseek.xyz/)。支持 PaperSeek Service、Third-party Service（ModelScope、OpenRouter、Hugging Face）和 Bring your own Key 三种模式；Bring your own Key 即 bring your own provider keys (BYOK)，适合快速试用或自带服务商 Key；详情见 [在线体验版使用说明](docs/online-demo.md)。
-- **开源自托管版**：通过 PyPI、源码安装、Docker 或 VPS 运行，适合长期检索、引用扩展和大量请求。
-- **ModelScope 创空间**：可在 [PaperSeek 创空间](https://modelscope.cn/studios/HongMingfeng/PaperSeek) 直接使用，也可参考部署指南创建自己的 Docker 创空间。
-- **Agent Skill**：可复制 `skills/paperseek/` 到支持 Skill 的 agent 平台；Skill 自带轻量 runtime，可在未安装完整包时执行核心检索。
-- **MCP Server**：安装 `paperseek[mcp]` 后运行 `paperseek-mcp`，将文献检索、诊断和历史记录暴露为 MCP 工具，供支持 MCP 的 AI agent 直接调用。
-
-完整使用说明见 [PaperSeek 用户手册](docs/user-manual.md)；部署说明见 [Docker、Vercel 与 ModelScope 部署指南](docs/deployment.md)。
+- 八数据源：OpenAlex、arXiv、Crossref、Semantic Scholar、PubMed、Google Scholar/Serper、PaperHub 计算机顶会、Web of Science Starter。
+- Query planning、检索式迭代和 Query Portfolio。
+- 多路召回、本地 hashing/BM25/RRF，以及可选外部 embedding/reranker。
+- OpenAlex 引用扩展与引用图谱。
+- 任意 selected source 的 DOI 通过独立 Crossref 服务补全摘要；可选 Crossref candidate metadata 补全默认关闭。
+- LLM 排序失败时保留本地顺序并记录降级事实。
+- durable run/events/checkpoint/lease/cancel/recovery。
+- Web、CLI、历史、结果、导出、图谱与中英文界面。
+- 独立 `paperseek-mcp` 发行和 Community Docker 镜像。
 
 ## 快速开始
 
-从 PyPI 安装稳定发布版：
+需要 Python 3.12+。
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install paperseek
+python -m pip install "paperseek==0.3.0"
+export PAPERSEEK_LLM_API_KEY=your-key
+paperseek serve
 ```
 
-Windows PowerShell：
+打开 `http://127.0.0.1:8765`。
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install paperseek
-```
-
-也可以 clone 仓库从源码安装，适合想查看或修改代码的用户：
+从源码安装时，Python distribution 的项目目录是 `backend/`：
 
 ```bash
-git clone https://github.com/MingfengHong/paperseek.git
-cd paperseek
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install ./backend
+paperseek version
 ```
 
-Windows PowerShell：
+## 正式 CLI
 
-```powershell
-git clone https://github.com/MingfengHong/paperseek.git
-cd paperseek
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .
-```
-
-启动网页界面：
-
-```bash
-paperseek-web
-```
-
-打开：
+安装后的 `paperseek` 只提供六个主命令：
 
 ```text
-http://127.0.0.1:8765/
+paperseek serve
+paperseek worker
+paperseek search
+paperseek doctor
+paperseek migrate
+paperseek version
 ```
 
-也可以直接使用命令行：
+运行一次持久检索：
 
 ```bash
-paperseek "open innovation and digital platforms" --source openalex
+paperseek search "responsible AI governance in public services" \
+  --source openalex \
+  --search-budget medium \
+  --citation-enabled \
+  --output json
 ```
 
-## 部署
+CLI 与 Web API 共用 submission normalizer、按职责拆分的 application services、SQLite UoW、artifact store 和 executor。缺少 key 或 provider 失败会留下明确的失败/降级运行，不会切到 fixture 或第二条 pipeline。
 
-Docker 是完整 Web UI 的推荐部署方式：
+高级单机分进程部署：
 
 ```bash
-docker compose up --build
+paperseek serve --database /data/paperseek.db --no-worker
+paperseek worker --database /data/paperseek.db
 ```
 
-打开：
-
-```text
-http://127.0.0.1:8765/
-```
-
-Vercel 可用于快速体验和轻量 Web UI 部署：
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FMingfengHong%2Fpaperseek)
-
-ModelScope 创空间也可通过 Docker 方式部署。点击下方按钮 fork 社区版创空间并创建自己的副本：
-
-<a href="https://modelscope.cn/studios/fork?target=HongMingfeng/PaperSeek"><img src="docs/assets/deploy-modelscope.svg" alt="Deploy to ModelScope" height="32"></a>
-
-长时间搜索、引用扩展和大量请求建议使用 Docker 或 VPS。完整说明见 [部署指南](docs/deployment.md)。
-
-## 最小配置
-
-PaperSeek 至少需要一个 LLM。默认数据源是 OpenAlex；OpenAlex 可匿名测试，但建议申请免费 API Key 以获得更稳定的访问体验。
-
-使用默认 OpenAI provider 时，只需要提供 LLM Key：
+WoS database selector 与 WoS Category 独立：
 
 ```bash
-export LLM_API_KEY=your-llm-api-key
-paperseek-web
+paperseek search "graph learning" \
+  --source wos \
+  --wos-db WOS \
+  --field-id "Computer Science, Artificial Intelligence"
 ```
 
-切换到 DeepSeek：
+## 配置
+
+`.env.example` 只列当前运行时支持的新名称：
+
+| 变量 | 用途 |
+| --- | --- |
+| `PAPERSEEK_DATABASE` | 可选 SQLite 路径。 |
+| `PAPERSEEK_LLM_API_TYPE` | `openai_chat`、`openai_responses` 或 `anthropic_messages`。 |
+| `PAPERSEEK_LLM_BASE_URL` | 模型 API base URL。 |
+| `PAPERSEEK_LLM_MODEL` | 模型名。 |
+| `PAPERSEEK_LLM_API_KEY` | LLM API key。 |
+| `PAPERSEEK_OPENALEX_API_KEY` | OpenAlex，可选但推荐。 |
+| `PAPERSEEK_SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar，可选。 |
+| `PAPERSEEK_PUBMED_API_KEY` | PubMed，可选。 |
+| `PAPERSEEK_WOS_API_KEY` | WoS 必需。 |
+| `PAPERSEEK_WOS_DB` | WoS database，默认 `WOS`。 |
+| `PAPERSEEK_GOOGLE_SCHOLAR_API_KEY` | Serper API key。 |
+
+模型路由、embedding、reranker、数据源筛选、预算、引用和 enrichment 是每次运行的受校验选项，不是内部环境开关。
+
+### 一次性迁移旧 `.env`
+
+运行时不会双读旧变量。使用迁移边界生成新的 `.env`：
 
 ```bash
-export LLM_PROVIDER=deepseek
-export LLM_API_TYPE=openai_chat
-export LLM_MODEL=deepseek-v4-flash
-export LLM_BASE_URL=https://api.deepseek.com
-export LLM_API_KEY=your-llm-api-key
-paperseek-web
+paperseek migrate \
+  --legacy-env /path/to/old.env \
+  --output-env /path/to/paperseek-v0.3.env
 ```
 
-以中国科技云为例：
+只有仍具有相同语义的常用名称会映射。源文件中的其它键只按名称列入 `ignored_settings` 并忽略；迁移不会回显密钥、不会覆盖冲突目标，重复运行返回 `already_migrated`。目标文件含未知键、目标冲突或输入文件无效时，迁移会拒绝继续。`paperseek doctor --json` 只按变量名报告当前进程中可迁移的旧配置。
+
+### 迁移 v0.2 SQLite
 
 ```bash
-export LLM_PROVIDER=cstcloud
-export LLM_API_TYPE=openai_chat
-export LLM_MODEL=deepseek-v4-flash
-export LLM_BASE_URL=https://uni-api.cstcloud.cn/v1
-export LLM_API_KEY=your-cstcloud-api-key
-paperseek-web
+paperseek migrate --from-v0.2 /path/to/paperseek-v0.2.db
 ```
 
-以 ModelScope API-Inference 为例：
-
-```bash
-export LLM_PROVIDER=modelscope
-export LLM_API_TYPE=openai_chat
-export LLM_MODEL=Qwen/Qwen3-235B-A22B-Instruct-2507
-export LLM_BASE_URL=https://api-inference.modelscope.cn/v1
-export LLM_API_KEY=your-modelscope-token
-paperseek-web
-```
-
-Windows PowerShell：
-
-```powershell
-$env:LLM_API_KEY = "your-llm-api-key"
-paperseek-web
-```
-
-本地 Ollama 不需要 LLM API Key：
-
-```bash
-export LLM_PROVIDER=ollama
-export LLM_API_TYPE=openai_chat
-export LLM_MODEL=qwen3:8b
-export LLM_BASE_URL=http://127.0.0.1:11434/v1
-paperseek-web
-```
-
-项目提供 `.env.example`。复制为 `.env` 后先填 `LLM_API_KEY` 即可开始使用；高级参数默认保持注释。不要提交真实 API Key。CLI 和 Web 后端会自动读取当前目录或项目根目录下的 `.env`；已经存在的系统环境变量优先于 `.env`。
+迁移前建立一致性备份，并支持可测试的重复执行语义。详见[用户手册](docs/user-manual.md)。
 
 ## Web UI
 
-PaperSeek 的网页界面分为四个工作区：
-
-| 页面 | 用途 |
-| --- | --- |
-| Search | 输入研究问题，选择数据源、检索预算与学科筛选，配置 LLM；实时查看工作流与系统日志。 |
-| Results | 查看最终排序结果，搜索、过滤、排序、勾选，并导出论文 CSV。 |
-| Citation Map | 查看 OpenAlex 引用扩展形成的关系图，按箭头方向探索论文之间的引用关系。 |
-| History | 查看本地保存的搜索运行、SearchPlan、最终检索式、结果列表和运行事件；从停止或失败运行的最近检查点继续。 |
-
 ![PaperSeek web interface](docs/assets/paperseek-web.png)
 
-如果后端已经通过系统环境变量或 `.env` 配置了 API Key，Web UI 会显示环境中已配置的状态，不会把密钥内容发送到浏览器。Web UI 中填写的 API Key、Base URL 和参数只用于当前浏览器会话，不写入本地配置文件。历史记录会保存运行参数摘要、SearchPlan、查询视角、检索式、审计状态、日志事件、检查点和结果，但不会保存任何 API Key；成功完成后会删除该运行的临时检查点。
+主导航始终包含 Search、Results、Citation Map 和 History。运行使用可恢复 URL：
 
-Results 导出的 CSV 文件名使用研究问题主题和本地日期，便于区分多次运行。
-
-## CLI 用法
-
-基本检索：
-
-```bash
-paperseek "responsible AI governance in public sector" --source openalex
+```text
+/search
+/runs/{run_id}
+/runs/{run_id}/results
+/runs/{run_id}/citation-map
+/history
 ```
 
-显式子命令：
-
-```bash
-paperseek search "digital platforms and open innovation" --source openalex
-```
-
-JSON 输出：
-
-```bash
-paperseek search "open innovation" --source openalex --output json
-```
-
-常用参数：
-
-```bash
-paperseek search "your research question" \
-  --source openalex \
-  --field management \
-  --discipline "Computer Science" \
-  --min 5 \
-  --max 50 \
-  --iterations 5 \
-  --llm-provider deepseek \
-  --llm-api-type openai_chat \
-  --llm-model deepseek-v4-flash \
-  --llm-base-url https://api.deepseek.com \
-  --llm-key your-llm-api-key
-```
-
-诊断配置：
-
-```bash
-paperseek doctor
-paperseek doctor --source openalex --json
-```
-
-测试数据源最小真实请求：
-
-```bash
-paperseek smoke --source openalex --query "machine learning"
-paperseek smoke --source crossref --query "open innovation" --json
-```
-
-查看数据源能力：
-
-```bash
-paperseek sources
-paperseek sources --json
-```
-
-查看本地历史记录：
-
-```bash
-paperseek history list
-paperseek history show <RUN_ID> --json
-paperseek history path
-```
-
-保存 CLI 用户级配置：
-
-```bash
-paperseek config path
-paperseek config set LLM_API_KEY your-llm-api-key
-paperseek config list
-paperseek config unset LLM_API_KEY
-```
-
-环境变量优先于用户级配置。`paperseek config list` 会遮蔽密钥。
-
-Source Filter 支持当前数据源可用的原生过滤值。OpenAlex 可使用 Field ID、字段标签或 `https://openalex.org/fields/<id>` URL；WoS 使用 Web of Science Category；arXiv 使用 `cs.IR`、`cs.LG` 等 category。多个值可以重复传入 `--discipline` / `--discipline-field`，也可以在环境变量中用分号分隔，例如：
-
-```bash
-export DISCIPLINE_FIELDS="17;14"
-paperseek search "open innovation and digital platforms" --source openalex
-```
-
-`--field` / `SEARCH_FIELD` 是自由文本领域提示，主要影响 LLM 生成的检索式；`--discipline` / `DISCIPLINE_FIELDS` 只用于有可靠原生过滤的数据源。OpenAlex 会应用 `primary_topic.field.id`，arXiv 会追加 `cat:`；WoS Starter 目前不支持 `WC=`，所选 Web of Science Category 只作为 LLM 构建 `TS` / `TI` / `SO` 检索式的上下文；Semantic Scholar、PubMed、Google Scholar、Crossref 和计算机顶会检索也使用领域文本提示，不做硬过滤。
+刷新时按 snapshot → 持久事件回放 → Last-Event-ID SSE 重连恢复。Stop 使用 `running → cancelling → cancelled`，迟到响应不能复活运行或写入结果。
 
 ## 数据源
 
-| 数据源 | 默认状态 | API Key | 适合场景 | 说明 |
-| --- | --- | --- | --- | --- |
-| OpenAlex | 默认 | 推荐 | 关键词与语义召回、摘要、引用数、引用扩展、引用图 | 开放学术元数据库，适合通用文献发现与引用关系探索；配置 API Key 后会增加语义召回通道。 |
-| arXiv | 支持 | 不需要 | 预印本、计算机科学、物理、数学、统计等领域 | 使用 arXiv 公共 API Atom feed，返回摘要、分类和 PDF 链接。 |
-| Semantic Scholar | 支持 | 可选 | 跨学科学术图谱、引用数、开放 PDF 线索 | 匿名访问适合轻量测试；配置 API Key 可获得更稳定的限额。 |
-| PubMed | 支持 | 可选 | 医学、生物医学与生命科学文献 | 使用 NCBI E-utilities；建议配置邮箱和 tool 标识以符合负责任使用要求。 |
-| Google Scholar | 支持 | 必需 | Google Scholar 结果、引用数线索和开放 PDF 线索 | 通过 Serper `/scholar` API 请求，需要 `SERPER_API_KEY` 或 `SERPER_API_KEYS`。 |
-| 计算机顶会 | 支持 | 不需要 | ICLR、ICML、NeurIPS、AAAI、NDSS 等计算机顶会论文 | 运行时读取 paper-hub 最新 manifest，不需要数据源 Key。当前上游快照包含 ICLR 2025/2026、ICML 2025/2026、NeurIPS 2025、AAAI 2026 和 NDSS 2026。 |
-| Crossref | 支持 | 通常不需要 | DOI、出版元数据、期刊和出版社信息校验 | DOI 与出版元数据注册库，适合题录校验和 DOI 补全。 |
-| Web of Science Starter | 适配中 | 必需 | 已有 Clarivate API 权限的机构用户 | 商业数据库 API，返回字段和可用性取决于订阅计划与机构授权。 |
-
-## LLM 服务商
-
-PaperSeek 支持两类主流接口协议：OpenAI 风格接口和 Anthropic Messages API。Provider 表示模型服务商，API Type 表示请求协议。
-
-| Provider | 默认 API Type | 默认模型 |
+| 数据源 | Key | 说明 |
 | --- | --- | --- |
-| OpenAI | `openai_responses` | `gpt-5.4-mini` |
-| Anthropic | `anthropic_messages` | `claude-sonnet-4-6` |
-| Google Gemini | `openai_chat` | `gemini-3.5-flash` |
-| DeepSeek | `openai_chat` | `deepseek-v4-flash` |
-| 中国科技云 CSTCloud | `openai_chat` | `deepseek-v4-flash` |
-| 阿里云百炼 DashScope | `openai_chat` | `qwen3.6-plus` |
-| Kimi Moonshot | `openai_chat` | `kimi-k2.6` |
-| 智谱 AI GLM | `openai_chat` | `glm-5.1` |
-| 硅基流动 SiliconFlow | `openai_chat` | `deepseek-ai/DeepSeek-V4-Flash` |
-| OpenRouter | `openai_chat` | `openai/gpt-5.4-mini` |
-| NVIDIA NIM | `openai_chat` | `nvidia/llama-3.3-nemotron-super-49b-v1.5` |
-| 火山方舟 | `openai_chat` | `doubao-seed-2-0-mini-260428` |
-| 腾讯混元 | `openai_chat` | `hunyuan-turbos-latest` |
-| 百度千帆 | `openai_chat` | `ernie-5.0` |
-| ModelScope 魔搭 | `openai_chat` | `Qwen/Qwen3-235B-A22B-Instruct-2507` |
-| Ollama | `openai_chat` | `qwen3:8b` |
-| Custom | `openai_chat` | 空，用户自行填写 |
+| OpenAlex | 推荐 | 多路召回、语义通道、引用扩展与图谱。 |
+| arXiv | 不需要 | 原生 category、摘要和 PDF。 |
+| Crossref | 不需要 | DOI/出版元数据及跨源补全。 |
+| Semantic Scholar | 可选 | 学术图谱、引用数和开放 PDF 线索。 |
+| PubMed | 可选 | 生物医学与生命科学。 |
+| Google Scholar | 必需 | 通过 Serper 请求。 |
+| 计算机顶会 | 不需要 | PaperHub 顶会数据。 |
+| Web of Science Starter | 必需 | WoS database 与 Category。 |
 
-默认模型用于初始化表单和命令参数示例。实际可用模型以各服务商控制台、账号权限和兼容层为准。
+`GET /api/v1/sources` 是 capability 的正式机器契约。原生筛选、文本提示、引用扩展等字段由选定 source 的能力校验。
 
-## Embedding 服务商
+## API 与持久化
 
-Embedding 用于 LLM 打分前的轻量多路召回预重排。社区版默认使用 `local`，即纯 Python hashing / BM25 / RRF，不需要外部服务。需要外部 embedding 时，可以在 Web UI 高级设置或环境变量中选择 OpenAI-compatible 服务。
+正式 API 前缀是 `/api/v1`，OpenAPI 位于 `/openapi.json`。主要动作包括 run 提交/读取/取消、事件、结果、图谱、审计、artifact、导出、历史和删除。
 
-| Provider | 默认模型 | 默认 Base URL |
-| --- | --- | --- |
-| Local Python | 空 | 空 |
-| 中国科技云 CSTCloud | `qwen3-embedding:8b,bge-large-zh:latest` | `https://uni-api.cstcloud.cn/v1` |
-| OpenAI | `text-embedding-3-large` | `https://api.openai.com/v1` |
-| 阿里云百炼 DashScope | `text-embedding-v4` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| 硅基流动 SiliconFlow | `BAAI/bge-large-zh-v1.5` | `https://api.siliconflow.cn/v1` |
-| OpenRouter | `openai/text-embedding-3-small` | `https://openrouter.ai/api/v1` |
-| NVIDIA NIM | `nvidia/nv-embedqa-e5-v5` | `https://integrate.api.nvidia.com/v1` |
-| 智谱 AI GLM | `embedding-3` | `https://open.bigmodel.cn/api/paas/v4` |
-| 火山方舟 | 空 | `https://ark.cn-beijing.volces.com/api/v3` |
-| ModelScope API-Inference | `Qwen/Qwen3-Embedding-8B,Qwen/Qwen3-Embedding-4B` | `https://api-inference.modelscope.cn/v1` |
-| Custom | 空 | 空 |
+Community 默认 SQLite 位于 `~/.paperseek/paperseek.db`，artifact 位于同一数据目录。浏览器 session key 保存在加密 transient credential store，终态后删除，不进入历史、事件、URL、checkpoint 或 artifact。
 
-如果 `RETRIEVAL_EMBEDDING_API_KEY` 留空，PaperSeek 会复用 `LLM_API_KEY`。未配置外部 embedding 或外部调用失败时，会回退到本地预重排。
+## MCP
 
-## Rerank 服务商
-
-Rerank 是 RRF 后的可选外部重排步骤，默认关闭。社区版默认不需要外部 reranker；只有在你明确配置 provider、model 和可用 API Key 时才会调用。
-
-| Provider | 默认模型 | 默认 Base URL |
-| --- | --- | --- |
-| Off | 空 | 空 |
-| 中国科技云 CSTCloud | `qwen3-reranker:8b` | `https://uni-api.cstcloud.cn/v1` |
-| OpenRouter | `jinaai/jina-reranker-v2-base-multilingual` | `https://openrouter.ai/api/v1` |
-| NVIDIA NIM | `nv-rerank-qa-mistral-4b:1` | `https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking` |
-| 硅基流动 SiliconFlow | `BAAI/bge-reranker-v2-m3` | `https://api.siliconflow.cn/v1` |
-| Custom | 空 | 空 |
-
-如果 `RETRIEVAL_RERANKER_API_KEY` 留空，PaperSeek 会复用 `LLM_API_KEY`。外部 reranker 不可用时，系统会保留本地 RRF 顺序继续运行。
-ModelScope API-Inference 可用于 LLM 和 Qwen embedding，不作为 Rerank 服务商。NVIDIA NIM 的 embedding 和 rerank 使用不同端点，PaperSeek 会自动按 provider 选择对应请求格式。
-
-> 中国科技云 CSTCloud 的 LLM、Embedding 和 Rerank 均按 OpenAI-compatible 方式接入，Base URL 统一为 `https://uni-api.cstcloud.cn/v1`。获取 Key 可打开 [中国科技云 API Keys](https://uni-api.cstcloud.cn/api_keys)，登录中国科技云统一认证后按页面要求提交申请信息；中国科学院院内用户可使用中国科技云通行证登录，通行证通常为院邮箱账号及密码。接口说明见 [中国科技云大模型 API 接口使用手册](https://uni-api.cstcloud.cn/doc/llm/)，其中包含 Chats、Embeddings 和 Rerank 文档。
-
-## 工作流
-
-一次搜索通常包含四步：
-
-1. **Query Generation**：LLM 根据研究问题、可选领域文本提示和源特定过滤生成初始查询。
-2. **Source Search**：请求所选数据源（OpenAlex、arXiv、Semantic Scholar、PubMed、Google Scholar、计算机顶会、Crossref 或 WoS Starter），并记录 HTTP 状态和命中数量。
-3. **Query Refinement**：结果过少时放宽查询；前排题名明显偏离研究意图时重定向查询。宽但相关的结果不再为追逐较小命中数而反复收窄。
-4. **Ranking & Results**：将候选池交给 LLM 统一评分，输出前若干条结果。
-
-如果启用 OpenAlex 引用扩展，PaperSeek 会直接复用多路融合后的候选顺序，从相关性、高被引和最新性三类 seed 中按检索预算选择种子论文，不再为选种额外执行一轮 LLM 全量打分；默认 `fast` 为最多 3 篇。高相关 seed 同时扩展参考文献和被引论文，高被引 seed 重点扩展参考文献，最新 seed 重点扩展被引论文。OpenAlex 参考文献 ID 会批量读取，同一 seed 的前向与后向请求会在受控并发下执行，并为不同 seed 预留新增记录份额。扩展记录会合并进同一个候选池，并在候选截断前重新执行本地 BM25、稀疏向量相似度与 RRF 融合，再统一交给 LLM 打分。
-
-在进入 LLM 打分前，PaperSeek 会先进行轻量多路召回预重排：按数据源能力综合相关性、高引用/影响力、时效性和本地质量等信号，去重后用 RRF 融合召回排名，并叠加纯 Python hashing embedding cosine、BM25 和词项覆盖分数。允许并发的数据源会并行执行独立召回路线；运行时会保留较深的主相关性路线，同时把影响力、时效性等多样性路线限制在足以进入最终 LLM 候选门限的深度，避免重复读取不会进入后续排序的长尾记录。默认 `fast` 预算的 LLM 前融合候选池上限为 `3000`。社区版默认不依赖外部 embedding 服务；如需外部增强，可在 Web UI 高级设置中从 Local Python、中国科技云、OpenAI、阿里云百炼、硅基流动、OpenRouter、NVIDIA NIM、智谱、火山方舟、ModelScope 或自定义端点中选择 embedding 服务，其中 ModelScope API-Inference 仅使用 `Qwen/Qwen3-Embedding-8B` 和 `Qwen/Qwen3-Embedding-4B`。如果用户自行配置外部 embedding/reranker，也可使用中国科技云的 `qwen3-embedding:8b`、`bge-large-zh:latest`、OpenRouter 的 embedding/rerank 模型或 NVIDIA NIM 的 `nvidia/nv-embedqa-e5-v5`、`nv-rerank-qa-mistral-4b:1` 等模型，配置多个模型时会按顺序 fallback，失败时会回退到本地 RRF 顺序。
-
-默认会把预排序后的最多 `256` 篇候选放入同一次 LLM 请求进行全局打分，使候选共享同一评分上下文和标准。首选响应包含每篇论文的分数与简短理由；如果请求报错、响应截断或漏项，系统会自动改用短整数编号完成一次紧凑的全局评分，再以每批最多 `64` 篇只为最终前 50 篇或所有 5 分及以上的保留结果生成理由。紧凑评分仍失败时才回退本地预排序。全局评分默认使用 `RANKING_LLM_TIMEOUT_SECONDS=180`；可通过 `RANKING_BATCH_SIZE` 降低单次请求规模。
-
-`TARGET_MIN` 用于判断候选是否少到需要恢复；`TARGET_MAX` 是用户期望范围和排序参考，不会仅因数据库总命中数较大就触发反复收窄，也不是最终展示的硬上限。LLM 打分前最多保留 `RANKING_CANDIDATE_LIMIT` 条候选，默认 `fast` 预算为 `256`。最终结果少于 50 条时全部展示；结果较多时至少展示前 50 条，如果 5 分及以上候选超过 50 条，则展示全部高分候选。
-
-### 检索预算
-
-Web UI、CLI、API 和 MCP 都支持 `fast`、`medium`、`high`、`max` 四档检索预算，默认使用 `fast`。`fast` 的请求次数最少；更高档位会同时扩大查询视角、多路召回、LLM 候选和引用扩展，而不是只增加检索式迭代次数。预算切换不会覆盖模型服务自身的思考设置。
-
-| 预算 | 查询软上限 | 查询视角 | 每路召回配置上限 | 融合候选池 | LLM 候选 | 引用扩展（seed / 每 seed / 总新增 / 深度） |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `fast` | 5 | 3 | 500 | 3000 | 256 | 3 / 4 / 40 / 2 |
-| `medium` | 7 | 3 | 750 | 4500 | 384 | 8 / 6 / 80 / 2 |
-| `high` | 9 | 4 | 1000 | 7000 | 512 | 16 / 8 / 160 / 3 |
-| `max` | 12 | 6 | 1000 | 10000 | 1024 | 30 / 10 / 320 / 3 |
-
-数据源自身的分页、速率和结果上限仍然生效。表中的每路召回值是配置上限；实际运行还会按最终 LLM 候选门限裁剪路线深度，主相关性路线保留较深候选，影响力、时效性等多样性路线只读取有机会进入融合前列的部分。`high` 和 `max` 会明显增加 API 请求、LLM 成本与等待时间，适合困难主题或需要更高召回率的检索。高级环境变量或 CLI 粒度参数可以覆盖所选预算中的单项值。
-
-## 引用图
-
-Citation Map 使用箭头表示引用方向：
-
-```text
-A -> B  表示 A 引用了 B
-```
-
-图中节点来自最终结果和 OpenAlex 引用扩展记录。你可以拖动节点、缩放和平移画布，并查看节点详情。引用图适合发现关键词检索遗漏的经典文献、相邻主题和近期延伸研究。
-
-## 环境变量
-
-大多数参数已有代码默认值，复制 `.env.example` 后通常只需要填写模型服务 Key。高级参数保持注释即可，除非你明确要覆盖默认行为。
-
-### 必须配置
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `LLM_API_KEY` | 空 | LLM API Key。使用 Ollama 时可留空。 |
-| `WOS_API_KEY` | 空 | 仅当 `DATA_SOURCE=wos` 时需要。 |
-
-### 常用可选配置
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `LLM_PROVIDER` | `openai` | LLM 服务商，例如 `openai`、`deepseek`、`cstcloud`、`anthropic`、`openrouter`、`nvidia`、`modelscope` 或 `ollama`。 |
-| `LLM_API_TYPE` | 由 provider 决定 | `openai_responses`、`openai_chat` 或 `anthropic_messages`。 |
-| `LLM_MODEL` | 由 provider 决定 | 模型名称。 |
-| `LLM_BASE_URL` | 由 provider 决定 | API Base URL。 |
-| `DATA_SOURCE` | `openalex` | `openalex`、`arxiv`、`semanticscholar`、`pubmed`、`googlescholar`、`paperhub`、`crossref` 或 `wos`。 |
-| `OPENALEX_API_KEY` | 空 | OpenAlex API Key，推荐填写以获得更稳定的请求体验。 |
-| `OPENALEX_EMAIL` | 空 | OpenAlex 联系邮箱。 |
-| `SEMANTIC_SCHOLAR_API_KEY` | 空 | Semantic Scholar API Key，可选；匿名访问适合轻量测试。 |
-| `PUBMED_EMAIL` / `PUBMED_TOOL` | 空 / `paperseek` | PubMed / NCBI 责任使用标识。 |
-| `PUBMED_API_KEY` | 空 | NCBI API Key，可选；提高 PubMed E-utilities 请求限额。 |
-| `SERPER_API_KEY` / `SERPER_API_KEYS` | 空 | Google Scholar 通过 Serper 请求；单 Key 用 `SERPER_API_KEY`，多 Key 用 `SERPER_API_KEYS` 并自动轮询。 |
-| `CROSSREF_EMAIL` | 空 | Crossref polite pool 邮箱。 |
-
-### 高级配置
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `SEARCH_FIELD` | 空 | 自由文本学科或领域提示。 |
-| `DISCIPLINE_FIELDS` | 空 | OpenAlex Field、WoS Category 或 arXiv Category 等原生过滤值；多个值建议用分号分隔。其它数据源使用 `SEARCH_FIELD` 文本提示。 |
-| `SEARCH_BUDGET` | `fast` | 统一检索预算：`fast`、`medium`、`high`、`max`。 |
-| `TARGET_MIN` / `TARGET_MAX` | `5` / `50` | 用户期望结果范围；最小值参与过小结果恢复，最大值不作为强制收窄或展示上限。 |
-| `MAX_ITERATIONS` | `5` | `fast` 的查询调整软预算；显式配置时覆盖预算预设。 |
-| `EXPAND_CITATIONS` | `true` | 是否启用 OpenAlex 引用扩展。 |
-| `FETCH_ABSTRACTS` | `false` | 是否尝试从外部 DOI 元数据补摘要。 |
-| `CITATION_SEED_COUNT` / `CITATION_PER_SEED` / `CITATION_MAX_RECORDS` | `3` / `4` / `40` | `fast` 的引用扩展规模；显式配置时覆盖预算预设。 |
-| `CITATION_DEPTH` | `2` | OpenAlex 引用扩展遍历层数。 |
-| `RANKING_BATCH_SIZE` / `RANKING_CONCURRENCY` | `8` / `16` | LLM 排序批大小和并发数。 |
-| `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | `2048` / `180` | LLM 输出长度和常规单次请求超时。 |
-| `RANKING_LLM_TIMEOUT_SECONDS` | `180` | 仅用于 LLM 全局评分或排序批次的超时；超时后回退本地预排序。 |
-| `RANKING_CANDIDATE_LIMIT` | `256` | 默认 `fast` 下送入 LLM 打分的候选上限。 |
-| `RETRIEVAL_POOL_MAX` / `RETRIEVAL_POOL_MIN` | `3000` / `5` | 默认 `fast` 下 LLM 打分前的融合候选池范围。 |
-| `RETRIEVAL_LANE_LIMIT` / `RETRIEVAL_RRF_K` | `500` / `60` | 默认 `fast` 下每路召回的配置上限和 RRF 融合常数；实际路线深度还会按 LLM 候选门限裁剪。 |
-| `RETRIEVAL_EMBEDDING_PROVIDER` | `local` | 社区版默认使用本地纯 Python 预重排；可改为 OpenAI-compatible embedding 服务。 |
-| `RETRIEVAL_EMBEDDING_MODEL` | `qwen3-embedding:8b,bge-large-zh:latest` | 外部 embedding 模型列表。 |
-| `RETRIEVAL_RERANKER_PROVIDER` / `RETRIEVAL_RERANKER_MODEL` | 空 / `qwen3-reranker:8b` | RRF 后的可选外部 reranker。 |
-| `RETRIEVAL_CROSSREF_ENRICHMENT` | `false` | 可选 Crossref DOI 元数据补全。 |
-| `PAPERSEEK_HISTORY_ENABLED` | `true` | 是否启用本地历史记录。 |
-| `PAPERSEEK_TIMEZONE` | `Asia/Shanghai` | CLI 和后端 fallback 时间戳时区；Web UI 优先使用浏览器时区。 |
-| `PAPERSEEK_DATA_DIR` / `PAPERSEEK_HISTORY_DB` | `~/.paperseek` / `~/.paperseek/paperseek.db` | 本地数据目录和历史数据库路径。 |
-
-## API 获取方式
-
-### OpenAlex
-
-OpenAlex 可匿名访问基础接口，但推荐配置免费 API Key；PaperSeek 只有在配置 Key 后才会使用 OpenAlex 语义召回：
-
-1. 打开 [OpenAlex](https://openalex.org/) 并注册账号。
-2. 进入 [OpenAlex API settings](https://openalex.org/settings/api)。
-3. 复制 API Key。
-4. 在 Web UI 填写 `OpenAlex API Key`，或设置 `OPENALEX_API_KEY`。
-
-### Semantic Scholar
-
-Semantic Scholar 可匿名访问；长期使用或请求量较高时建议申请 API Key：
-
-1. 打开 [Semantic Scholar API](https://www.semanticscholar.org/product/api) 页面。
-2. 进入 API Key 申请入口，按页面要求填写姓名、邮箱、用途等信息。
-3. 提交申请后等待 Semantic Scholar 发送或启用 API Key。
-4. 在 Web UI 填写 `Semantic Scholar API Key`，或设置 `SEMANTIC_SCHOLAR_API_KEY`。
-
-### PubMed / NCBI
-
-PubMed 使用 NCBI E-utilities。建议始终配置联系邮箱和 tool 名称；如果需要更高请求限额，可在 NCBI 账号中生成 API Key：
-
-1. 打开 [NCBI](https://www.ncbi.nlm.nih.gov/) 并注册或登录账号。
-2. 进入账号设置页面，找到 API Key 管理区域。
-3. 点击创建 API Key 并复制生成的 key。
-4. 在 Web UI 填写 `PubMed API Key`，或设置 `PUBMED_API_KEY`。
-5. 同时设置 `PUBMED_EMAIL` 和 `PUBMED_TOOL`，例如 `paperseek`。
-
-### Google Scholar / Serper
-
-PaperSeek 通过 Serper 的 Google Scholar API 请求 Google Scholar 结果，需要 Serper API Key：
-
-1. 打开 [Serper](https://serper.dev/) 并注册或登录账号。
-2. 进入 API Key 管理页面。
-3. 复制 API Key。
-4. 在 Web UI 填写 `Serper API Key`，或设置 `SERPER_API_KEY`。
-5. 如果有多个 Key，可设置 `SERPER_API_KEYS`，用逗号、分号或空白分隔，PaperSeek 会按请求轮询。
-
-### Crossref
-
-Crossref REST API 通常不需要 API Key。建议设置邮箱进入 polite pool：
+MCP 是独立且同版本的发行：
 
 ```bash
-export CROSSREF_EMAIL=you@example.org
+python -m pip install "paperseek==0.3.0" "paperseek-mcp==0.3.0"
+paperseek-mcp --transport stdio
 ```
 
-如果需要更高限额、优先支持或生产级 SLA，可以了解 Crossref Metadata Plus。PaperSeek 使用 Crossref 公共/Polite REST API 路径。
-
-### arXiv 与计算机顶会
-
-- arXiv 不需要 API Key，适合预印本和 arXiv 覆盖学科的快速发现。
-- 计算机顶会检索不需要 API Key。PaperSeek 运行时读取 [paper-hub](https://github.com/Yupu-Wang/paper-hub) 的 manifest 与内容哈希 shard；截至其 2026-07-20 快照，共覆盖 26,579 篇论文，后续上游新增 shard 无需修改 PaperSeek 查询接口。
-
-### Web of Science Starter API
-
-WoS Starter 需要在 Clarivate Developer Portal 申请，通常适合已有机构订阅权限的用户：
-
-1. 打开 [Clarivate Developer Portal 注册页](https://developer.clarivate.com/signup)，点击 `Register`。
-2. 建议使用机构邮箱注册，并尽量与 Web of Science 数据库账号一致。
-3. 登录后进入 [Applications](https://developer.clarivate.com/applications)，点击 `Register Application`。
-4. 填写应用信息：
-   - `Application ID` 使用数字、小写字母、`-` 或 `_`。
-   - `Application Name` 可写为机构或项目名称。
-   - `Application Description` 可说明用于 Web of Science API 检索。
-   - `Client Type` 保持默认 `Public: Single Page Application`。
-   - 不勾选 OAuth2.0 Flows。
-5. 打开 [Web of Science Starter API](https://developer.clarivate.com/apis/wos-starter) 页面。
-6. 找到刚注册的 Application，点击 `Subscribe`。
-7. 按身份和机构权限选择计划。机构成员通常选择 Institutional Member 相关计划。
-8. 看到 `Subscription approval is pending` 后等待审批。机构申请通常需要数个工作日。
-9. 获得 API Key 后，在 Web UI 填写 `WoS API Key`，或设置 `WOS_API_KEY`。
-
-WoS Starter 的权限、每日请求量和返回字段取决于订阅计划与机构授权。若遇到 HTTP 401，先检查是否使用 `https://` 和正确 key；若遇到 Clarivate 返回的非标准 HTTP 512，应优先检查 Clarivate 服务状态、订阅审批和检索式兼容性。
-
-## Python API 与 core
-
-社区版安装包已经内置可复用核心模块 `paperseek_core`，不需要额外安装单独的 `paperseek-core` 仓库依赖。常规用户和下游代码建议从 `paperseek` 导入稳定入口：
-
-```python
-from paperseek import PaperSeekAgent
-```
-
-`LiteratureSearchAgent` 和 `WosSearchAgent` 仍保留为兼容旧代码的别名，新代码请使用 `PaperSeekAgent`。
+stdio、Streamable HTTP 和标记为 legacy 的 SSE transport 共享一套九工具 registry。非 loopback HTTP 必须配置服务 token、Host/Origin allowlist；TLS 交给反向代理。详见 [`integrations/mcp/README.md`](integrations/mcp/README.md)。
 
 ## Agent Skill
 
-仓库包含一个可选的 PaperSeek Skill：
+仓库中的 [`skills/paperseek/SKILL.md`](skills/paperseek/SKILL.md) 是薄路由说明：它调用已安装的正式 CLI/API/MCP，不复制检索 pipeline，不要求用户在对话中粘贴密钥。
 
-```text
-skills/paperseek/
-```
-
-它用于指导支持 Skill 的 AI agent 正确调用 PaperSeek，包括数据源选择、配置诊断、JSON 结果解析和引用图边界。Skill 使用 progressive disclosure：`SKILL.md` 保持简短，详细命令契约放在 `references/`。
-
-这个 Skill **不会随 Python 包自动安装**。如果需要在 agent 平台中使用，可以手动复制或链接 `skills/paperseek/` 到对应平台的 Skill 目录。
-
-Skill 中的 launcher 与自包含 runtime：
-
-```text
-skills/paperseek/scripts/paperseek.py
-skills/paperseek/scripts/paperseek_skill_runtime.py
-```
-
-单独发布 Skill 时，复制 `skills/paperseek/` 即可。`paperseek.py` 会优先调用完整 PaperSeek 包；如果未安装包，会回退到 `paperseek_skill_runtime.py`，使用 Python 标准库直接完成 OpenAlex、arXiv、Semantic Scholar、PubMed、Google Scholar（需 Serper key）、计算机顶会、Crossref 和带 key 的 WoS Starter 核心文献检索。Web UI、引用图和完整历史管理仍需要安装完整包。
-
-## MCP Server
-
-PaperSeek 提供可选的 MCP（Model Context Protocol）服务器，将文献检索、配置诊断、数据源测试和历史记录暴露为 MCP 工具，供支持 MCP 的 AI agent 直接调用。
-
-安装 MCP 可选依赖（需要 Python 3.12+）：
+## Docker
 
 ```bash
-python -m pip install "paperseek[mcp]"
+docker compose up -d
 ```
 
-启动 MCP 服务器（stdio 传输）：
+正式 Community Compose 是单服务，使用 `ghcr.io/mingfenghong/paperseek` 与 `paperseek-data` named volume。健康检查为 `/health` 和 `/ready`。部署细节见[部署指南](docs/deployment.md)。
 
-```bash
-paperseek-mcp
-```
+## 文档
 
-配置方式与 CLI 和 Web UI 完全一致，通过环境变量或 `.env` 设置 LLM 和数据源参数。API Key 不会暴露给 LLM，仅由 MCP 服务器进程持有。
+- [完整用户手册](docs/user-manual.md)
+- [部署指南](docs/deployment.md)
+- [v0.3.0 说明](docs/v0.3.0.md)
+- [独立 MCP](integrations/mcp/README.md)
 
-可用的 MCP 工具：
+## 安全边界
 
-| 工具 | 用途 |
-| --- | --- |
-| `search_papers` | 输入研究问题，执行完整的 LLM 检索工作流并返回排序结果 |
-| `check_config` | 检查 PaperSeek 配置（数据源、LLM、API Key）是否就绪 |
-| `smoke_test` | 对数据源发起最小真实请求，测试连通性 |
-| `list_sources` | 列出所有支持的数据源及其能力 |
-| `list_history` | 列出本地保存的搜索运行记录 |
-| `get_history_run` | 查看某次搜索运行的完整详情 |
+- 不在仓库、日志、历史或 artifacts 中存储 API key。
+- 默认服务只绑定 loopback；公开部署应使用反向代理和访问控制。
+- 不自动下载付费全文；链接和元数据仍受来源网站条款约束。
+- 发布前以最终 wheel、浏览器、MCP、Docker 与持久化门禁为准，不用 fixture-only smoke 冒充产品验证。
 
-在 Claude Desktop 等支持 MCP 的客户端中配置：
+## License
 
-```json
-{
-  "mcpServers": {
-    "paperseek": {
-      "command": "paperseek-mcp",
-      "env": {
-        "LLM_API_KEY": "your-llm-api-key"
-      }
-    }
-  }
-}
-```
-
-也可以使用 `python -m paperseek.mcp_server` 启动。MCP 服务器复用与 CLI 相同的 `PaperSeekAgent` 核心逻辑，搜索结果会自动保存到本地历史记录。
-
-## 项目状态
-
-PaperSeek 当前处于 alpha 阶段。CLI、Web UI、OpenAlex、arXiv、Semantic Scholar、PubMed、Google Scholar（通过 Serper）、计算机顶会、Crossref、引用扩展、CSV 导出、Skill 和 MCP Server 已可用于日常文献检索与候选集整理。
-
-欢迎贡献：
-
-- 新数据源适配器。
-- 更稳健的查询生成与排序提示词。
-- 更好的引用图交互。
-- Web API、CLI、provider parsing 和导出行为测试。
-- 文档、示例和错误诊断改进。
-
-贡献前可阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请参考 [SECURITY.md](SECURITY.md)。
-
-## 致谢
-
-感谢以下开源项目为 PaperSeek 的公开功能提供支持或设计参考：
-
-- [Yupu-Wang/paper-hub](https://github.com/Yupu-Wang/paper-hub)：经作者同意后集成，用于提供计算机顶会检索支持。
-- [bytedance/pasa](https://github.com/bytedance/pasa)：参考检索规划、候选队列和证据扩展设计。
-- [pydantic/pydantic](https://github.com/pydantic/pydantic) 与 [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai)：用于类型化数据契约，并通过可选适配器提供有界结构化输出重试。
-
-## 开源协议
-
-PaperSeek 使用 [Apache License 2.0](LICENSE) 开源。第三方依赖与计算机顶会数据源说明见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+Apache License 2.0。第三方数据与 API 仍遵循各自条款。

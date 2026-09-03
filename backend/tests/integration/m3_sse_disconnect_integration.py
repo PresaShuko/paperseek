@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import nullcontext
+from datetime import timedelta
 from pathlib import Path
 import socket
 import tempfile
@@ -13,7 +14,11 @@ import httpx
 import uvicorn
 
 from paperseek_app.models import RunStatus
-from paperseek_app.services import RunService
+from paperseek_app.services import (
+    RunExecutionService,
+    RunQueryService,
+    RunSubmissionService,
+)
 from paperseek_community.api import create_app
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
@@ -29,8 +34,11 @@ class M3SseDisconnectIntegrationTest(unittest.TestCase):
             migrate_database(database)
             uow = SQLiteRunUnitOfWork(database)
             self.addCleanup(uow.close)
-            service = RunService(uow, FileArtifactStore(data_dir))
-            run = service.create_run("SSE disconnect contract", "openalex")
+            store = FileArtifactStore(data_dir)
+            submission_service = RunSubmissionService(uow)
+            execution_service = RunExecutionService(uow, store)
+            query_service = RunQueryService(uow, store)
+            run = submission_service.create_run("SSE disconnect contract", "openalex")
 
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -63,9 +71,9 @@ class M3SseDisconnectIntegrationTest(unittest.TestCase):
                 with client.stream("GET", f"/api/v1/runs/{run.id}/events") as response:
                     first = self._first_event(response)
                 self.assertEqual(first["sequence"], 1)
-                self.assertEqual(service.get_run(run.id).status, RunStatus.QUEUED)
+                self.assertEqual(query_service.get_run(run.id).status, RunStatus.QUEUED)
 
-                lease = service.claim_run(run.id, "sse-worker")
+                lease = uow.claim_run(run.id, "sse-worker", timedelta(seconds=60))
                 with client.stream(
                     "GET",
                     f"/api/v1/runs/{run.id}/events",
@@ -74,10 +82,10 @@ class M3SseDisconnectIntegrationTest(unittest.TestCase):
                     replayed = self._first_event(response)
                 self.assertEqual(replayed["sequence"], 2)
                 self.assertEqual(replayed["event_type"], "run.claimed")
-                self.assertEqual(service.get_run(run.id).status, RunStatus.RUNNING)
+                self.assertEqual(query_service.get_run(run.id).status, RunStatus.RUNNING)
 
-            service.request_cancel(run.id)
-            self.assertEqual(service.complete_cancel(lease).status, RunStatus.CANCELLED)
+            submission_service.request_cancel(run.id)
+            self.assertEqual(execution_service.complete_cancel(lease).status, RunStatus.CANCELLED)
 
     @staticmethod
     def _first_event(response: httpx.Response) -> dict:

@@ -51,6 +51,9 @@ jobs:
       - name: Check M1 CLI and REST entries
         run: uv run --locked python -m unittest discover -s tests/integration -p "*_integration.py"
 
+      - name: Check database migrations and recovery
+        run: uv run --locked python -m unittest discover -s tests/migration -p "*.py"
+
       - name: Build backend wheel
         run: uv build --out-dir dist
 
@@ -75,6 +78,10 @@ jobs:
 
       - name: Install locked web dependencies
         run: npm ci
+
+      - name: Check generated OpenAPI TypeScript
+        working-directory: backend
+        run: uv run --locked python scripts/generate_openapi_types.py --check
 
       - name: Type-check web skeleton
         run: npm run typecheck

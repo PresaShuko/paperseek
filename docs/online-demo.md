@@ -86,7 +86,7 @@ https://www.paperseek.xyz/
 | 登录 | 使用 Supabase 账号系统；PaperSeek Service 和 History 需要登录 | 默认不需要登录 |
 | 模型调用 | PaperSeek Service 可使用站点免费额度；Third-party Service 使用用户第三方授权；也可 BYOK | 使用你自己配置的 LLM API Key |
 | OpenAlex Key | 登录用户可直接使用；未登录 BYOK 模式需自填 OpenAlex Key | 可匿名访问或自己配置 key |
-| Source Filter | 页面选择，随本次搜索提交 | 页面选择、CLI 参数或 `DISCIPLINE_FIELDS` 环境变量 |
+| Source Filter | 页面选择，随本次搜索提交 | 页面选择、CLI 的 `--field-id` / `--field-hint` 或正式 API 字段 |
 | 历史记录 | 登录后保存到云端 Supabase 数据库 | 默认保存到本地 SQLite |
 | 适用场景 | 快速体验、轻量检索、临时试用 | 私有部署、长期使用、可控配置 |
 

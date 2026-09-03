@@ -28,7 +28,12 @@ from paperseek_app.models import (
     PendingEvent,
     RunStatus,
 )
-from paperseek_app.services import RunService
+from paperseek_app.services import (
+    RunCleanupService,
+    RunExecutionService,
+    RunQueryService,
+    RunSubmissionService,
+)
 from paperseek_community.api import create_app
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
@@ -75,7 +80,10 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
         self.store = FileArtifactStore(self.data_dir)
         self.uow = SQLiteRunUnitOfWork(self.database, clock=self.clock)
         self.addCleanup(self.uow.close)
-        self.service = RunService(self.uow, self.store)
+        self.submission_service = RunSubmissionService(self.uow)
+        self.execution_service = RunExecutionService(self.uow, self.store)
+        self.query_service = RunQueryService(self.uow, self.store)
+        self.cleanup_service = RunCleanupService(self.uow, self.store)
 
     def _stored(
         self,
@@ -100,9 +108,11 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
         )
 
     def _complete(self, *, result_count: int = 1, warnings: list[str] | None = None):
-        run = self.service.create_run(f"Question {self.clock.value.isoformat()}", "openalex")
-        lease = self.service.claim_run(run.id, "contract-worker")
-        self.service.append_checkpoint(
+        run = self.submission_service.create_run(
+            f"Question {self.clock.value.isoformat()}", "openalex"
+        )
+        lease = self.uow.claim_run(run.id, "contract-worker", timedelta(seconds=60))
+        self.execution_service.append_checkpoint(
             lease,
             [PendingEvent(event_type="workflow.progress", stage="workflow", payload={"current": 1, "total": 1, "unit": "stage"})],
             CheckpointDraft(
@@ -213,7 +223,7 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
 
     def test_sse_replays_only_missing_strict_sequences_with_public_event_fields(self) -> None:
         run = self._complete()
-        events = self.service.list_events(run.id)
+        events = self.query_service.list_events(run.id)
         cursor = events[2].sequence
 
         with TestClient(create_app(self.database)) as client:
@@ -242,9 +252,9 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
     def test_result_cursor_pages_are_stable_and_cursor_scope_is_enforced(self) -> None:
         run = self._complete(result_count=5)
 
-        first = self.service.get_result_page(run.id, page_size=2)
-        second = self.service.get_result_page(run.id, cursor=first.next_cursor, page_size=2)
-        third = self.service.get_result_page(run.id, cursor=second.next_cursor, page_size=2)
+        first = self.query_service.get_result_page(run.id, page_size=2)
+        second = self.query_service.get_result_page(run.id, cursor=first.next_cursor, page_size=2)
+        third = self.query_service.get_result_page(run.id, cursor=second.next_cursor, page_size=2)
 
         self.assertEqual([item.rank for item in first.results], [1, 2])
         self.assertEqual([item.rank for item in second.results], [3, 4])
@@ -252,16 +262,16 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
         self.assertIsNone(third.next_cursor)
         other = self._complete()
         with self.assertRaises(InvalidCursor):
-            self.service.get_result_page(other.id, cursor=first.next_cursor, page_size=2)
+            self.query_service.get_result_page(other.id, cursor=first.next_cursor, page_size=2)
 
     def test_history_is_terminal_keyset_paginated_and_deleted_runs_hide_immediately(self) -> None:
         oldest = self._complete()
         middle = self._complete(warnings=["citation_expansion_failed_base_candidates_retained"])
         newest = self._complete()
-        queued = self.service.create_run("Not history yet", "openalex")
+        queued = self.submission_service.create_run("Not history yet", "openalex")
 
-        first = self.service.get_history_page(page_size=2)
-        second = self.service.get_history_page(cursor=first.next_cursor, page_size=2)
+        first = self.query_service.get_history_page(page_size=2)
+        second = self.query_service.get_history_page(cursor=first.next_cursor, page_size=2)
         self.assertEqual([item.id for item in first.items], [newest.id, middle.id])
         self.assertEqual([item.id for item in second.items], [oldest.id])
         self.assertNotIn(queued.id, [item.id for item in [*first.items, *second.items]])
@@ -270,17 +280,24 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
             ["citation_expansion_failed_base_candidates_retained"],
         )
 
-        receipt = self.service.delete_history_run(middle.id)
+        receipt = self.cleanup_service.delete_history_run(middle.id)
         self.assertEqual(receipt.status, "cleanup_pending")
         with self.assertRaises(RunNotFound):
-            self.service.get_run(middle.id)
-        self.assertNotIn(middle.id, [item.id for item in self.service.get_history_page(page_size=10).items])
+            self.query_service.get_run(middle.id)
+        self.assertNotIn(
+            middle.id,
+            [item.id for item in self.query_service.get_history_page(page_size=10).items],
+        )
 
     def test_user_artifacts_export_and_citation_map_never_expose_internal_objects_or_paths(self) -> None:
         run = self._complete()
-        internal = next(item for item in self.service.list_artifacts(run.id) if item.visibility is ArtifactVisibility.INTERNAL)
+        internal = next(
+            item
+            for item in self.query_service.list_artifacts(run.id)
+            if item.visibility is ArtifactVisibility.INTERNAL
+        )
 
-        descriptors = self.service.list_user_artifacts(run.id)
+        descriptors = self.query_service.list_user_artifacts(run.id)
         self.assertEqual(
             {item.filename for item in descriptors},
             {"final_result.json", "export.json", "export.csv", "citation_map.json"},
@@ -290,26 +307,28 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
         self.assertNotIn(str(self.data_dir), serialized)
         self.assertNotIn(internal.id, {item.id for item in descriptors})
         with self.assertRaises(ArtifactNotFound):
-            self.service.read_user_artifact(run.id, internal.id)
+            self.query_service.read_user_artifact(run.id, internal.id)
 
-        json_export = self.service.get_export(run.id, "json")
-        csv_export = self.service.get_export(run.id, "csv")
-        citation_map = self.service.get_citation_map(run.id)
+        json_export = self.query_service.get_export(run.id, "json")
+        csv_export = self.query_service.get_export(run.id, "csv")
+        citation_map = self.query_service.get_citation_map(run.id)
         self.assertEqual(json.loads(json_export.content)["ranked"][0]["title"], "Paper 1")
         self.assertEqual(csv_export.content, b"rank,title\n1,Paper 1\n")
         self.assertEqual(json.loads(citation_map.content), {"edges": []})
 
     def test_delete_rejects_active_run_then_cleans_content_and_every_artifact(self) -> None:
-        active = self.service.create_run("Still queued", "openalex")
+        active = self.submission_service.create_run("Still queued", "openalex")
         with self.assertRaises(RunStateError):
-            self.service.delete_history_run(active.id)
+            self.cleanup_service.delete_history_run(active.id)
 
         completed = self._complete(result_count=2)
         run_directory = self.data_dir / "artifacts" / "runs" / completed.id
         self.assertTrue(run_directory.exists())
-        receipt = self.service.delete_history_run(completed.id)
+        receipt = self.cleanup_service.delete_history_run(completed.id)
         self.assertEqual(receipt.run_id, completed.id)
-        self.assertTrue(self.service.cleanup_next_deleted_run("cleanup-worker", lease_seconds=30))
+        self.assertTrue(
+            self.cleanup_service.cleanup_next_deleted_run("cleanup-worker", lease_seconds=30)
+        )
         self.assertFalse(run_directory.exists())
         with closing(sqlite3.connect(self.database)) as connection:
             counts = {
@@ -322,28 +341,32 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
 
     def test_cleanup_failure_stays_durable_and_retryable_without_restoring_visibility(self) -> None:
         completed = self._complete()
-        self.service.delete_history_run(completed.id)
+        self.cleanup_service.delete_history_run(completed.id)
         with patch.object(self.store, "delete", side_effect=ArtifactPersistenceError("controlled")):
-            self.assertTrue(self.service.cleanup_next_deleted_run("cleanup-worker", lease_seconds=30))
+            self.assertTrue(
+                self.cleanup_service.cleanup_next_deleted_run("cleanup-worker", lease_seconds=30)
+            )
 
         with self.assertRaises(RunNotFound):
-            self.service.get_run(completed.id)
+            self.query_service.get_run(completed.id)
         with closing(sqlite3.connect(self.database)) as connection:
             failed = connection.execute(
                 "SELECT status, attempt, error_code FROM run_cleanup_jobs WHERE run_id = ?",
                 (completed.id,),
             ).fetchone()
         self.assertEqual(failed, ("failed", 1, "artifact_delete_failed"))
-        self.assertTrue(self.service.cleanup_next_deleted_run("cleanup-worker", lease_seconds=30))
+        self.assertTrue(
+            self.cleanup_service.cleanup_next_deleted_run("cleanup-worker", lease_seconds=30)
+        )
         with closing(sqlite3.connect(self.database)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM runs WHERE id = ?", (completed.id,)).fetchone()[0], 0)
 
     def test_public_read_delete_endpoints_use_durable_models_and_uniform_errors(self) -> None:
         completed = self._complete()
-        active = self.service.create_run("Active", "openalex")
+        active = self.submission_service.create_run("Active", "openalex")
         internal = next(
             item
-            for item in self.service.list_artifacts(completed.id)
+            for item in self.query_service.list_artifacts(completed.id)
             if item.visibility is ArtifactVisibility.INTERNAL
         )
 

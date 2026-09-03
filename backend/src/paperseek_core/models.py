@@ -121,6 +121,7 @@ class RetrievalRequest(CoreModel):
     resume_lane_results: dict[str, list[PaperRecord]] = Field(default_factory=dict)
     completed_lanes: list[str] = Field(default_factory=list)
     checkpoint_resume_stage: str = "retrieve"
+    crossref_metadata_enrichment: bool = False
 
 
 class RetrievalRerankItem(CoreModel):
@@ -130,6 +131,19 @@ class RetrievalRerankItem(CoreModel):
 
 class RetrievalRerankResult(CoreModel):
     items: list[RetrievalRerankItem] = Field(default_factory=list)
+
+
+class CandidateMetadataEnrichmentRequest(CoreModel):
+    documents: list[PaperRecord] = Field(default_factory=list)
+    limit: int = Field(default=100, ge=1, le=100)
+
+
+class CandidateMetadataEnrichmentResult(CoreModel):
+    documents: list[PaperRecord] = Field(default_factory=list)
+    attempted_count: int = 0
+    enriched_count: int = 0
+    failed_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RetrievalResult(CoreModel):
@@ -594,6 +608,7 @@ class QueryLoopResumeState(CoreModel):
 
 class QueryLoopRequest(CoreModel):
     question: str = Field(min_length=1)
+    source_context: str = ""
     budget: QueryLoopBudget = Field(default_factory=QueryLoopBudget)
     resume: QueryLoopResumeState | None = None
 
@@ -761,6 +776,7 @@ class ResearchWorkflowResumeState(CoreModel):
 
 class ResearchWorkflowRequest(CoreModel):
     question: str = Field(min_length=1)
+    source_context: str = ""
     query_budget: QueryLoopBudget = Field(default_factory=QueryLoopBudget)
     citation_enabled: bool = True
     citation_seed_count: int = 30
@@ -772,6 +788,7 @@ class ResearchWorkflowRequest(CoreModel):
     enrichment_concurrency: int = 8
     ranking_batch_size: int = 256
     ranking_concurrency: int = 16
+    crossref_metadata_enrichment: bool = False
     resume: ResearchWorkflowResumeState | None = None
 
 

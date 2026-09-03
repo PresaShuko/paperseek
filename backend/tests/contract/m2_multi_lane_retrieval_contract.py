@@ -14,7 +14,8 @@ from paperseek_core.models import (
     RetrievalRerankResult,
 )
 from paperseek_core.ports import EmbeddingPort, RerankPort, SourcePort
-from paperseek_core.retrieval import RetrievalLane, RetrievalPipeline, document_key
+from paperseek_core.document_identity import document_key
+from paperseek_core.retrieval import RetrievalLane, RetrievalPipeline
 from paperseek_core.sources.contracts import (
     SourceCapabilities,
     SourceSearchMetadata,
@@ -282,7 +283,8 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
             capabilities=capabilities,
             delays={RetrievalLane.RELEVANCE: 0.02, RetrievalLane.SEMANTIC: 0.01},
         )
-        result = await RetrievalPipeline(source, RecordingObserver()).run(
+        observer = RecordingObserver()
+        result = await RetrievalPipeline(source, observer).run(
             RetrievalRequest(
                 question="natural language research question",
                 query="compiled boolean query",
@@ -302,6 +304,16 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[(RetrievalLane.RECENT, 1)].limit, 100)
         self.assertEqual(result.completed_lanes, list(capabilities.lanes))
         self.assertEqual(len(result.documents), 153)
+        started = next(event for event in observer.events if event.event_type == "retrieval.started")
+        self.assertEqual(started.payload["total_lanes"], 4)
+        self.assertEqual(started.payload["lane_concurrency"], 2)
+        progress = [event.payload for event in observer.events if event.event_type == "retrieval.progress"]
+        self.assertEqual(progress[-1]["completed_lanes"], 4)
+        self.assertEqual(progress[-1]["total_lanes"], 4)
+        self.assertEqual(progress[-1]["lane_concurrency"], 2)
+        completed = next(event for event in observer.events if event.event_type == "retrieval.completed")
+        self.assertEqual(completed.payload["fusion"], "rrf")
+        self.assertEqual(completed.payload["llm_gate_candidate_count"], 153)
 
     async def test_later_page_failure_retains_primary_page_and_is_checkpointed_visibly(self) -> None:
         primary = [record(f"primary-{index}") for index in range(100)]

@@ -23,6 +23,8 @@ from paperseek_core.models import (
     RankedPaper,
     ResearchAssemblyRequest,
     ResearchWorkflowRequest,
+    RetrievalRerankItem,
+    RetrievalRerankResult,
     SearchPlan,
 )
 from paperseek_core.ports import AbstractPort
@@ -116,6 +118,16 @@ class M2AbstractEnrichmentContractTest(unittest.IsolatedAsyncioTestCase):
         degraded = [event for event in observer.events if event.event_type == "enrichment.degraded"]
         self.assertEqual(degraded[0].payload["code"], "abstract_enrichment_failed")
         self.assertNotIn("private upstream failure body", json.dumps(degraded[0].payload))
+        started = next(event.payload for event in observer.events if event.event_type == "enrichment.started")
+        self.assertEqual(started["request_count"], 2)
+        self.assertEqual(started["concurrency"], 2)
+        progress = next(event.payload for event in observer.events if event.event_type == "enrichment.progress")
+        self.assertEqual(progress["current"], 2)
+        self.assertEqual(progress["total"], 2)
+        self.assertEqual(progress["concurrency"], 2)
+        completed = next(event.payload for event in observer.events if event.event_type == "enrichment.completed")
+        self.assertEqual(completed["request_count"], 2)
+        self.assertEqual(completed["enriched_count"], 1)
 
     async def test_resume_skips_committed_dois_and_retains_enriched_values(self) -> None:
         source = FixtureAbstractPort()
@@ -283,7 +295,70 @@ class ExistingAbstractPort:
         return AbstractFetchResult(doi=request.doi, abstract=f"Enriched abstract for {request.doi}.", found=True)
 
 
+class RecordingEmbedding:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def embedding_scores(self, question: str, documents: list[PaperRecord]) -> list[float]:
+        del question
+        self.calls += 1
+        return [0.5 for _ in documents]
+
+
+class RecordingReranker:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def rerank(self, question: str, documents: list[PaperRecord]) -> RetrievalRerankResult:
+        del question
+        self.calls += 1
+        return RetrievalRerankResult(
+            items=[RetrievalRerankItem(document=document, score=1.0) for document in documents]
+        )
+
+
 class M2ResearchWorkflowContractTest(unittest.IsolatedAsyncioTestCase):
+    async def test_single_workflow_passes_external_retrieval_ports_to_retrieval_stage(self) -> None:
+        source_payload = json.loads((M0 / "source_responses.json").read_text(encoding="utf-8"))
+        mapper = OpenAlexSource(transport=AsyncHttpTransport())
+        records = [mapper._to_record(item) for item in source_payload["relevance"]]
+        llm = FixtureWorkflowLLM(
+            [
+                (ROOT / "tests" / "fixtures" / "llm" / "intent_search_plan.json").read_text(encoding="utf-8"),
+                (M0 / "llm_query.json").read_text(encoding="utf-8"),
+                (M0 / "llm_ranking_scores.json").read_text(encoding="utf-8"),
+                (M0 / "llm_ranking_reasons.json").read_text(encoding="utf-8"),
+            ]
+        )
+        embedding = RecordingEmbedding()
+        reranker = RecordingReranker()
+        workflow = ResearchWorkflow(
+            llm=llm,
+            source=FixtureWorkflowSource(records),
+            observer=RecordingObserver(),
+            embedding=embedding,
+            reranker=reranker,
+        )
+
+        await workflow.run(
+            ResearchWorkflowRequest(
+                question="How do transparent AI decision systems affect accountability in public agencies?",
+                query_budget=QueryLoopBudget(
+                    target_min=1,
+                    target_max=5,
+                    retrieval_pool_min=1,
+                    retrieval_pool_max=3000,
+                    max_iterations=5,
+                    query_portfolio_enabled=False,
+                ),
+                citation_enabled=False,
+                fetch_abstracts=False,
+            )
+        )
+
+        self.assertEqual(embedding.calls, 1)
+        self.assertEqual(reranker.calls, 1)
+
     async def test_single_workflow_composes_every_core_stage_and_checkpoints_final_artifacts(self) -> None:
         source_payload = json.loads((M0 / "source_responses.json").read_text(encoding="utf-8"))
         mapper = OpenAlexSource(transport=AsyncHttpTransport())

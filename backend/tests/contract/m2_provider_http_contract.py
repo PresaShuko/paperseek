@@ -167,6 +167,20 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.keywords.author_keywords, ["cs.IR"])
         self.assertEqual(record.abstract, "Graph retrieval abstract.")
 
+        await source.search(
+            SourceSearchRequest(
+                query="graph retrieval",
+                limit=1,
+                page=1,
+                lane="relevance",
+                field_ids=("cs.AI", "stat.ML"),
+            )
+        )
+        self.assertEqual(
+            client.calls[1]["params"]["search_query"],
+            'all:"graph retrieval" AND (cat:cs.AI OR cat:stat.ML)',
+        )
+
     async def test_semantic_scholar_exact_request_mapping_and_bulk_lanes(self) -> None:
         routes = {
             SemanticScholarSource.BASE_URL: json_route("semantic_scholar.json"),

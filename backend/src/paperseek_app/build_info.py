@@ -1,12 +1,12 @@
-"""Build identity embedded in the M2 Community distribution."""
+"""Build identity embedded in the Community distribution."""
 
 from __future__ import annotations
 
 
 DISTRIBUTION = "paperseek"
 VERSION = "0.3.0"
-COMMUNITY_COMMIT = "5525a58bd72e5f1cd18b681a25d0eea72e6b24ef"
-PUBLIC_OPENAPI_SHA256 = "B434FA1CFD36B5BC7D6E9CEB9EFF725B41BCF1500C9D8ED773BA53F03E435062"
+COMMUNITY_COMMIT = "source-tree"
+PUBLIC_OPENAPI_SHA256 = "25519F78B895F6AF2852649F3EB0E87D80525EEA2B9AD0CDF933857AF6F5868D"
 SOURCE_TREE_DIRTY = True
 
 

@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperseek-mcp"
+version = "0.3.0"
+description = "Model Context Protocol integration for PaperSeek"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [
+    { name = "MingfengHong", email = "hongmingfeng24@mails.ucas.ac.cn" },
+]
+maintainers = [
+    { name = "MingfengHong", email = "hongmingfeng24@mails.ucas.ac.cn" },
+]
+keywords = ["literature-search", "mcp", "openalex", "crossref", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "mcp==2.0.0",
+    "paperseek==0.3.0",
+]
+
+[project.urls]
+Homepage = "https://www.paperseek.top/"
+Repository = "https://github.com/MingfengHong/paperseek"
+Issues = "https://github.com/MingfengHong/paperseek/issues"
+Documentation = "https://docs.paperseek.top/"
+Online-Demo = "https://www.paperseek.top/"
+
+[project.scripts]
+paperseek-mcp = "paperseek_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["paperseek_mcp*"]
+
+[tool.setuptools.data-files]
+"share/paperseek-mcp" = ["server.json"]
+
+[tool.uv.sources]
+paperseek = { path = "../../backend" }

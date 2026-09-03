@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 
+from paperseek_community.key_pool import ApiKeyPool, retryable_key_status
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.ports import CancellationToken
 
@@ -25,7 +27,7 @@ class CommunityLLMAdapter:
         self.api_type = api_type
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.api_key = api_key
+        self.api_keys = ApiKeyPool(api_key)
 
     async def chat_json(
         self,
@@ -47,18 +49,19 @@ class CommunityLLMAdapter:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
-        response = await self._post(
+        response, api_key = await self._post(
             f"{self.base_url}/chat/completions",
             body,
-            self._bearer_headers(),
+            self._bearer_headers,
             allow_status={400, 422},
         )
         if response.status_code in {400, 422}:
             body.pop("response_format")
-            response = await self._post(
+            response, _ = await self._post(
                 f"{self.base_url}/chat/completions",
                 body,
-                self._bearer_headers(),
+                self._bearer_headers,
+                attempt_keys=(api_key,),
             )
         try:
             choice = (response.json().get("choices") or [])[0]
@@ -77,7 +80,11 @@ class CommunityLLMAdapter:
         }
         if instructions:
             body["instructions"] = instructions
-        response = await self._post(f"{self.base_url}/responses", body, self._bearer_headers())
+        response, _ = await self._post(
+            f"{self.base_url}/responses",
+            body,
+            self._bearer_headers,
+        )
         try:
             payload = response.json()
             if payload.get("output_text"):
@@ -102,14 +109,10 @@ class CommunityLLMAdapter:
         system = "\n\n".join(item["content"] for item in messages if item.get("role") == "system")
         if system:
             body["system"] = system
-        response = await self._post(
+        response, _ = await self._post(
             f"{self.base_url}/v1/messages",
             body,
-            {
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-            },
+            self._anthropic_headers,
         )
         try:
             texts = [
@@ -125,12 +128,35 @@ class CommunityLLMAdapter:
         self,
         url: str,
         body: dict,
-        headers: dict[str, str],
+        headers: Callable[[str], dict[str, str]],
         *,
         allow_status: set[int] | None = None,
-    ) -> httpx.Response:
-        if not self.api_key and not url.startswith(("http://127.0.0.1", "http://localhost")):
+        attempt_keys: tuple[str, ...] | None = None,
+    ) -> tuple[httpx.Response, str]:
+        if not self.api_keys.available and not url.startswith(("http://127.0.0.1", "http://localhost")):
             raise LLMRequestError("The configured LLM credential is unavailable.")
+        keys = attempt_keys or self.api_keys.attempts()
+        for index, api_key in enumerate(keys):
+            try:
+                response = await self._cancellable_post(url, body, headers(api_key))
+            except httpx.RequestError as exc:
+                if index + 1 < len(keys):
+                    continue
+                raise LLMRequestError("The LLM endpoint could not be reached.") from exc
+            if response.status_code in (allow_status or set()) or 200 <= response.status_code < 300:
+                return response, api_key
+            if retryable_key_status(response.status_code) and index + 1 < len(keys):
+                continue
+            raise LLMRequestError(f"The LLM endpoint returned HTTP {response.status_code}.")
+        raise LLMRequestError("The LLM endpoint could not be reached.")
+
+    async def _cancellable_post(
+        self,
+        url: str,
+        body: dict,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        self.cancellation.raise_if_cancelled()
         request = asyncio.create_task(self.client.post(url, json=body, headers=headers))
         cancelled = asyncio.create_task(self.cancellation.wait())
         try:
@@ -140,23 +166,27 @@ class CommunityLLMAdapter:
                 await asyncio.gather(request, return_exceptions=True)
                 self.cancellation.raise_if_cancelled()
                 raise asyncio.CancelledError
-            response = await request
-        except httpx.RequestError as exc:
-            raise LLMRequestError("The LLM endpoint could not be reached.") from exc
+            return await request
         finally:
             for task in (request, cancelled):
                 if not task.done():
                     task.cancel()
             await asyncio.gather(request, cancelled, return_exceptions=True)
-        if response.status_code not in (allow_status or set()) and not 200 <= response.status_code < 300:
-            raise LLMRequestError(f"The LLM endpoint returned HTTP {response.status_code}.")
-        return response
 
-    def _bearer_headers(self) -> dict[str, str]:
+    @staticmethod
+    def _bearer_headers(api_key: str) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return headers
+
+    @staticmethod
+    def _anthropic_headers(api_key: str) -> dict[str, str]:
+        return {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
 
     @staticmethod
     def _missing() -> str:

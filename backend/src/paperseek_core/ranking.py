@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from paperseek_core.document_identity import document_identity, document_key
 from paperseek_core.execution import NEVER_CANCELLED
 from paperseek_core.models import (
     CheckpointDraft,
@@ -26,31 +27,6 @@ from paperseek_core.prompts import SYSTEM_RANKING_REASONS, SYSTEM_RESULT_RANKING
 
 class EmptyRankingBatchError(RuntimeError):
     """Raised when an LLM ranking batch returns no usable scores."""
-
-
-def _normalize_key(value: Any) -> str:
-    return re.sub(r"\s+", "", str(value or "").strip().casefold())
-
-
-def _normalize_title(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip().casefold())
-
-
-def document_key(document: PaperRecord) -> str:
-    identifiers = document.identifiers
-    for name in ("doi", "openalex", "arxiv", "semanticscholar", "pmid"):
-        normalized = _normalize_key(getattr(identifiers, name, "") if identifiers else "")
-        if normalized:
-            return f"{name}:{normalized}"
-    uid = _normalize_key(document.uid)
-    if uid:
-        return f"uid:{uid}"
-    title = _normalize_title(document.title)
-    return f"title:{title}" if title else ""
-
-
-def document_identity(document: PaperRecord) -> str:
-    return str(document.uid or document_key(document) or "").strip()
 
 
 def describe_document(document: PaperRecord, index: int, *, abstract_limit: int = 1200) -> str:
@@ -475,6 +451,7 @@ class RankingPipeline:
             "ranking.started",
             {
                 "candidate_count": len(documents),
+                "llm_gate_candidate_count": len(documents),
                 "batch_count": len(batches),
                 "batch_size": batch_size,
                 "concurrency": scheduler.concurrency(),
@@ -488,6 +465,7 @@ class RankingPipeline:
                 batch_ids[1],
                 completed_ids,
                 scores,
+                scheduler.concurrency(),
             )
         else:
             scores, warnings = await self._run_multiple_batches(
@@ -522,6 +500,7 @@ class RankingPipeline:
         batch_id: str,
         completed_ids: set[str],
         scores: list[dict[str, Any]],
+        concurrency: int,
     ) -> list[str]:
         if batch_id in completed_ids:
             return []
@@ -550,7 +529,14 @@ class RankingPipeline:
         self._checkpoint(request, batch_id, scores, completed_ids)
         self._event(
             "ranking.batch_completed",
-            {"batch_index": 1, "batch_count": 1, "candidate_count": len(documents)},
+            {
+                "batch_index": 1,
+                "batch_count": 1,
+                "completed_batches": len(completed_ids),
+                "candidate_count": len(documents),
+                "scored_count": len(scores),
+                "concurrency": concurrency,
+            },
         )
         return warnings
 
@@ -630,7 +616,9 @@ class RankingPipeline:
                             {
                                 "batch_index": index,
                                 "batch_count": len(batches),
+                                "completed_batches": len(completed_ids),
                                 "candidate_count": len(batch),
+                                "scored_count": len(scores),
                                 "concurrency": workers,
                             },
                         )

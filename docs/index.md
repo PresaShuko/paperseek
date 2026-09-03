@@ -39,7 +39,7 @@ features:
   - title: 可复核导出
     details: 在 Results 页面筛选、勾选、排序论文，导出包含元数据和评分理由的 CSV；系统会至少保留前 50 条结果，并在高分候选更多时展示全部 5 分及以上论文。
   - title: Agent 与 MCP 集成
-    details: 可复制自包含 Skill，或安装 paperseek[mcp] 启动 stdio MCP Server，让支持 MCP 的 AI agent 调用检索、诊断和历史工具。
+    details: 可复制自包含 Skill，或独立安装同版本 paperseek-mcp，通过持久 run_id 让 MCP agent 启动、恢复、取消和导出检索运行。
 ---
 
 ## 选择你的入口

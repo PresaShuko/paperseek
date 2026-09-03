@@ -12,10 +12,47 @@ import unittest
 
 from paperseek_community.api import create_app
 from paperseek_community.cli import main as cli_main
+from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
+from paperseek_community.settings import CommunityDeploymentSettings
 from paperseek_app import build_info
+from paperseek_app.execution import WorkflowExecution
+from paperseek_core.models import QueryLoopBudget, ResearchWorkflowRequest
 
 
 FIXTURE = Path(__file__).parents[1] / "contract" / "fixtures" / "m1_fixed_source.json"
+
+
+def _settings() -> CommunityDeploymentSettings:
+    return CommunityDeploymentSettings(
+        llm_api_type="openai_chat",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        llm_api_key="",
+        openalex_api_key="",
+        semantic_scholar_api_key="",
+        pubmed_api_key="",
+        wos_api_key="",
+        google_scholar_api_key="",
+        contact_email="",
+    )
+
+
+def _fixed_resolver(run, _cancellation) -> WorkflowExecution:
+    source = FixedSourceAdapter.from_file(FIXTURE)
+    return WorkflowExecution(
+        llm=FixedLLMAdapter(source.fixture.llm_responses),
+        source=source,
+        abstracts=source,
+        request=ResearchWorkflowRequest(
+            question=run.question,
+            query_budget=QueryLoopBudget(
+                target_min=1,
+                target_max=50,
+                retrieval_pool_min=1,
+                query_portfolio_enabled=False,
+            ),
+        ),
+    )
 
 
 class M1EntryIntegrationTest(unittest.TestCase):
@@ -38,8 +75,8 @@ class M1EntryIntegrationTest(unittest.TestCase):
                 ).fetchone()
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(outputs, [{"schema_version": 6, "status": "migrated"}] * 2)
-        self.assertEqual(version, 5)
+        self.assertEqual(outputs, [{"schema_version": 7, "status": "migrated"}] * 2)
+        self.assertEqual(version, 7)
         self.assertEqual(artifact_table, ("run_artifacts",))
         self.assertEqual(cleanup_table, ("run_cleanup_jobs",))
 
@@ -55,9 +92,11 @@ class M1EntryIntegrationTest(unittest.TestCase):
                         fixture["question"],
                         "--database",
                         str(database),
-                        "--source-fixture",
-                        str(FIXTURE),
-                    ]
+                        "--source",
+                        "openalex",
+                    ],
+                    deployment_settings=_settings(),
+                    execution_resolver=_fixed_resolver,
                 )
             cli_payload = json.loads(output.getvalue())
             with TestClient(create_app(database)) as client:
@@ -105,10 +144,7 @@ class M1EntryIntegrationTest(unittest.TestCase):
 
         self.assertEqual(build_info.DISTRIBUTION, "paperseek")
         self.assertEqual(build_info.VERSION, "0.3.0")
-        self.assertEqual(
-            build_info.COMMUNITY_COMMIT,
-            "5525a58bd72e5f1cd18b681a25d0eea72e6b24ef",
-        )
+        self.assertEqual(build_info.COMMUNITY_COMMIT, "source-tree")
         self.assertTrue(build_info.SOURCE_TREE_DIRTY)
         self.assertEqual(
             build_info.PUBLIC_OPENAPI_SHA256,

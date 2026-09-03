@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
+from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -15,7 +16,7 @@ import httpx
 from paperseek_app.errors import RunOwnershipLost, RunStateError
 from paperseek_app.execution import CancellationScope, WorkflowExecution
 from paperseek_app.models import ArtifactRole, LeaseToken, PendingEvent, RunStatus
-from paperseek_app.services import RunService
+from paperseek_app.services import RunExecutionService, RunQueryService, RunSubmissionService
 from paperseek_community.api import create_app
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
@@ -228,7 +229,10 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
         self.database = self.data_dir / "paperseek.db"
         migrate_database(self.database)
         self.uow = SQLiteRunUnitOfWork(self.database)
-        self.service = RunService(self.uow, FileArtifactStore(self.data_dir))
+        store = FileArtifactStore(self.data_dir)
+        self.submission_service = RunSubmissionService(self.uow)
+        self.execution_service = RunExecutionService(self.uow, store)
+        self.query_service = RunQueryService(self.uow, store)
         self.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
         self.server = _SlowServer()
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -243,7 +247,7 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
         self.temp.cleanup()
 
     def _create_run(self):
-        return self.service.create_run(
+        return self.submission_service.create_run(
             self.fixture["question"],
             self.fixture["source"],
             {"fixture_id": self.fixture["fixture_id"]},
@@ -251,23 +255,23 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
 
     async def test_queued_cancel_is_atomic_idempotent_and_terminal(self) -> None:
         run = self._create_run()
-        cancelled = self.service.request_cancel(run.id)
-        repeated = self.service.request_cancel(run.id)
+        cancelled = self.submission_service.request_cancel(run.id)
+        repeated = self.submission_service.request_cancel(run.id)
 
         self.assertEqual(cancelled.status, RunStatus.CANCELLED)
         self.assertEqual(repeated.status, RunStatus.CANCELLED)
         self.assertIsNotNone(cancelled.finished_at)
         self.assertEqual(
-            [event.event_type for event in self.service.list_events(run.id)],
+            [event.event_type for event in self.query_service.list_events(run.id)],
             ["run.created", "run.cancelled"],
         )
         with self.assertRaises(RunStateError):
-            self.service.claim_run(run.id, "late-worker")
+            self.uow.claim_run(run.id, "late-worker", timedelta(seconds=60))
 
     async def test_running_cancel_fences_writes_and_only_executor_finishes_cancel(self) -> None:
         run = self._create_run()
-        lease = self.service.claim_run(run.id, "worker-a")
-        cancelling = self.service.request_cancel(run.id)
+        lease = self.uow.claim_run(run.id, "worker-a", timedelta(seconds=60))
+        cancelling = self.submission_service.request_cancel(run.id)
 
         self.assertEqual(cancelling.status, RunStatus.CANCELLING)
         with self.assertRaises((RunOwnershipLost, RunStateError)):
@@ -277,10 +281,10 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                 None,
                 None,
             )
-        cancelled = self.service.complete_cancel(lease)
+        cancelled = self.execution_service.complete_cancel(lease)
         self.assertEqual(cancelled.status, RunStatus.CANCELLED)
         self.assertEqual(
-            [event.event_type for event in self.service.list_events(run.id)][-2:],
+            [event.event_type for event in self.query_service.list_events(run.id)][-2:],
             ["run.cancelling", "run.cancelled"],
         )
 
@@ -297,7 +301,7 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
             self.assertLess(elapsed, 0.5)
 
             running = self._create_run()
-            self.service.claim_run(running.id, "api-worker")
+            self.uow.claim_run(running.id, "api-worker", timedelta(seconds=60))
             started = time.perf_counter()
             response = await client.post(f"/api/v1/runs/{running.id}/cancel")
             elapsed = time.perf_counter() - started
@@ -407,7 +411,10 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                 database = stage_dir / "paperseek.db"
                 migrate_database(database)
                 uow = SQLiteRunUnitOfWork(database)
-                service = RunService(uow, FileArtifactStore(stage_dir))
+                store = FileArtifactStore(stage_dir)
+                submission_service = RunSubmissionService(uow)
+                execution_service = RunExecutionService(uow, store)
+                query_service = RunQueryService(uow, store)
                 requests: list[_StageRequest] = []
 
                 def resolve(_run, token: CancellationToken) -> WorkflowExecution:
@@ -440,12 +447,12 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                     )
 
                 executor = EmbeddedRunExecutor(
-                    service,
+                    execution_service,
                     resolve,
                     owner_id=f"worker-{stage}",
                     cancellation_poll_seconds=0.02,
                 )
-                run = service.create_run(
+                run = submission_service.create_run(
                     self.fixture["question"],
                     self.fixture["source"],
                     {"stage": stage},
@@ -457,7 +464,7 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                         3,
                     )
                     self.assertTrue(received, f"{stage} never reached the real slow HTTP endpoint")
-                    running = service.get_run(run.id)
+                    running = query_service.get_run(run.id)
                     stale_lease = LeaseToken(
                         run_id=run.id,
                         owner_id=running.lease_owner,
@@ -490,7 +497,7 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                         "Cancellation must not schedule a replacement request.",
                     )
 
-                    events = service.list_events(run.id)
+                    events = query_service.list_events(run.id)
                     cancelling_index = next(
                         index for index, event in enumerate(events) if event.event_type == "run.cancelling"
                     )
@@ -498,11 +505,11 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                         [event.event_type for event in events[cancelling_index + 1:]],
                         ["run.cancelled"],
                     )
-                    self.assertEqual(service.get_results(run.id), [])
+                    self.assertEqual(query_service.get_results(run.id), [])
                     self.assertFalse(
                         any(
                             artifact.role is ArtifactRole.COMPLETION_REQUIRED
-                            for artifact in service.list_artifacts(run.id)
+                            for artifact in query_service.list_artifacts(run.id)
                         )
                     )
                     with self.assertRaises((RunOwnershipLost, RunStateError)):

@@ -32,7 +32,7 @@ Pull Request 只构建文档站，不发布。推送到 `main` 后，工作流�
 
 ## PyPI 发布
 
-PaperSeek 的 Python 包通过 `.github/workflows/publish-pypi.yml` 发布到 PyPI。该工作流会：
+PaperSeek 的唯一 Python distribution 定义位于 `backend/pyproject.toml`，通过 `.github/workflows/publish-pypi.yml` 发布到 PyPI。该工作流会：
 
 1. 在 Python 3.12 上构建 wheel 和 sdist。
 2. 使用 `twine check` 校验发布产物。
@@ -53,10 +53,10 @@ PYPI_API_TOKEN
 
 发布前需要先更新：
 
-- `pyproject.toml` 中的 `project.version`
-- `paperseek/__init__.py` 中的 `__version__`
-- `paperseek_core/__init__.py` 中的 `__version__`
-- `tests/test_packaging.py` 中的版本断言
+- `backend/pyproject.toml` 中的 `project.version`
+- `backend/src/paperseek_app/build_info.py` 中的版本与构建信息
+- `backend/src/paperseek_core/__init__.py` 和 `backend/src/paperseek_community/__init__.py` 的版本边界
+- 新架构的 packaging contract
 - `README.md`、`README.en.md` 和对应版本更新说明
 
 版本提交合并后，先确认 Python CI、文档构建、wheel/sdist 构建和 `twine check` 全部通过，再创建与包版本一致的 GitHub Release 和 tag。GitHub Release 会触发 PyPI 工作流；同一版本的上传产物不能覆盖。

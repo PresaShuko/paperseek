@@ -1,0 +1,200 @@
+name: Publish Community and MCP images to GHCR
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PAPERSEEK_VERSION: "0.3.0"
+  COMMUNITY_IMAGE: ghcr.io/mingfenghong/paperseek
+  MCP_IMAGE: ghcr.io/mingfenghong/paperseek-mcp
+
+jobs:
+  verify-and-publish:
+    name: Verify AMD64 images before publishing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify release version
+        shell: bash
+        run: test "${GITHUB_REF_NAME#v}" = "${PAPERSEEK_VERSION}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.9.24
+
+      - name: Verify backend and independent MCP distributions
+        shell: bash
+        run: |
+          uv sync --locked --project backend
+          uv run --locked --project backend python backend/tests/import_boundaries.py
+          uv run --locked --project backend python -m unittest discover -s backend/tests/contract -p "*contract.py"
+          uv run --locked --project backend python -m unittest discover -s backend/tests/integration -p "*.py"
+          uv run --locked --project backend python -m unittest discover -s backend/tests/migration -p "*.py"
+          uv lock --check --project integrations/mcp
+          uv sync --locked --project integrations/mcp
+          PYTHONPATH=backend/src uv run --locked --project integrations/mcp python -m unittest discover -s integrations/mcp/tests -p "*contract.py"
+          mkdir -p .release-mcp/dist
+          uv build --wheel --out-dir .release-mcp/dist backend
+          uv build --wheel --out-dir .release-mcp/dist integrations/mcp
+          uv venv .release-mcp/venv --python 3.12
+          uv pip install --python .release-mcp/venv/bin/python \
+            .release-mcp/dist/paperseek-0.3.0-py3-none-any.whl \
+            .release-mcp/dist/paperseek_mcp-0.3.0-py3-none-any.whl
+          gate=$(env -u PYTHONPATH \
+            PAPERSEEK_CLI_EXECUTABLE="$PWD/.release-mcp/venv/bin/paperseek" \
+            PAPERSEEK_ISOLATED_PREFIX="$PWD/.release-mcp/venv" \
+            PAPERSEEK_CLI_FIXTURE="$PWD/backend/tests/contract/fixtures/m1_fixed_source.json" \
+            PAPERSEEK_CLI_DATABASE="$PWD/.release-mcp/paperseek.db" \
+            PAPERSEEK_EXPECTED_COMMIT="${GITHUB_SHA}" \
+            PAPERSEEK_EXPECTED_DIRTY=false \
+            .release-mcp/venv/bin/python backend/tests/integration/installed_product_smoke.py)
+          run_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["completed_run_id"])' <<<"${gate}")
+          env -u PYTHONPATH \
+            PAPERSEEK_MCP_EXECUTABLE="$PWD/.release-mcp/venv/bin/paperseek-mcp" \
+            PAPERSEEK_EXECUTABLE="$PWD/.release-mcp/venv/bin/paperseek" \
+            PAPERSEEK_ISOLATED_PREFIX="$PWD/.release-mcp" \
+            PAPERSEEK_MCP_DATABASE="$PWD/.release-mcp/paperseek.db" \
+            PAPERSEEK_COMPLETED_RUN_ID="${run_id}" \
+            .release-mcp/venv/bin/python integrations/mcp/tests/m4_official_client_integration.py -v
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify current Vue delivery
+        working-directory: web
+        run: |
+          npm ci
+          uv run --locked --project ../backend python ../backend/scripts/generate_openapi_types.py --check
+          npm run typecheck
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:browser
+
+      - name: Build Linux AMD64 images
+        shell: bash
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker build --platform linux/amd64 --build-arg PAPERSEEK_BUILD_COMMIT="${GITHUB_SHA}" --build-arg PAPERSEEK_BUILD_DIRTY=false --tag "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" .
+          docker build --platform linux/amd64 --build-arg PAPERSEEK_BUILD_COMMIT="${GITHUB_SHA}" --build-arg PAPERSEEK_BUILD_DIRTY=false --file integrations/mcp/Dockerfile --tag "${MCP_IMAGE}:${PAPERSEEK_VERSION}" .
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}")" = "linux/amd64"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${MCP_IMAGE}:${PAPERSEEK_VERSION}")" = "linux/amd64"
+          docker run --rm --entrypoint python "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" -c 'import shutil; tools=[x for x in ("node","npm","gcc","g++","make","cc","git") if shutil.which(x)]; assert not tools, tools'
+          docker run --rm --entrypoint python "${MCP_IMAGE}:${PAPERSEEK_VERSION}" -c 'import shutil; tools=[x for x in ("node","npm","gcc","g++","make","cc","git") if shutil.which(x)]; assert not tools, tools'
+
+      - name: Run Community and MCP image gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker rm -f paperseek-release-community paperseek-release-mcp paperseek-release-mcp-noauth >/dev/null 2>&1 || true
+            docker volume rm paperseek-data paperseek-release-mcp-data >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          cleanup
+
+          docker volume create paperseek-data
+          docker run --name paperseek-release-community --detach \
+            --publish 8765:8765 \
+            --volume paperseek-data:/var/lib/paperseek \
+            "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" \
+            serve --database /var/lib/paperseek/paperseek.db --host 0.0.0.0 --port 8765 --no-worker
+          for attempt in {1..60}; do
+            curl --fail --silent http://127.0.0.1:8765/health >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8765/health >/dev/null
+          curl --fail --silent http://127.0.0.1:8765/ready >/dev/null
+          curl --fail --silent http://127.0.0.1:8765/api/v1/sources | python -c 'import json,sys; ids={x["id"] for x in json.load(sys.stdin)["sources"]}; assert ids == {"openalex","arxiv","crossref","semanticscholar","pubmed","wos","googlescholar","paperhub"}'
+          for route in search runs/release-smoke runs/release-smoke/results runs/release-smoke/citation-map history; do
+            curl --fail --silent "http://127.0.0.1:8765/${route}" >/dev/null
+          done
+
+          docker exec paperseek-release-community mkdir -p /tmp/fixtures
+          docker cp backend/tests/contract/fixtures/m1_fixed_source.json paperseek-release-community:/tmp/fixtures/m1_fixed_source.json
+          docker cp backend/tests/contract/m3_cancellation_request_lifecycle_contract.py paperseek-release-community:/tmp/m3_cancellation_request_lifecycle_contract.py
+          docker exec \
+            -e PYTHONPATH=/tmp \
+            paperseek-release-community \
+            python -m unittest -v \
+            m3_cancellation_request_lifecycle_contract.M3CancellationRequestLifecycleContractTest.test_real_slow_http_stop_covers_all_four_async_stages_without_late_writes
+
+          docker cp backend/tests/contract/fixtures/m1_fixed_source.json paperseek-release-community:/tmp/fixture.json
+          docker cp backend/tests/integration/installed_product_smoke.py paperseek-release-community:/tmp/installed_product_smoke.py
+          docker cp backend/tests/integration/cli_test_hook paperseek-release-community:/tmp/cli_test_hook
+          gate=$(docker exec \
+            -e PAPERSEEK_CLI_EXECUTABLE=/usr/local/bin/paperseek \
+            -e PAPERSEEK_ISOLATED_PREFIX=/usr/local \
+            -e PAPERSEEK_CLI_FIXTURE=/tmp/fixture.json \
+            -e PAPERSEEK_CLI_DATABASE=/var/lib/paperseek/paperseek.db \
+            -e PAPERSEEK_EXPECTED_COMMIT="${GITHUB_SHA}" \
+            -e PAPERSEEK_EXPECTED_DIRTY=false \
+            paperseek-release-community \
+            python /tmp/installed_product_smoke.py)
+          run_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["completed_run_id"])' <<<"${gate}")
+          artifacts=$(curl --fail --silent "http://127.0.0.1:8765/api/v1/runs/${run_id}/artifacts")
+          artifact_id=$(python -c 'import json,sys; print(next(x["id"] for x in json.load(sys.stdin)["artifacts"] if x["filename"] == "export.json"))' <<<"${artifacts}")
+          before=$(curl --fail --silent "http://127.0.0.1:8765/api/v1/runs/${run_id}/artifacts/${artifact_id}" | sha256sum)
+          docker restart paperseek-release-community >/dev/null
+          for attempt in {1..60}; do
+            curl --fail --silent http://127.0.0.1:8765/ready >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent "http://127.0.0.1:8765/api/v1/runs/${run_id}" >/dev/null
+          after=$(curl --fail --silent "http://127.0.0.1:8765/api/v1/runs/${run_id}/artifacts/${artifact_id}" | sha256sum)
+          test "${before}" = "${after}"
+
+          if docker run --name paperseek-release-mcp-noauth "${MCP_IMAGE}:${PAPERSEEK_VERSION}"; then
+            echo "MCP non-loopback startup unexpectedly accepted a missing service token" >&2
+            exit 1
+          fi
+          docker volume create paperseek-release-mcp-data
+          docker run --name paperseek-release-mcp --detach \
+            --publish 8766:8766 \
+            --volume paperseek-release-mcp-data:/data \
+            --env PAPERSEEK_MCP_SERVICE_TOKEN=release-gate-token \
+            --env PAPERSEEK_MCP_PUBLIC_URL=https://mcp.example.test/mcp \
+            --env PAPERSEEK_MCP_ALLOWED_HOSTS=127.0.0.1:8766 \
+            --env PAPERSEEK_MCP_ALLOWED_ORIGINS=https://client.example.test \
+            "${MCP_IMAGE}:${PAPERSEEK_VERSION}"
+          for attempt in {1..60}; do
+            curl --silent http://127.0.0.1:8766/mcp >/dev/null && break
+            sleep 1
+          done
+          uv run --locked --project integrations/mcp python integrations/mcp/tests/m4_container_client_smoke.py \
+            --url http://127.0.0.1:8766/mcp \
+            --token release-gate-token \
+            --origin https://client.example.test \
+            --host 127.0.0.1:8766
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish verified semver and latest tags
+        shell: bash
+        run: |
+          docker tag "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" "${COMMUNITY_IMAGE}:latest"
+          docker tag "${MCP_IMAGE}:${PAPERSEEK_VERSION}" "${MCP_IMAGE}:latest"
+          docker push "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}"
+          docker push "${COMMUNITY_IMAGE}:latest"
+          docker push "${MCP_IMAGE}:${PAPERSEEK_VERSION}"
+          docker push "${MCP_IMAGE}:latest"

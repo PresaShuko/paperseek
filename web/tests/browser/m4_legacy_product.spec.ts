@@ -24,6 +24,15 @@ const sources = [
   label,
   default: index === 0,
   status: id === "wos" ? "temporarily_unavailable" : "available",
+  api_key: id === "wos" || id === "googlescholar" ? "required" : "not_required",
+  capabilities: {
+    citation_expansion: id === "openalex",
+    filter: {
+      mode: ["openalex", "arxiv", "wos"].includes(id) ? "native" : "text",
+      label: `${label} filter`,
+      options: [],
+    },
+  },
 }));
 
 const run = {
@@ -105,12 +114,13 @@ test("Vue preserves the four-stage bilingual search, result, graph, export and h
   await expect(page.getByLabel("Data Source")).toHaveValue("openalex");
   await expect(page.getByLabel("Fast")).toBeChecked();
   await expect(page.getByRole("navigation", { name: "Workspace section" })).toBeVisible();
-  await expect(page.getByLabel("Provider").locator('option[value="cstcloud"]')).toHaveCount(1);
-  await expect(page.getByLabel("Provider").locator('option[value="nvidia"]')).toHaveCount(1);
-  await expect(page.getByLabel("Provider").locator('option[value="openrouter"]')).toHaveCount(1);
-  await page.getByLabel("Provider").selectOption("modelscope");
+  const llmProvider = page.getByText("Provider", { exact: true }).locator("..").locator("select");
+  await expect(llmProvider.locator('option[value="cstcloud"]')).toHaveCount(1);
+  await expect(llmProvider.locator('option[value="nvidia"]')).toHaveCount(1);
+  await expect(llmProvider.locator('option[value="openrouter"]')).toHaveCount(1);
+  await llmProvider.selectOption("modelscope");
   await expect(page.getByLabel("Model", { exact: true })).toHaveValue("Qwen/Qwen3-235B-A22B-Instruct-2507");
-  await page.getByLabel("Provider").selectOption("openai");
+  await llmProvider.selectOption("openai");
 
   await page.getByRole("button", { name: "中文" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
@@ -129,7 +139,7 @@ test("Vue preserves the four-stage bilingual search, result, graph, export and h
   }
   await expect(page.getByTestId("stage-results")).toHaveAttribute("data-state", "complete");
 
-  await page.getByRole("link", { name: "Results" }).click();
+  await page.getByRole("link", { name: "Results", exact: true }).click();
   await expect(page.getByRole("heading", { name: finalResult.ranked[0].title })).toBeVisible();
   const exportLink = page.getByRole("link", { name: "Export CSV" });
   await expect(exportLink).toHaveAttribute("href", new RegExp(`/api/v1/runs/${runId}/export\\?format=csv$`));
@@ -143,9 +153,9 @@ test("Vue preserves the four-stage bilingual search, result, graph, export and h
   expect(exportResult.disposition).toContain("paperseek-results.csv");
   expect(exportResult.byteLength).toBe(csvExport.byteLength);
 
-  await page.getByRole("link", { name: "Citation Map" }).click();
+  await page.getByRole("link", { name: "Citation Map", exact: true }).click();
   await expect(page.getByText(`${citationMap.nodes.length} nodes`)).toBeVisible();
-  await expect(page.getByText(citationMap.nodes[0].title)).toBeVisible();
+  await expect(page.getByRole("button", { name: citationMap.nodes[0].title, exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "History" }).click();
   await expect(page.getByRole("button", { name: new RegExp(question) })).toBeVisible();

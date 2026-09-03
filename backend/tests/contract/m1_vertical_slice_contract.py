@@ -19,7 +19,11 @@ from paperseek_app.models import (
     PendingEvent,
     RunStatus,
 )
-from paperseek_app.services import RunService
+from paperseek_app.services import (
+    RunExecutionService,
+    RunQueryService,
+    RunSubmissionService,
+)
 from paperseek_app.state import validate_transition
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.composition import execute_fixture_search
@@ -66,16 +70,18 @@ class M1VerticalSliceContractTest(unittest.TestCase):
         self.uow = SQLiteRunUnitOfWork(self.database, clock=self.clock)
         self.addCleanup(self.uow.close)
         self.store = FileArtifactStore(self.temp.name)
-        self.service = RunService(self.uow, self.store)
+        self.submission_service = RunSubmissionService(self.uow)
+        self.execution_service = RunExecutionService(self.uow, self.store)
+        self.query_service = RunQueryService(self.uow, self.store)
         self.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
     def _create_and_claim(self, owner: str = "worker-a"):
-        run = self.service.create_run(
+        run = self.submission_service.create_run(
             self.fixture["question"],
             self.fixture["source"],
             {"fixture_id": self.fixture["fixture_id"]},
         )
-        lease = self.service.claim_run(run.id, owner, lease_seconds=30)
+        lease = self.uow.claim_run(run.id, owner, timedelta(seconds=30))
         return run, lease
 
     def test_fixed_source_adapter_is_deterministic(self):
@@ -105,7 +111,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
         self.assertEqual(detail.attempt, 1)
         self.assertEqual(detail.versions.model_dump(mode="json"), self.fixture["expected"]["versions"])
 
-        events = self.service.list_events(detail.id)
+        events = self.query_service.list_events(detail.id)
         self.assertEqual([event.sequence for event in events], list(range(1, len(events) + 1)))
         event_types = [event.event_type for event in events]
         self.assertEqual(event_types[:2], ["run.created", "run.claimed"])
@@ -114,20 +120,20 @@ class M1VerticalSliceContractTest(unittest.TestCase):
         self.assertIn("retrieval.completed", event_types)
         self.assertIn("ranking.completed", event_types)
         self.assertEqual(event_types[-2:], ["workflow.completed", "run.completed"])
-        checkpoint = self.service.get_checkpoint(detail.id)
+        checkpoint = self.uow.get_checkpoint(detail.id)
         self.assertEqual(checkpoint.step_key, "assemble_final_result")
         self.assertLess(checkpoint.event_sequence, events[-1].sequence)
         self.assertEqual(checkpoint.lease_generation, 1)
-        results = self.service.get_results(detail.id)
+        results = self.query_service.get_results(detail.id)
         self.assertEqual(results[0].record.uid, self.fixture["records"][0]["uid"])
 
     def test_claim_generation_and_expiry_fence_stale_owner_writes(self):
         run, stale = self._create_and_claim("worker-a")
-        renewed = self.service.renew_lease(stale, lease_seconds=30)
+        renewed = self.uow.renew_lease(stale, timedelta(seconds=30))
         self.assertEqual(renewed.lease_generation, stale.lease_generation)
 
         self.clock.advance(31)
-        current = self.service.claim_run(run.id, "worker-b", lease_seconds=30)
+        current = self.uow.claim_run(run.id, "worker-b", timedelta(seconds=30))
         self.assertEqual(current.lease_generation, stale.lease_generation + 1)
 
         with self.assertRaises(RunOwnershipLost):
@@ -143,11 +149,11 @@ class M1VerticalSliceContractTest(unittest.TestCase):
             None,
             None,
         )
-        self.assertNotIn("source.late", [event.event_type for event in self.service.list_events(run.id)])
+        self.assertNotIn("source.late", [event.event_type for event in self.query_service.list_events(run.id)])
 
     def test_event_and_checkpoint_transaction_rolls_back_together(self):
         run, lease = self._create_and_claim()
-        before = self.service.list_events(run.id)
+        before = self.query_service.list_events(run.id)
         with closing(sqlite3.connect(self.database)) as connection:
             connection.execute(
                 """
@@ -160,21 +166,21 @@ class M1VerticalSliceContractTest(unittest.TestCase):
             )
 
         with self.assertRaises(RunPersistenceError):
-            self.service.append_checkpoint(
+            self.execution_service.append_checkpoint(
                 lease,
                 [PendingEvent(event_type="source.transient", stage="source", payload={})],
                 CheckpointDraft(
                     step_key="source.search",
                     idempotency_key="forced-failure",
                     state={"count": 1},
-                    workflow_version=self.service.get_run(run.id).versions.workflow_version,
+                    workflow_version=self.query_service.get_run(run.id).versions.workflow_version,
                 ),
             )
 
-        after = self.service.list_events(run.id)
+        after = self.query_service.list_events(run.id)
         self.assertEqual([event.sequence for event in after], [event.sequence for event in before])
-        self.assertIsNone(self.service.get_checkpoint(run.id))
-        self.assertEqual(self.service.get_run(run.id).last_event_sequence, before[-1].sequence)
+        self.assertIsNone(self.uow.get_checkpoint(run.id))
+        self.assertEqual(self.query_service.get_run(run.id).last_event_sequence, before[-1].sequence)
 
     def test_concurrent_observer_writes_allocate_one_continuous_sequence(self):
         run, lease = self._create_and_claim()
@@ -190,7 +196,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=6) as pool:
             list(pool.map(append, range(12)))
 
-        events = self.service.list_events(run.id)
+        events = self.query_service.list_events(run.id)
         self.assertEqual([event.sequence for event in events], list(range(1, 15)))
         self.assertEqual(
             sorted(event.payload["index"] for event in events if event.event_type == "source.progress"),
@@ -200,7 +206,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
     def test_source_failure_is_terminal_redacted_and_cannot_be_completed(self):
         run, lease = self._create_and_claim()
         detail = asyncio.run(
-            self.service.execute_claimed_workflow(
+            self.execution_service.execute_claimed_workflow(
                 lease,
                 llm=FixedLLMAdapter(self.fixture["llm_responses"][:2]),
                 source=FailingSource(),
@@ -218,8 +224,8 @@ class M1VerticalSliceContractTest(unittest.TestCase):
 
         self.assertEqual(detail.status, RunStatus.FAILED)
         self.assertEqual(detail.error_code, "research_workflow_failed")
-        self.assertEqual(self.service.get_results(run.id), [])
-        self.assertEqual(self.service.get_checkpoint(run.id).step_key, "query.plan")
+        self.assertEqual(self.query_service.get_results(run.id), [])
+        self.assertEqual(self.uow.get_checkpoint(run.id).step_key, "query.plan")
         self.assertNotIn(b"private upstream response body", self.database.read_bytes())
         with self.assertRaises((RunOwnershipLost, RunStateError)):
             self.uow.complete_run(lease, [], None, [])
@@ -260,7 +266,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
         detail = self.uow.complete_run(lease, [], result, [final_artifact])
 
         self.assertEqual(detail.status, RunStatus.COMPLETED_WITH_WARNINGS)
-        terminal = self.service.list_events(run.id)[-1]
+        terminal = self.query_service.list_events(run.id)[-1]
         self.assertEqual(terminal.event_type, "run.completed_with_warnings")
         self.assertEqual(terminal.payload["warning_count"], 1)
 
@@ -274,7 +280,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'run%'"
                 )
             }
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
         self.assertEqual(
             tables,
             {

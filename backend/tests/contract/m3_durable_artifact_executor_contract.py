@@ -31,7 +31,7 @@ from paperseek_app.models import (
     RunStatus,
     RunVersions,
 )
-from paperseek_app.services import RunService
+from paperseek_app.services import RunExecutionService, RunQueryService, RunSubmissionService
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
@@ -75,11 +75,13 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         self.store = FileArtifactStore(self.data_dir)
         self.uow = SQLiteRunUnitOfWork(self.database, clock=self.clock)
         self.addCleanup(self.uow.close)
-        self.service = RunService(self.uow, self.store)
+        self.submission_service = RunSubmissionService(self.uow)
+        self.execution_service = RunExecutionService(self.uow, self.store)
+        self.query_service = RunQueryService(self.uow, self.store)
         self.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
     def _create_run(self):
-        return self.service.create_run(
+        return self.submission_service.create_run(
             self.fixture["question"],
             self.fixture["source"],
             {"fixture_id": self.fixture["fixture_id"]},
@@ -103,9 +105,12 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
             ),
         )
 
-    def _executor(self, service: RunService | None = None) -> EmbeddedRunExecutor:
+    def _executor(
+        self,
+        service: RunExecutionService | None = None,
+    ) -> EmbeddedRunExecutor:
         return EmbeddedRunExecutor(
-            service or self.service,
+            service or self.execution_service,
             self._execution,
             owner_id="embedded-worker",
             lease_seconds=60,
@@ -152,7 +157,7 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         self.assertEqual(upgraded_run.question, "persisted before M3")
         self.assertGreater(upgraded_run.deadline_at, upgraded_run.created_at)
         with closing(sqlite3.connect(database)) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -248,14 +253,14 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
 
     def test_checkpoint_pointer_commits_after_recovery_artifact_and_rolls_back_together(self) -> None:
         run = self._create_run()
-        lease = self.service.claim_run(run.id, "checkpoint-worker", lease_seconds=60)
+        lease = self.uow.claim_run(run.id, "checkpoint-worker", timedelta(seconds=60))
         first = CheckpointDraft(
             step_key="retrieve.lane",
             idempotency_key="m3-checkpoint-first",
             state={"completed_lanes": ["relevance"], "candidate_count": 1},
             workflow_version=run.versions.workflow_version,
         )
-        persisted = self.service.append_checkpoint(
+        persisted = self.execution_service.append_checkpoint(
             lease,
             [PendingEvent(event_type="retrieval.progress", stage="retrieval")],
             first,
@@ -263,14 +268,14 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
 
         self.assertTrue(persisted.state_artifact_id)
         self.assertEqual(self.uow.get_checkpoint(run.id).state, {})
-        self.assertEqual(self.service.get_checkpoint(run.id).state, first.state)
-        artifacts = self.service.list_artifacts(run.id)
+        self.assertEqual(self.execution_service.get_checkpoint(run.id).state, first.state)
+        artifacts = self.query_service.list_artifacts(run.id)
         self.assertEqual(len(artifacts), 1)
         self.assertEqual(artifacts[0].role, ArtifactRole.RECOVERY)
         self.assertEqual(artifacts[0].visibility, ArtifactVisibility.INTERNAL)
         self.assertEqual(json.loads(self.store.read(artifacts[0])), first.state)
 
-        before_events = self.service.list_events(run.id)
+        before_events = self.query_service.list_events(run.id)
         with closing(sqlite3.connect(self.database)) as connection:
             connection.execute(
                 """
@@ -288,15 +293,18 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
             workflow_version=run.versions.workflow_version,
         )
         with self.assertRaises(RunPersistenceError):
-            self.service.append_checkpoint(
+            self.execution_service.append_checkpoint(
                 lease,
                 [PendingEvent(event_type="ranking.progress", stage="ranking")],
                 second,
             )
 
-        self.assertEqual(self.service.get_checkpoint(run.id).idempotency_key, first.idempotency_key)
-        self.assertEqual(self.service.list_events(run.id), before_events)
-        self.assertEqual(len(self.service.list_artifacts(run.id)), 1)
+        self.assertEqual(
+            self.execution_service.get_checkpoint(run.id).idempotency_key,
+            first.idempotency_key,
+        )
+        self.assertEqual(self.query_service.list_events(run.id), before_events)
+        self.assertEqual(len(self.query_service.list_artifacts(run.id)), 1)
         checkpoint_files = list(
             (self.data_dir / "artifacts" / "runs" / run.id / "checkpoint" / "1").glob("*.json")
         )
@@ -308,8 +316,10 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
 
         restarted_uow = SQLiteRunUnitOfWork(self.database, clock=self.clock)
         self.addCleanup(restarted_uow.close)
-        restarted_service = RunService(restarted_uow, FileArtifactStore(self.data_dir))
-        completed = asyncio.run(self._executor(restarted_service).run_once())
+        restarted_store = FileArtifactStore(self.data_dir)
+        restarted_execution = RunExecutionService(restarted_uow, restarted_store)
+        restarted_query = RunQueryService(restarted_uow, restarted_store)
+        completed = asyncio.run(self._executor(restarted_execution).run_once())
 
         self.assertIsNotNone(completed)
         self.assertEqual(completed.id, queued.id)
@@ -318,7 +328,7 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         self.assertEqual(completed.lease_generation, 1)
         required = [
             item
-            for item in restarted_service.list_artifacts(queued.id)
+            for item in restarted_query.list_artifacts(queued.id)
             if item.role is ArtifactRole.COMPLETION_REQUIRED
         ]
         self.assertEqual(
@@ -332,9 +342,9 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
             },
         )
         final_artifact = next(item for item in required if item.filename == "final_result.json")
-        results = restarted_service.get_results(queued.id)
+        results = restarted_query.get_results(queued.id)
         self.assertEqual({item.record_artifact_id for item in results}, {final_artifact.id})
-        self.assertEqual(asyncio.run(self._executor(restarted_service).run_once()), None)
+        self.assertEqual(asyncio.run(self._executor(restarted_execution).run_once()), None)
 
     def test_completion_artifact_reference_failure_rolls_back_success_and_marks_failed(self) -> None:
         run = self._create_run()
@@ -355,14 +365,14 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         self.assertEqual(detail.id, run.id)
         self.assertEqual(detail.status, RunStatus.FAILED)
         self.assertEqual(detail.error_code, "artifact_commit_failed")
-        self.assertEqual(self.service.get_results(run.id), [])
+        self.assertEqual(self.query_service.get_results(run.id), [])
         self.assertFalse(
             any(
                 item.role is ArtifactRole.COMPLETION_REQUIRED
-                for item in self.service.list_artifacts(run.id)
+                for item in self.query_service.list_artifacts(run.id)
             )
         )
-        event_types = [item.event_type for item in self.service.list_events(run.id)]
+        event_types = [item.event_type for item in self.query_service.list_events(run.id)]
         self.assertNotIn("run.completed", event_types)
         self.assertEqual(event_types[-1], "run.failed")
 
@@ -385,9 +395,12 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
 
         self.assertEqual(detail.status, RunStatus.FAILED)
         self.assertEqual(detail.error_code, "artifact_persistence_failed")
-        self.assertEqual(self.service.get_results(run.id), [])
+        self.assertEqual(self.query_service.get_results(run.id), [])
         self.assertFalse(
-            any(event.event_type.startswith("run.completed") for event in self.service.list_events(run.id))
+            any(
+                event.event_type.startswith("run.completed")
+                for event in self.query_service.list_events(run.id)
+            )
         )
 
 

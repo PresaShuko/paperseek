@@ -1,0 +1,52 @@
+/* PaperSeek v0.3.0 design tokens — FRONTEND_INTERACTION_OPTIMIZATION.md §12.2/§12.3 */
+:root {
+  /* Semantic colors (§12.2) */
+  --color-page: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f1f2ee;
+  --color-text: #171717;
+  --color-text-muted: #4b5563;
+  --color-border: #d7d9d4;
+  --color-border-strong: #b7bab2;
+  --color-accent: #c2410c;
+  --color-accent-soft: #fff7ed;
+  --color-success: #166534;
+  --color-success-soft: #f0fdf4;
+  --color-link: #1d4ed8;
+  --color-link-soft: #eff6ff;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
+
+  /* Typography (§12.3) */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --text-page-title: 22px;
+  --text-section-title: 17px;
+  --text-body: 14px;
+  --text-meta: 12px;
+
+  /* Spacing rhythm: 4/8px (§12.3) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Shape and control sizes (§12.3) */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --control-h: 40px;
+  --control-h-primary: 48px;
+  --touch-target: 44px;
+
+  /* Layout (§12.5) */
+  --topbar-h: 64px;
+  --pane-min: 340px;
+  --pane-max: 500px;
+
+  /* Motion (§8): functional transitions only, 150–200ms */
+  --duration: 160ms;
+  --easing: ease-out;
+}
