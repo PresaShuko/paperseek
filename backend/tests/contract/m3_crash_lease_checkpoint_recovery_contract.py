@@ -169,6 +169,34 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
                 None,
             )
 
+    async def test_cancel_during_configuration_failure_finishes_cancel_not_failed(self) -> None:
+        run = self._create()
+
+        def resolve(_run, _cancellation):
+            self.submission_service.request_cancel(run.id)
+            raise ValueError("The credential became unavailable during cancellation.")
+
+        executor = RunExecutor(self.execution_service, resolve, owner_id="worker")
+        result = await executor.run_once()
+        self.assertEqual(result.status, RunStatus.CANCELLED)
+        self.assertEqual(result.error_code, "")
+        self.assertEqual(self.uow.list_events(run.id)[-1].event_type, "run.cancelled")
+
+    async def test_configuration_failure_from_stale_worker_cannot_fail_replacement(self) -> None:
+        run = self._create()
+
+        def resolve(_run, _cancellation):
+            self.clock.advance(61)
+            self.execution_service.claim_next_run("replacement")
+            raise ValueError("The old lease cannot load its credentials.")
+
+        executor = RunExecutor(self.execution_service, resolve, owner_id="old")
+        result = await executor.run_once()
+        self.assertEqual(result.status, RunStatus.RUNNING)
+        self.assertEqual(result.lease_owner, "replacement")
+        self.assertEqual(result.error_code, "")
+        self.assertFalse(any(event.event_type == "run.failed" for event in self.uow.list_events(run.id)))
+
     async def test_two_workers_competing_for_one_run_have_one_claim_winner(self) -> None:
         run = self._create()
         barrier = threading.Barrier(2)

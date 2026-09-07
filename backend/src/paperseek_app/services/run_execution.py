@@ -129,6 +129,9 @@ class RunExecutionService:
         return self.uow.complete_cancel(lease)
 
     def fail_claimed_run(self, lease: LeaseToken, error_code: str) -> RunDetail:
+        cancelled = self._finish_cancel_if_requested(lease, CancellationScope())
+        if cancelled is not None:
+            return cancelled
         return self.uow.fail_run(lease, [], error_code)
 
     async def execute_claimed_workflow(

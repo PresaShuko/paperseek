@@ -40,10 +40,10 @@ class RunExecutor:
         run = self.service.get_run(lease.run_id)
         cancellation = CancellationScope()
         try:
-            execution = self.resolve(run, cancellation)
-        except Exception:
-            return self.service.fail_claimed_run(lease, "run_configuration_invalid")
-        try:
+            try:
+                execution = self.resolve(run, cancellation)
+            except Exception:
+                return self.service.fail_claimed_run(lease, "run_configuration_invalid")
             try:
                 return await self.service.execute_claimed_workflow(
                     lease,
