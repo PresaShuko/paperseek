@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 import unittest
+from uuid import uuid4
+
+from pydantic import ValidationError
 
 from paperseek_app.submission import RunSubmission, SubmissionValidationError, prepare_run_submission
 
@@ -27,3 +30,36 @@ class SharedSubmissionTests(unittest.TestCase):
             with self.subTest(code=code), self.assertRaises(SubmissionValidationError) as caught:
                 prepare_run_submission(RunSubmission.model_validate({"question": "evidence"} | values), self.defaults)
             self.assertEqual(caught.exception.code, code)
+
+    def test_service_choice_is_explicit_and_part_of_the_same_request_digest(self):
+        connection_id = str(uuid4())
+        choices = ({"mode": "paperseek"}, {"mode": "byok"},
+                   {"mode": "third_party", "connection_id": connection_id})
+        default = prepare_run_submission(RunSubmission(question="evidence"), self.defaults)
+        null = prepare_run_submission(RunSubmission(question="evidence", service=None), self.defaults)
+        self.assertEqual(default, null)
+        self.assertNotIn("service_mode", default.config_snapshot)
+        digests = {default.request_digest}
+        for choice in choices:
+            with self.subTest(choice=choice):
+                prepared = prepare_run_submission(RunSubmission(question="evidence", service=choice,
+                    credentials={"llm": {"api_key": "not-in-snapshot"}}), self.defaults)
+                self.assertEqual(prepared.config_snapshot["service_mode"], choice["mode"])
+                if choice["mode"] == "third_party":
+                    self.assertEqual(prepared.config_snapshot["connection_id"], connection_id)
+                else:
+                    self.assertNotIn("connection_id", prepared.config_snapshot)
+                self.assertNotIn("not-in-snapshot", str(prepared))
+                self.assertNotIn(prepared.request_digest, digests)
+                digests.add(prepared.request_digest)
+        another = prepare_run_submission(RunSubmission(question="evidence",
+            service={"mode": "third_party", "connection_id": str(uuid4())}), self.defaults)
+        self.assertNotIn(another.request_digest, digests)
+
+    def test_service_choice_rejects_ambiguous_or_invalid_connection_selection(self):
+        for choice in ({"mode": "auto"}, {"mode": "third_party"},
+                       {"mode": "third_party", "connection_id": "not-a-uuid"},
+                       {"mode": "paperseek", "connection_id": str(uuid4())},
+                       {"mode": "byok", "connection_id": str(uuid4())}):
+            with self.subTest(choice=choice), self.assertRaises(ValidationError):
+                RunSubmission(question="evidence", service=choice)

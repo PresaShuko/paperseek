@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from paperseek_app.configuration import (
     LLM_PROVIDERS,
@@ -63,6 +65,21 @@ class RetrievalRouteInput(BaseModel):
     crossref_metadata_enrichment: bool = False
 
 
+class ServiceSelectionInput(BaseModel):
+    """Non-secret selection; Hosted policy owns eligibility and credential resolution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["paperseek", "third_party", "byok"]
+    connection_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_connection(self) -> ServiceSelectionInput:
+        if (self.mode == "third_party") != (self.connection_id is not None):
+            raise ValueError("Only third-party service requires and accepts a connection.")
+        return self
+
+
 class RunConfigurationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -75,6 +92,7 @@ class RunConfigurationInput(BaseModel):
     llm: LLMRouteInput = Field(default_factory=LLMRouteInput)
     retrieval: RetrievalRouteInput = Field(default_factory=RetrievalRouteInput)
     credentials: RunCredentialsInput = Field(default_factory=RunCredentialsInput)
+    service: ServiceSelectionInput | None = None
 
 
 class RunSubmission(RunConfigurationInput):
@@ -225,6 +243,10 @@ def prepare_run_submission(
             "unsupported_llm_api_type",
             "The selected LLM API type is not supported.",
         )
+    if submission.service is not None:
+        snapshot["service_mode"] = submission.service.mode
+        if submission.service.connection_id is not None:
+            snapshot["connection_id"] = str(submission.service.connection_id)
     digest = hashlib.sha256(
         json.dumps(
             snapshot,

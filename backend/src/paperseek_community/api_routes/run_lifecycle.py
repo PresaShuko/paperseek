@@ -43,6 +43,8 @@ def register_run_submission_and_status_routes(
         submission: RunSubmission,
         idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=200),
     ) -> RunDetail:
+        if submission.service is not None:
+            raise ApiError(422, "unsupported_service_mode", "Hosted service modes are not available in Community.")
         if execution_resolver is None and not accept_submissions_without_worker:
             raise ApiError(503, "executor_unavailable", "The embedded executor is not configured.")
         try:

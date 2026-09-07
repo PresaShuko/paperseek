@@ -60,6 +60,7 @@ export interface components {
         "llm"?: components["schemas"]["LLMRouteInput"];
         "retrieval"?: components["schemas"]["RetrievalRouteInput"];
         "search_budget"?: string;
+        "service"?: components["schemas"]["ServiceSelectionInput"] | null;
         "source"?: string;
         "wos_db"?: string | null;
       };
@@ -215,6 +216,7 @@ export interface components {
         "question" : string;
         "retrieval"?: components["schemas"]["RetrievalRouteInput"];
         "search_budget"?: string;
+        "service"?: components["schemas"]["ServiceSelectionInput"] | null;
         "source"?: string;
         "wos_db"?: string | null;
       };
@@ -224,6 +226,10 @@ export interface components {
         "engine_version"?: string;
         "prompt_version"?: string;
         "workflow_version"?: string;
+      };
+    "ServiceSelectionInput": {
+        "connection_id"?: string | null;
+        "mode" : "paperseek" | "third_party" | "byok";
       };
     "SourceCapabilitiesOutput": {
         "citation_expansion" : boolean;
@@ -293,6 +299,7 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type RunStatus = components["schemas"]["RunStatus"];
 export type RunSubmission = components["schemas"]["RunSubmission"];
 export type RunVersions = components["schemas"]["RunVersions"];
+export type ServiceSelectionInput = components["schemas"]["ServiceSelectionInput"];
 export type SourceCapabilitiesOutput = components["schemas"]["SourceCapabilitiesOutput"];
 export type SourceCredentialOutput = components["schemas"]["SourceCredentialOutput"];
 export type SourceDescriptorOutput = components["schemas"]["SourceDescriptorOutput"];

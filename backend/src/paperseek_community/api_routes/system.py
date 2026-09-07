@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from paperseek_community.api_dependencies import open_query_service
+from paperseek_community.api_dependencies import ApiError, open_query_service
 from paperseek_app.api_schemas import DiagnosticOutput, SourceListOutput
 from paperseek_community.diagnostics import run_configuration_diagnostics
 from paperseek_community.settings import CommunityDeploymentSettings
@@ -37,4 +37,6 @@ def register_system_routes(
 
     @app.post("/api/v1/diagnostics", response_model=DiagnosticOutput)
     def diagnostics(submission: DiagnosticSubmission) -> dict[str, object]:
+        if submission.service is not None:
+            raise ApiError(422, "unsupported_service_mode", "Hosted service modes are not available in Community.")
         return run_configuration_diagnostics(submission.model_dump(mode="json"), settings)

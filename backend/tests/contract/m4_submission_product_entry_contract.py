@@ -143,6 +143,17 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
         store.delete(run.id)
         self.assertEqual(store.resolve(run.id), {})
 
+    def test_community_rejects_hosted_service_selection_without_creating_a_run(self) -> None:
+        with TestClient(create_app(self.database, accept_submissions_without_worker=True)) as client:
+            for path in ("/api/v1/runs", "/api/v1/diagnostics"):
+                payload = {"service": {"mode": "byok"}}
+                if path.endswith("/runs"):
+                    payload["question"] = "Hosted is not local Community"
+                response = client.post(path, json=payload, headers={"Idempotency-Key": "hosted-choice"})
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.json()["error"]["code"], "unsupported_service_mode")
+            self.assertEqual(client.get("/api/v1/history").json()["items"], [])
+
     def test_api_submission_executes_and_vue_spa_is_the_single_root(self) -> None:
         static_dir = self.data_dir / "static"
         static_dir.mkdir()
