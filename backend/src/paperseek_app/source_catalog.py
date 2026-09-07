@@ -10,7 +10,7 @@ from paperseek_core.disciplines import (
 
 
 @dataclass(frozen=True)
-class CommunitySourceDefinition:
+class SourceDefinition:
     id: str
     label: str
     api_key: str
@@ -47,8 +47,8 @@ class CommunitySourceDefinition:
         }
 
 
-COMMUNITY_SOURCES = (
-    CommunitySourceDefinition(
+SOURCES = (
+    SourceDefinition(
         "openalex",
         "OpenAlex",
         "recommended",
@@ -59,9 +59,9 @@ COMMUNITY_SOURCES = (
         default=True,
         citation_expansion=True,
     ),
-    CommunitySourceDefinition("arxiv", "arXiv", "not_required"),
-    CommunitySourceDefinition("crossref", "Crossref", "not_required"),
-    CommunitySourceDefinition(
+    SourceDefinition("arxiv", "arXiv", "not_required"),
+    SourceDefinition("crossref", "Crossref", "not_required"),
+    SourceDefinition(
         "semanticscholar",
         "Semantic Scholar",
         "optional",
@@ -69,7 +69,7 @@ COMMUNITY_SOURCES = (
         "Request Semantic Scholar API key",
         "https://www.semanticscholar.org/product/api#api-key-form",
     ),
-    CommunitySourceDefinition(
+    SourceDefinition(
         "pubmed",
         "PubMed",
         "optional",
@@ -77,7 +77,7 @@ COMMUNITY_SOURCES = (
         "Get NCBI API key",
         "https://www.ncbi.nlm.nih.gov/books/NBK25497/",
     ),
-    CommunitySourceDefinition(
+    SourceDefinition(
         "wos",
         "Web of Science Starter",
         "required",
@@ -86,7 +86,7 @@ COMMUNITY_SOURCES = (
         "https://developer.clarivate.com/apis/wos-starter",
         status="temporarily_unavailable",
     ),
-    CommunitySourceDefinition(
+    SourceDefinition(
         "googlescholar",
         "Google Scholar (Serper)",
         "required",
@@ -94,15 +94,15 @@ COMMUNITY_SOURCES = (
         "Get Serper API key",
         "https://serper.dev/",
     ),
-    CommunitySourceDefinition(
+    SourceDefinition(
         "paperhub",
         "Computer science top conferences",
         "not_required",
     ),
 )
 
-COMMUNITY_SOURCE_BY_ID = {source.id: source for source in COMMUNITY_SOURCES}
+SOURCE_BY_ID = {source.id: source for source in SOURCES}
 
 
-def list_community_source_descriptors() -> list[dict[str, object]]:
-    return [source.descriptor() for source in COMMUNITY_SOURCES]
+def list_source_descriptors() -> list[dict[str, object]]:
+    return [source.descriptor() for source in SOURCES]

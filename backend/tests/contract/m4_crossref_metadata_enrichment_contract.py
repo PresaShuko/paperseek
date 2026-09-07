@@ -15,7 +15,7 @@ from paperseek_community.composition import CommunityExecutionResolver
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import (
+from paperseek_app.submission import (
     RetrievalRouteInput,
     RunSubmission,
     prepare_run_submission,

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 
+from paperseek_app.configuration import resolve_llm_route
 from paperseek_app.execution import WorkflowExecution
 from paperseek_app.models import RunDetail
 from paperseek_app.services import RunExecutionService, RunSubmissionService
@@ -53,7 +54,7 @@ class CommunityExecutionResolver:
         source_credentials = stored.get("source", {})
         embedding_credentials = stored.get("embedding", {})
         reranker_credentials = stored.get("reranker", {})
-        route = self.settings.llm_route(dict(run.config_snapshot.get("llm") or {}))
+        route = resolve_llm_route(self.settings, dict(run.config_snapshot.get("llm") or {}))
         client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
             limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),

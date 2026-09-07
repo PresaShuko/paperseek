@@ -20,7 +20,7 @@ from paperseek_community.cli import _parser, main as cli_main
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import RunSubmission, prepare_run_submission
+from paperseek_app.submission import RunSubmission, prepare_run_submission
 from paperseek_core.models import QueryLoopBudget, ResearchWorkflowRequest
 from paperseek_core.ports import CancellationToken
 

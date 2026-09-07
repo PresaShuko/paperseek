@@ -6,12 +6,13 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from paperseek_community.settings import (
+from paperseek_app.configuration import (
     LLM_PROVIDERS,
-    CommunityDeploymentSettings,
+    SubmissionDefaults,
+    resolve_llm_route,
     normalize_wos_db,
 )
-from paperseek_community.source_capabilities import COMMUNITY_SOURCE_BY_ID
+from paperseek_app.source_catalog import SOURCE_BY_ID
 
 
 class LLMRouteInput(BaseModel):
@@ -105,14 +106,14 @@ def _invalid(code: str, message: str) -> None:
 
 def prepare_run_submission(
     submission: RunSubmission,
-    settings: CommunityDeploymentSettings,
+    settings: SubmissionDefaults,
 ) -> PreparedRunSubmission:
     question = submission.question.strip()
     if not question:
         _invalid("invalid_question", "The research question is required.")
     source = submission.source.strip().lower() or "openalex"
     search_budget = submission.search_budget.strip().lower() or "fast"
-    source_definition = COMMUNITY_SOURCE_BY_ID.get(source)
+    source_definition = SOURCE_BY_ID.get(source)
     if source_definition is None:
         _invalid("unsupported_source", "The selected source is not supported.")
     if search_budget not in {"fast", "medium", "high", "max"}:
@@ -195,7 +196,7 @@ def prepare_run_submission(
         "field_hint": field_hint,
         "citation_enabled": citation_enabled,
         "wos_db": normalize_wos_db(submission.wos_db, settings.wos_db),
-        "llm": settings.llm_route(submission.llm.model_dump()),
+        "llm": resolve_llm_route(settings, submission.llm.model_dump()),
         "retrieval": {
             "crossref_metadata_enrichment": submission.retrieval.crossref_metadata_enrichment,
             "embedding": {

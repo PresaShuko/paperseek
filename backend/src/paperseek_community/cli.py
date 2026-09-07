@@ -33,8 +33,8 @@ from paperseek_community.persistence import (
     migrate_v0_2_database,
 )
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.source_capabilities import COMMUNITY_SOURCE_BY_ID
-from paperseek_community.submission import (
+from paperseek_app.source_catalog import SOURCE_BY_ID
+from paperseek_app.submission import (
     LLMRouteInput,
     RetrievalRouteInput,
     RunSubmission,
@@ -76,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_database(search)
     search.add_argument(
         "--source",
-        choices=tuple(COMMUNITY_SOURCE_BY_ID),
+        choices=tuple(SOURCE_BY_ID),
         default="openalex",
     )
     search.add_argument(
@@ -122,7 +122,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_database(doctor)
     doctor.add_argument(
         "--source",
-        choices=tuple(COMMUNITY_SOURCE_BY_ID),
+        choices=tuple(SOURCE_BY_ID),
         default="openalex",
     )
     doctor.add_argument("--wos-db", default=None)

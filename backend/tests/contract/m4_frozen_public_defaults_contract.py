@@ -4,7 +4,7 @@ import unittest
 
 from paperseek_community.cli import _parser
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import (
+from paperseek_app.submission import (
     LLMRouteInput,
     RunSubmission,
     SubmissionValidationError,

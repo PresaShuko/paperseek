@@ -7,12 +7,9 @@ import sqlite3
 import sys
 from urllib.parse import urlsplit
 
-from paperseek_community.settings import (
-    LLM_PROVIDERS,
-    CommunityDeploymentSettings,
-    normalize_wos_db,
-)
-from paperseek_community.source_capabilities import COMMUNITY_SOURCE_BY_ID
+from paperseek_app.configuration import LLM_PROVIDERS, normalize_wos_db, resolve_llm_route
+from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_app.source_catalog import SOURCE_BY_ID
 from paperseek_community.legacy_settings import classify_legacy_environment
 
 
@@ -134,7 +131,7 @@ def run_configuration_diagnostics(
     embedding_credentials = _mapping(credentials.get("embedding"))
     reranker_credentials = _mapping(credentials.get("reranker"))
 
-    source_definition = COMMUNITY_SOURCE_BY_ID.get(source)
+    source_definition = SOURCE_BY_ID.get(source)
     if source_definition is None:
         checks.append(_check(
             "source.supported", "fail", "error", "The selected data source is not supported.",
@@ -178,7 +175,7 @@ def run_configuration_diagnostics(
                 details={"database": wos_db},
             ))
 
-    route = settings.llm_route(dict(llm))
+    route = resolve_llm_route(settings, dict(llm))
     provider = route["provider"].strip().lower()
     api_type = route["api_type"].strip().lower()
     if provider in LLM_PROVIDERS:

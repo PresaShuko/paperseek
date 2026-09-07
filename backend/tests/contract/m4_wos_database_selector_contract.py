@@ -17,7 +17,7 @@ from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.diagnostics import run_configuration_diagnostics
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import RunSubmission, prepare_run_submission
+from paperseek_app.submission import RunSubmission, prepare_run_submission
 from paperseek_core.disciplines import WOS_CATEGORIES
 from paperseek_core.execution import NEVER_CANCELLED
 from paperseek_core.sources.contracts import SourceSearchRequest

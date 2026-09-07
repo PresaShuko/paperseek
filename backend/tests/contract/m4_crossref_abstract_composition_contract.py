@@ -24,7 +24,7 @@ from paperseek_community.composition import CommunityExecutionResolver
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import RunSubmission, prepare_run_submission
+from paperseek_app.submission import RunSubmission, prepare_run_submission
 from paperseek_community.worker import EmbeddedRunExecutor
 from paperseek_core.enrichment import AbstractEnrichmentPipeline
 from paperseek_core.models import AbstractEnrichmentRequest, CheckpointDraft, RankedPaper

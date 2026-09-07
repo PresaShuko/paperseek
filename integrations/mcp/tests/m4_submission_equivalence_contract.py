@@ -70,12 +70,12 @@ class M4SubmissionEquivalenceContract(unittest.TestCase):
 
     def test_api_and_mcp_share_one_normalized_snapshot_and_digest(self):
         from paperseek_community.api import create_app
-        from paperseek_community.source_capabilities import COMMUNITY_SOURCE_BY_ID
-        from paperseek_community.submission import prepare_run_submission
+        from paperseek_app.source_catalog import SOURCE_BY_ID
+        from paperseek_app.submission import prepare_run_submission
         from paperseek_mcp.application import CommunityMCPApplication
 
         self.assertTrue(callable(prepare_run_submission))
-        field_id = COMMUNITY_SOURCE_BY_ID["openalex"].descriptor()["capabilities"]["filter"]["options"][0]["id"]
+        field_id = SOURCE_BY_ID["openalex"].descriptor()["capabilities"]["filter"]["options"][0]["id"]
         values = {
             "question": "  Durable submission equivalence  ",
             "source": "openalex",
@@ -115,7 +115,7 @@ class M4SubmissionEquivalenceContract(unittest.TestCase):
 
     def test_api_and_mcp_share_semantic_validation_codes(self):
         from paperseek_community.api import create_app
-        from paperseek_community.submission import SubmissionValidationError
+        from paperseek_app.submission import SubmissionValidationError
         from paperseek_mcp.application import CommunityMCPApplication
 
         invalid_cases = [

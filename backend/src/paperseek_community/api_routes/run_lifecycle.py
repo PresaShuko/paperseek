@@ -21,7 +21,7 @@ from paperseek_community.api_dependencies import (
 )
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import (
+from paperseek_app.submission import (
     RunSubmission,
     SubmissionValidationError,
     prepare_run_submission,

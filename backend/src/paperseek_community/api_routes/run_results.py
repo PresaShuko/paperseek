@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from paperseek_app.errors import ArtifactNotFound, InvalidCursor, RunNotFound
 from paperseek_app.models import RunAudit
 from paperseek_community.api_dependencies import ApiError, content_response, open_query_service
-from paperseek_community.api_schemas import CitationMapOutput, ResultPageOutput
+from paperseek_app.api_schemas import CitationMapOutput, ResultPageOutput
 
 
 def register_run_result_routes(app: FastAPI, *, database: Path) -> None:

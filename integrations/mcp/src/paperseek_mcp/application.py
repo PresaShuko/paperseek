@@ -19,10 +19,10 @@ from paperseek_community.composition import CommunityExecutionResolver
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.submission import RunSubmission, prepare_run_submission
-from paperseek_community.source_capabilities import (
-    COMMUNITY_SOURCE_BY_ID,
-    list_community_source_descriptors,
+from paperseek_app.submission import RunSubmission, prepare_run_submission
+from paperseek_app.source_catalog import (
+    SOURCE_BY_ID,
+    list_source_descriptors,
 )
 from paperseek_community.worker import EmbeddedRunExecutor
 from paperseek_core.ports import CancellationToken
@@ -214,10 +214,10 @@ class CommunityMCPApplication:
             uow.close()
 
     def list_sources(self) -> dict[str, object]:
-        return {"sources": list_community_source_descriptors()}
+        return {"sources": list_source_descriptors()}
 
     def get_source_capabilities(self, *, source: str) -> dict[str, object]:
-        source_definition = COMMUNITY_SOURCE_BY_ID.get(source)
+        source_definition = SOURCE_BY_ID.get(source)
         if source_definition is None:
             raise ValueError("The selected source is not supported.")
         return source_definition.descriptor()
