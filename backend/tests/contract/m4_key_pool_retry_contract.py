@@ -8,8 +8,8 @@ from unittest.mock import patch
 import httpx
 
 from paperseek_app.execution import CancellationScope
-from paperseek_community.llm import CommunityLLMAdapter
-from paperseek_community.retrieval_services import (
+from paperseek_core.llm import HttpLLMAdapter
+from paperseek_core.retrieval_clients import (
     ExternalEmbeddingAdapter,
     ExternalRerankerAdapter,
 )
@@ -133,9 +133,9 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
         api_type: str = "openai_responses",
         keys: str = "key-a,key-b,key-c,key-d",
         cancellation: CancellationScope | None = None,
-    ) -> tuple[CommunityLLMAdapter, httpx.AsyncClient]:
+    ) -> tuple[HttpLLMAdapter, httpx.AsyncClient]:
         client = httpx.AsyncClient(trust_env=False)
-        return CommunityLLMAdapter(
+        return HttpLLMAdapter(
             client=client,
             cancellation=cancellation or CancellationScope(),
             api_type=api_type,

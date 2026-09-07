@@ -21,7 +21,7 @@ from paperseek_community.api import create_app
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.execution import RequestContext
 from paperseek_core.models import (
     AbstractFetchRequest,
@@ -446,7 +446,7 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                         ),
                     )
 
-                executor = EmbeddedRunExecutor(
+                executor = RunExecutor(
                     execution_service,
                     resolve,
                     owner_id=f"worker-{stage}",

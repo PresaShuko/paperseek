@@ -24,7 +24,7 @@ from paperseek_app.source_catalog import (
     SOURCE_BY_ID,
     list_source_descriptors,
 )
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.ports import CancellationToken
 
 
@@ -59,7 +59,7 @@ class CommunityMCPApplication:
     @asynccontextmanager
     async def lifespan(self) -> AsyncIterator[None]:
         worker_uow = SQLiteRunUnitOfWork(self.database)
-        executor = EmbeddedRunExecutor(
+        executor = RunExecutor(
             RunExecutionService(worker_uow, FileArtifactStore(self.database.parent)),
             self.execution_resolver,
             owner_id=f"community-mcp-{uuid4()}",

@@ -6,12 +6,12 @@ from typing import Any
 
 import httpx
 
-from paperseek_community.key_pool import ApiKeyPool, retryable_key_status
+from paperseek_core.key_pool import ApiKeyPool, retryable_key_status
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.ports import CancellationToken
 
 
-class CommunityLLMAdapter:
+class HttpLLMAdapter:
     def __init__(
         self,
         *,

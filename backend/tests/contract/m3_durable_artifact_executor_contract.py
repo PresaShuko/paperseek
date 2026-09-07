@@ -36,7 +36,7 @@ from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.persistence.migrate import database_url
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.models import CheckpointDraft, QueryLoopBudget, ResearchWorkflowRequest
 
 
@@ -108,8 +108,8 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
     def _executor(
         self,
         service: RunExecutionService | None = None,
-    ) -> EmbeddedRunExecutor:
-        return EmbeddedRunExecutor(
+    ) -> RunExecutor:
+        return RunExecutor(
             service or self.execution_service,
             self._execution,
             owner_id="embedded-worker",

@@ -9,7 +9,7 @@ from paperseek_app.services import RunExecutionService
 from paperseek_core.ports import CancellationToken
 
 
-class EmbeddedRunExecutor:
+class RunExecutor:
     def __init__(
         self,
         service: RunExecutionService,

@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from paperseek_community.key_pool import ApiKeyPool, retryable_key_status
+from paperseek_core.key_pool import ApiKeyPool, retryable_key_status
 from paperseek_core.models import PaperRecord, RetrievalRerankItem, RetrievalRerankResult
 from paperseek_core.ports import CancellationToken
 from paperseek_core.retrieval import document_text

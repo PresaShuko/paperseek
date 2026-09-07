@@ -14,11 +14,11 @@ from paperseek_app.services import RunExecutionService, RunSubmissionService
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.credentials import EncryptedRunCredentialStore
-from paperseek_community.llm import CommunityLLMAdapter
+from paperseek_core.llm import HttpLLMAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
-from paperseek_community.retrieval_services import ExternalEmbeddingAdapter, ExternalRerankerAdapter
+from paperseek_core.retrieval_clients import ExternalEmbeddingAdapter, ExternalRerankerAdapter
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.budgets import workflow_budget
 from paperseek_core.disciplines import discipline_prompt_context
 from paperseek_core.execution import RequestContext
@@ -80,7 +80,7 @@ class CommunityExecutionResolver:
             budget_name,
             field_ids=field_ids,
         )
-        llm = CommunityLLMAdapter(
+        llm = HttpLLMAdapter(
             client=client,
             cancellation=cancellation,
             api_type=route["api_type"],
@@ -227,7 +227,7 @@ def execute_fixture_search(
                 ),
             )
 
-        executor = EmbeddedRunExecutor(execution_service, resolve, owner_id=owner_id)
+        executor = RunExecutor(execution_service, resolve, owner_id=owner_id)
 
         async def execute_until_created() -> RunDetail:
             while True:

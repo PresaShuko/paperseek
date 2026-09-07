@@ -6,7 +6,7 @@ import unittest
 import httpx
 
 from paperseek_app.execution import CancellationScope
-from paperseek_community.retrieval_services import ExternalEmbeddingAdapter, ExternalRerankerAdapter
+from paperseek_core.retrieval_clients import ExternalEmbeddingAdapter, ExternalRerankerAdapter
 from paperseek_core.models import PaperRecord
 
 

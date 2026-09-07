@@ -41,7 +41,7 @@ from paperseek_app.submission import (
     SubmissionValidationError,
     prepare_run_submission,
 )
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.ports import CancellationToken
 
 
@@ -306,7 +306,7 @@ def _search(
             source=prepared.source,
             config_snapshot=prepared.config_snapshot,
         )
-        executor = EmbeddedRunExecutor(
+        executor = RunExecutor(
             execution_service,
             resolver,
             owner_id=f"community-cli-{uuid4()}",
@@ -322,7 +322,7 @@ def _search(
 
 
 async def _execute_until_terminal(
-    executor: EmbeddedRunExecutor,
+    executor: RunExecutor,
     service: RunQueryService,
     run_id: str,
 ) -> RunDetail:
@@ -345,7 +345,7 @@ def _worker(
 ) -> int:
     uow = SQLiteRunUnitOfWork(database)
     try:
-        executor = EmbeddedRunExecutor(
+        executor = RunExecutor(
             RunExecutionService(uow, FileArtifactStore(database.parent)),
             resolver,
             owner_id=f"community-worker-{uuid4()}",

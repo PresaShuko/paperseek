@@ -25,7 +25,7 @@ from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
 from paperseek_app.submission import RunSubmission, prepare_run_submission
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.enrichment import AbstractEnrichmentPipeline
 from paperseek_core.models import AbstractEnrichmentRequest, CheckpointDraft, RankedPaper
 from paperseek_core.ports import AbstractPort
@@ -268,7 +268,7 @@ class M4CrossrefAbstractCompositionContract(unittest.IsolatedAsyncioTestCase):
                 with_doi=with_doi,
             )
             resolver = CommunityExecutionResolver(_settings(), credentials)
-            executor = EmbeddedRunExecutor(
+            executor = RunExecutor(
                 execution,
                 resolver,
                 owner_id="abstract-contract",
@@ -393,7 +393,7 @@ class M4CrossrefAbstractCompositionContract(unittest.IsolatedAsyncioTestCase):
             _database, uow, submission, execution_service, query, credentials = self._create_services(root)
             run = self._submit(submission)
             controlled = ControlledProductHTTP(crossref_outcome="cancel_late")
-            executor = EmbeddedRunExecutor(
+            executor = RunExecutor(
                 execution_service,
                 CommunityExecutionResolver(_settings(), credentials),
                 owner_id="abstract-cancel-contract",

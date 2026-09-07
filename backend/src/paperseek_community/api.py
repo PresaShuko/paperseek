@@ -20,7 +20,7 @@ from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.ports import CancellationToken
 
 
@@ -78,7 +78,7 @@ def create_app(
         stop = asyncio.Event()
         if execution_resolver is not None:
             worker_uow = SQLiteRunUnitOfWork(database)
-            executor = EmbeddedRunExecutor(
+            executor = RunExecutor(
                 RunExecutionService(worker_uow, FileArtifactStore(database.parent)),
                 execution_resolver,
                 owner_id=f"community-embedded-{uuid4()}",

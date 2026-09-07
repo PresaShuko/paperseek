@@ -18,7 +18,7 @@ from paperseek_app.services import RunExecutionService, RunQueryService, RunSubm
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
-from paperseek_community.worker import EmbeddedRunExecutor
+from paperseek_app.worker import RunExecutor
 from paperseek_core.models import QueryLoopBudget, ResearchWorkflowRequest
 
 
@@ -132,7 +132,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
                 request=self._request(),
             )
 
-        executor = EmbeddedRunExecutor(
+        executor = RunExecutor(
             self.execution_service,
             resolve,
             owner_id="worker-before-crash",
@@ -197,7 +197,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
             source = TrackingSource()
             return WorkflowExecution(llm=llm, source=source, request=self._request())
 
-        executor = EmbeddedRunExecutor(
+        executor = RunExecutor(
             self.execution_service,
             resolve,
             owner_id="heartbeat-worker",
@@ -222,7 +222,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
         def resolve(_run, _cancellation):
             return WorkflowExecution(llm=llm, source=TrackingSource(), request=self._request())
 
-        executor = EmbeddedRunExecutor(
+        executor = RunExecutor(
             self.execution_service,
             resolve,
             owner_id="losing-worker",
@@ -263,7 +263,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
                 request=self._request(),
             )
 
-        detail = await EmbeddedRunExecutor(
+        detail = await RunExecutor(
             rebuilt_execution,
             resolve,
             owner_id="worker-after-crash",
@@ -302,7 +302,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
             connection.commit()
         self.clock.advance(31)
 
-        detail = await EmbeddedRunExecutor(
+        detail = await RunExecutor(
             self.execution_service,
             lambda _run, _cancellation: WorkflowExecution(
                 llm=FixedLLMAdapter(self.fixture["llm_responses"][2:]),
@@ -326,7 +326,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
             connection.commit()
         self.clock.advance(31)
 
-        detail = await EmbeddedRunExecutor(
+        detail = await RunExecutor(
             self.execution_service,
             lambda _run, _cancellation: WorkflowExecution(
                 llm=FixedLLMAdapter(self.fixture["llm_responses"][2:]),
