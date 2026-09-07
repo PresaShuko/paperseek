@@ -22,7 +22,7 @@ from paperseek_app.errors import (
     ArtifactPersistenceError,
     RunPersistenceError,
 )
-from paperseek_app.execution import WorkflowExecution
+from paperseek_app.execution import CancellationScope, WorkflowExecution
 from paperseek_app.models import (
     ArtifactRole,
     ArtifactVisibility,
@@ -65,6 +65,24 @@ def _upgrade_to(database: Path, revision: str) -> None:
 
 
 class M3DurableArtifactExecutorContractTest(unittest.TestCase):
+    def test_execution_can_use_an_ephemeral_observer_without_persistence(self):
+        class Observer:
+            def __init__(self):
+                self.events = []
+
+            def on_event(self, event):
+                self.events.append(event)
+
+            def on_checkpoint(self, checkpoint):
+                # Transient observers deliberately do not retain checkpoint state.
+                return None
+
+        observer = Observer()
+        result = asyncio.run(self._execution(None, None).run(observer, CancellationScope()))
+        self.assertTrue(result.ranked)
+        self.assertEqual(observer.events[-1].event_type, "workflow.completed")
+        self.assertEqual(self.query_service.get_history_page().items, [])
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

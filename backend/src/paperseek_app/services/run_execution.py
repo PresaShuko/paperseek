@@ -14,7 +14,7 @@ from paperseek_app.errors import (
     RunPersistenceError,
     RunStateError,
 )
-from paperseek_app.execution import CancellationScope
+from paperseek_app.execution import CancellationScope, WorkflowExecution
 from paperseek_app.models import (
     ArtifactRole,
     ArtifactVisibility,
@@ -47,8 +47,8 @@ from paperseek_core.ports import (
     LLMPort,
     RerankPort,
     SourcePort,
+    WorkflowObserver,
 )
-from paperseek_core.workflow import ResearchWorkflow
 
 
 class TransactionalObserver:
@@ -160,17 +160,16 @@ class RunExecutionService:
         try:
             result = await self._run_cancellable_workflow(
                 lease,
-                ResearchWorkflow(
+                WorkflowExecution(
                     llm=llm,
                     source=source,
-                    observer=observer,
+                    request=request.model_copy(update={"resume": resume}),
                     abstracts=abstracts,
                     candidate_metadata=candidate_metadata,
                     embedding=embedding,
                     reranker=reranker,
-                    cancellation=scope,
                 ),
-                request.model_copy(update={"resume": resume}),
+                observer,
                 scope,
                 cancellation_poll_seconds,
                 lease_seconds,
@@ -231,14 +230,14 @@ class RunExecutionService:
     async def _run_cancellable_workflow(
         self,
         lease: LeaseToken,
-        workflow: ResearchWorkflow,
-        request: ResearchWorkflowRequest,
+        execution: WorkflowExecution,
+        observer: WorkflowObserver,
         scope: CancellationScope,
         poll_seconds: float,
         lease_seconds: int,
         heartbeat_seconds: float,
     ):
-        workflow_task = asyncio.create_task(workflow.run(request))
+        workflow_task = asyncio.create_task(execution.run(observer, scope))
 
         async def monitor() -> None:
             while True:

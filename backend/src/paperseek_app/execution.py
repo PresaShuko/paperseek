@@ -5,7 +5,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from paperseek_core.models import ResearchWorkflowRequest
-from paperseek_core.ports import AbstractPort, CandidateMetadataPort, CancellationToken, EmbeddingPort, LLMPort, RerankPort, SourcePort
+from paperseek_core.ports import AbstractPort, CandidateMetadataPort, CancellationToken, EmbeddingPort, LLMPort, RerankPort, SourcePort, WorkflowObserver
+from paperseek_core.workflow import ResearchWorkflow
 
 
 class CancellationScope:
@@ -37,6 +38,13 @@ class WorkflowExecution:
     embedding: EmbeddingPort | None = None
     reranker: RerankPort | None = None
     close: Callable[[], Awaitable[None]] | None = None
+
+    async def run(self, observer: WorkflowObserver, cancellation: CancellationToken):
+        return await ResearchWorkflow(
+            llm=self.llm, source=self.source, observer=observer, abstracts=self.abstracts,
+            candidate_metadata=self.candidate_metadata, embedding=self.embedding,
+            reranker=self.reranker, cancellation=cancellation,
+        ).run(self.request)
 
 
 assert isinstance(CancellationScope(), CancellationToken)
