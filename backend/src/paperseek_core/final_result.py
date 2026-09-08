@@ -121,7 +121,7 @@ class FinalResultAssembler:
             "database": result.db,
             "final_query": result.final_query,
             "db": result.db,
-            "field": None,
+            "field": result.field or None,
             "total_results": result.total,
             "total": result.total,
             "iterations": result.iterations,

@@ -22,6 +22,7 @@ from paperseek_core.models import (
     QueryLoopBudget,
     RankedPaper,
     ResearchAssemblyRequest,
+    ResearchResult,
     ResearchWorkflowRequest,
     RetrievalRerankItem,
     RetrievalRerankResult,
@@ -228,6 +229,14 @@ def _paper_from_expected(item: dict) -> RankedPaper:
 
 
 class M2FinalAssemblyContractTest(unittest.TestCase):
+    def test_imported_history_preserves_explicit_search_field_in_both_json_artifacts(self) -> None:
+        result = ResearchResult(question="Historical question", search_intent="", search_plan={},
+            source="wos", final_query="TS=(synthetic)", db="WOS", field="TS")
+        artifacts = {item.kind: json.loads(item.content) for item in FinalResultAssembler().artifacts_for(result)
+                     if item.kind in {"final_result", "export_json"}}
+        self.assertEqual(artifacts["final_result"]["field"], "TS")
+        self.assertEqual(artifacts["export_json"]["field"], "TS")
+
     def test_m0_ranked_user_fields_and_export_artifacts_are_exact(self) -> None:
         expected = json.loads((M0 / "final_result.json").read_text(encoding="utf-8"))
         expected_export = json.loads((M0 / "export.json").read_text(encoding="utf-8"))
