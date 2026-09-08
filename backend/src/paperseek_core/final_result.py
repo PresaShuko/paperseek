@@ -52,7 +52,7 @@ class FinalResultAssembler:
             warnings=list(dict.fromkeys(request.warnings)),
             provenance_by_identity=provenance,
         )
-        return result.model_copy(update={"artifacts": self._artifacts(result)})
+        return result.model_copy(update={"artifacts": self.artifacts_for(result)})
 
     @staticmethod
     def _paper(rank: int, item: RankedPaper) -> FinalPaperResult:
@@ -106,7 +106,8 @@ class FinalResultAssembler:
             reasoning=item.reasoning,
         )
 
-    def _artifacts(self, result: ResearchResult) -> list[ArtifactDraft]:
+    def artifacts_for(self, result: ResearchResult) -> list[ArtifactDraft]:
+        """Serialize a final result, including imported history, without rerunning research."""
         public = result.public_payload()
         export = {
             "question": result.question,

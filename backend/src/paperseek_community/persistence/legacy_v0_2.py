@@ -655,7 +655,7 @@ def _migrated_artifacts(
         ranked=records,
         warnings=warnings,
     )
-    drafts = FinalResultAssembler()._artifacts(result)
+    drafts = FinalResultAssembler().artifacts_for(result)
     return [
         store.put(
             ArtifactWrite(

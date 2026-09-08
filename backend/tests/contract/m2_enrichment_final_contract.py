@@ -249,6 +249,7 @@ class M2FinalAssemblyContractTest(unittest.TestCase):
         )
 
         result = FinalResultAssembler().assemble(request)
+        self.assertEqual(FinalResultAssembler().artifacts_for(result), result.artifacts)
 
         self.assertEqual(
             result.public_payload(),
