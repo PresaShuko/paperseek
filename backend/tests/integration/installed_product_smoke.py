@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import time
+from zipfile import ZipFile
 
 import httpx
 
@@ -83,6 +84,11 @@ def main() -> None:
     for module in (sys.modules[RunQueryService.__module__], cli_module):
         if prefix not in Path(module.__file__).resolve().parents:
             raise AssertionError(f"Product module did not load from the isolated prefix: {module.__file__}")
+    with ZipFile(Path(cli_module.__file__).parent / "web_source.zip") as shared_web:
+        names = set(shared_web.namelist())
+        assert {"src/App.vue", "src/api/client.ts", "src/state/run.ts", "package.json", "package-lock.json"} <= names
+        assert all(name.startswith(("src/", "public/")) or name in {"package.json", "package-lock.json"} for name in names)
+        assert all(not part.startswith(".") for name in names for part in name.split("/"))
 
     expected_commit = os.environ.get("PAPERSEEK_EXPECTED_COMMIT", "").strip()
     if expected_commit and build_info.COMMUNITY_COMMIT != expected_commit:

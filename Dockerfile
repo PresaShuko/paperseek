@@ -25,6 +25,9 @@ COPY backend/pyproject.toml backend/uv.lock backend/README.md backend/LICENSE ba
 COPY backend/setup.py ./
 COPY backend/src ./src
 COPY --from=web-build /build/web/dist ./src/paperseek_community/static
+COPY --from=web-build /build/web/src /build/web/src
+COPY --from=web-build /build/web/public /build/web/public
+COPY --from=web-build /build/web/package.json /build/web/package-lock.json /build/web/
 
 RUN python -m pip wheel --wheel-dir /wheels --no-deps .
 

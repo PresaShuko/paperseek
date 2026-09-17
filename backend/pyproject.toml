@@ -52,4 +52,4 @@ where = ["src"]
 include = ["paperseek_core*", "paperseek_app*", "paperseek_community*"]
 
 [tool.setuptools.package-data]
-paperseek_community = ["static/**/*"]
+paperseek_community = ["static/**/*", "web_source.zip"]
