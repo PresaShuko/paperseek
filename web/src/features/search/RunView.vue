@@ -6,6 +6,7 @@ import { useLocale } from "../../locales";
 import { cancelRun, recoverRun, runState, stopRunRecovery, type StageKey } from "../../state/run";
 import WorkflowStages from "./WorkflowStages.vue";
 
+const props = defineProps<{ externalRecovery?: boolean }>();
 const route = useRoute();
 const { runMessage, sourceName, t } = useLocale();
 const runId = computed(() => String(route.params.runId || ""));
@@ -85,10 +86,10 @@ async function load(value: string): Promise<void> {
 
 watch(runId, (value) => {
   diagnosticsOpen.value = false;
-  void load(value);
+  if (!props.externalRecovery) void load(value);
 }, { immediate: true });
 
-onBeforeUnmount(stopRunRecovery);
+onBeforeUnmount(() => { if (!props.externalRecovery) stopRunRecovery(); });
 </script>
 
 <template>
@@ -158,7 +159,9 @@ onBeforeUnmount(stopRunRecovery);
         <span>{{ activeStageLabel }}</span>
         <span v-if="activeStageElapsed" class="stage-elapsed">{{ activeStageElapsed }}</span>
       </button>
-      <WorkflowStages />
+      <WorkflowStages>
+        <template v-if="$slots['log-export']" #log-export="scope"><slot name="log-export" v-bind="scope" /></template>
+      </WorkflowStages>
     </div>
   </div>
 </template>

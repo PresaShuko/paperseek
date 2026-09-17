@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   sourceOptions?: SourceDescriptor[];
   credentialHelp?: string;
 }>(), { submissionEnabled: true });
+const emit = defineEmits<{ submitted: [run: RunDetail] }>();
 
 const { filterDomainName, filterOptionName, providerName, sourceName, t } = useLocale();
 const router = useRouter();
@@ -183,6 +184,7 @@ async function submit(): Promise<void> {
   try {
     const run = await submitSearch({ question: form.question, ...configurationPayload() });
     clearCredentials();
+    emit('submitted', run);
     await router.push(`/runs/${run.id}`);
   } catch (error) {
     if (error instanceof ApiError && error.code === "active_run_exists") {
@@ -536,7 +538,9 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
       </form>
     </div>
     <div class="workbench-pane workbench-pane--audit">
-      <WorkflowStages />
+      <WorkflowStages>
+        <template v-if="$slots['log-export']" #log-export="scope"><slot name="log-export" v-bind="scope" /></template>
+      </WorkflowStages>
     </div>
   </div>
 </template>

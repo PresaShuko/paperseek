@@ -171,7 +171,7 @@ function waitForOnline(signal?: AbortSignal | null): Promise<void> {
   });
 }
 
-export async function recoverRun(runId: string): Promise<void> {
+export async function recoverRun(runId: string, loadAudit: typeof api.audit | null = api.audit): Promise<void> {
   stopRunRecovery();
   const generation = recoveryGeneration;
   const controller = new AbortController();
@@ -209,8 +209,8 @@ export async function recoverRun(runId: string): Promise<void> {
     const refreshedSnapshot = await api.run(runId, controller.signal);
     if (!applySnapshot(runId, generation, refreshedSnapshot)) return;
     if (terminalStatuses.has(state.run.status)) {
-      if (["completed", "completed_with_warnings"].includes(state.run.status)) {
-        const audit = await api.audit(runId, controller.signal);
+      if (loadAudit && ["completed", "completed_with_warnings"].includes(state.run.status)) {
+        const audit = await loadAudit(runId, controller.signal);
         if (!isCurrent(runId, generation)) return;
         state.audit = audit;
       }

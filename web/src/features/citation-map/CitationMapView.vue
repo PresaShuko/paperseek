@@ -6,6 +6,7 @@ import { api } from "../../api/client";
 import type { CitationMap, CitationNode, RunDetail } from "../../api/types";
 import { useLocale } from "../../locales";
 
+const props = defineProps<{ snapshot?: { run: RunDetail; citationMap: CitationMap } }>();
 const { sourceName, t } = useLocale();
 const route = useRoute();
 const runId = computed(() => String(route.params.runId || ""));
@@ -127,6 +128,13 @@ async function load(value: string): Promise<void> {
   selectedId.value = "";
   focusId.value = "";
   pageState.value = "loading";
+  if (props.snapshot?.run.id === value) {
+    run.value = props.snapshot.run;
+    citationMap.value = props.snapshot.citationMap;
+    resetGraph();
+    pageState.value = "loaded";
+    return;
+  }
   const [detail, map] = await Promise.allSettled([
     api.run(value, controller.signal),
     api.citationMap(value, controller.signal),

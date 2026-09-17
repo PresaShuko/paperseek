@@ -6,6 +6,7 @@ import { api } from "../../api/client";
 import type { PaperResult, RunDetail } from "../../api/types";
 import { useLocale } from "../../locales";
 
+const props = defineProps<{ snapshot?: { run: RunDetail; results: PaperResult[] } }>();
 const { sourceName, t } = useLocale();
 const route = useRoute();
 const runId = computed(() => String(route.params.runId || ""));
@@ -111,6 +112,12 @@ async function load(value: string): Promise<void> {
   availability.value = "all";
   sort.value = "rank";
   pageState.value = "loading";
+  if (props.snapshot?.run.id === value) {
+    run.value = props.snapshot.run;
+    results.value = props.snapshot.results;
+    pageState.value = "loaded";
+    return;
+  }
   const [detail, page] = await Promise.allSettled([
     api.run(value, controller.signal),
     api.resultPage(value, undefined, controller.signal),
@@ -139,8 +146,10 @@ onBeforeUnmount(() => {
     <header class="workspace-header">
       <div><div class="section-kicker">{{ t("results") }}</div><h2>{{ run?.question || t("noRun") }}</h2></div>
       <div v-if="run" class="alert-actions">
-        <a class="button button--primary" :href="api.exportUrl(runId, 'csv')">{{ t("exportCsv") }}</a>
-        <a class="button" :href="api.exportUrl(runId, 'json')">{{ t("exportJson") }}</a>
+        <slot name="exports">
+          <a class="button button--primary" :href="api.exportUrl(runId, 'csv')">{{ t("exportCsv") }}</a>
+          <a class="button" :href="api.exportUrl(runId, 'json')">{{ t("exportJson") }}</a>
+        </slot>
       </div>
     </header>
 

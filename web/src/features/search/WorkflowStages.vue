@@ -578,7 +578,9 @@ watchEffect(() => {
       </summary>
       <div class="log-body">
         <div class="log-toolbar">
-          <a class="button button--small" data-testid="system-log-export" :href="api.logUrl(runState.run!.id)">{{ t("exportLog") }}</a>
+          <slot name="log-export" :content="systemLog" :run-id="runState.run!.id">
+            <a class="button button--small" data-testid="system-log-export" :href="api.logUrl(runState.run!.id)">{{ t("exportLog") }}</a>
+          </slot>
         </div>
         <pre class="log-content" data-testid="system-log-audit">{{ systemLog }}</pre>
       </div>
