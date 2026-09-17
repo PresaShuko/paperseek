@@ -12,6 +12,12 @@ import type {
 } from "./types";
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+let request: typeof fetch = (input, init) => fetch(input, init);
+
+// Hosted supplies its session-aware transport at application startup.
+export function setRequestHandler(handler: typeof fetch): void {
+  request = handler;
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -26,7 +32,7 @@ export class ApiError extends Error {
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, init);
+  const response = await request(`${apiBase}${path}`, init);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const code = payload?.error?.code || `http_${response.status}`;
@@ -109,7 +115,7 @@ export const api = {
     onEvent: (event: RunEvent) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const response = await fetch(`${apiBase}/api/v1/runs/${runId}/events`, {
+    const response = await request(`${apiBase}/api/v1/runs/${runId}/events`, {
       headers: {
         Accept: "text/event-stream",
         "Last-Event-ID": String(afterSequence),

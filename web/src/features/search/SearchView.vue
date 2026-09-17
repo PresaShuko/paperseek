@@ -9,6 +9,7 @@ import { submitSearch } from "../../state/run";
 import WorkflowStages from "./WorkflowStages.vue";
 
 const QUESTION_MAX_LENGTH = 10_000; // Backend contract: RunSubmission.question max_length.
+const props = withDefaults(defineProps<{ submissionEnabled?: boolean }>(), { submissionEnabled: true });
 
 const { filterDomainName, filterOptionName, providerName, sourceName, t } = useLocale();
 const router = useRouter();
@@ -118,7 +119,7 @@ const budgetHintKey = computed(() => (({
   high: "budgetHintHigh",
   max: "budgetHintMax",
 }) as Record<string, string>)[form.searchBudget || "fast"]);
-const canSubmit = computed(() => Boolean(form.question.trim()) && !busy.value);
+const canSubmit = computed(() => props.submissionEnabled && Boolean(form.question.trim()) && !busy.value);
 
 watch(() => form.llmProvider, (provider) => {
   const [model, apiType, baseUrl] = providerDefaults[provider];
@@ -251,6 +252,7 @@ function clearCredentials(): void {
 }
 
 async function checkConfiguration(): Promise<void> {
+  if (!props.submissionEnabled) return;
   diagnosticsBusy.value = true;
   diagnosticError.value = "";
   diagnosticResult.value = null;
@@ -415,7 +417,7 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
             </div>
           </div>
           <div class="alert-actions">
-            <button class="button" type="button" :disabled="busy || diagnosticsBusy" @click="checkConfiguration">
+            <button class="button" type="button" :disabled="!submissionEnabled || busy || diagnosticsBusy" @click="checkConfiguration">
               {{ diagnosticsBusy ? t("checkingConfiguration") : t("checkConfiguration") }}
             </button>
           </div>

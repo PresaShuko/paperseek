@@ -84,6 +84,10 @@ def _bundle_web_sources(target: Path) -> None:
             entry.compress_type = ZIP_DEFLATED
             entry.external_attr = 0o644 << 16
             archive.writestr(entry, path.read_bytes())
+        entry = ZipInfo("tools/generate_openapi_types.py", date_time=(1980, 1, 1, 0, 0, 0))
+        entry.compress_type = ZIP_DEFLATED
+        entry.external_attr = 0o644 << 16
+        archive.writestr(entry, (BACKEND_ROOT / "scripts/generate_openapi_types.py").read_bytes())
 
 
 class BuildPy(_build_py):

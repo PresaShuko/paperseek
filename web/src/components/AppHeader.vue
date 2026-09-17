@@ -76,6 +76,7 @@ function currentFor(name: string): "page" | undefined {
         <button :class="{ active: language === 'en' }" :aria-pressed="language === 'en'" type="button" @click="setLanguage('en')">EN</button>
         <button :class="{ active: language === 'zh' }" :aria-pressed="language === 'zh'" type="button" @click="setLanguage('zh')">中文</button>
       </div>
+      <slot name="account" />
     </div>
   </header>
 </template>

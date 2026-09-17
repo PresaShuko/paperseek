@@ -87,7 +87,7 @@ def main() -> None:
     with ZipFile(Path(cli_module.__file__).parent / "web_source.zip") as shared_web:
         names = set(shared_web.namelist())
         assert {"src/App.vue", "src/api/client.ts", "src/state/run.ts", "package.json", "package-lock.json"} <= names
-        assert all(name.startswith(("src/", "public/")) or name in {"package.json", "package-lock.json"} for name in names)
+        assert all(name.startswith(("src/", "public/")) or name in {"package.json", "package-lock.json", "tools/generate_openapi_types.py"} for name in names)
         assert all(not part.startswith(".") for name in names for part in name.split("/"))
 
     expected_commit = os.environ.get("PAPERSEEK_EXPECTED_COMMIT", "").strip()
