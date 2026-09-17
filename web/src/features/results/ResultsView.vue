@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
     <header class="workspace-header">
       <div><div class="section-kicker">{{ t("results") }}</div><h2>{{ run?.question || t("noRun") }}</h2></div>
       <div v-if="run" class="alert-actions">
-        <slot name="exports">
+        <slot name="exports" :run-id="runId">
           <a class="button button--primary" :href="api.exportUrl(runId, 'csv')">{{ t("exportCsv") }}</a>
           <a class="button" :href="api.exportUrl(runId, 'json')">{{ t("exportJson") }}</a>
         </slot>

@@ -218,8 +218,10 @@ onBeforeUnmount(() => {
             <RouterLink class="button button--small" :to="`/runs/${selected.id}`">{{ t("workflow") }}</RouterLink>
             <RouterLink class="button button--small" :to="`/runs/${selected.id}/results`">{{ t("results") }}</RouterLink>
             <RouterLink class="button button--small" :to="`/runs/${selected.id}/citation-map`">{{ t("citationMap") }}</RouterLink>
-            <a class="button button--small" :href="api.exportUrl(selected.id, 'csv')">{{ t("exportCsv") }}</a>
-            <a class="button button--small" :href="api.exportUrl(selected.id, 'json')">{{ t("exportJson") }}</a>
+            <slot name="exports" :run-id="selected.id">
+              <a class="button button--small" :href="api.exportUrl(selected.id, 'csv')">{{ t("exportCsv") }}</a>
+              <a class="button button--small" :href="api.exportUrl(selected.id, 'json')">{{ t("exportJson") }}</a>
+            </slot>
             <button ref="deleteButton" class="button button--small button--danger" type="button" @click="askDelete">{{ t("deleteRun") }}</button>
           </div>
         </template>
