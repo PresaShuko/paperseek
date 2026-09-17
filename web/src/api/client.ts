@@ -31,14 +31,14 @@ export class ApiError extends Error {
   }
 }
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
+export async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await request(`${apiBase}${path}`, init);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const code = payload?.error?.code || `http_${response.status}`;
     throw new ApiError(response.status, code);
   }
-  return response.json() as Promise<T>;
+  return response.status === 204 ? null as T : response.json() as Promise<T>;
 }
 
 export const api = {

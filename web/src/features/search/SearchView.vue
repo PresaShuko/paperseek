@@ -9,7 +9,13 @@ import { submitSearch } from "../../state/run";
 import WorkflowStages from "./WorkflowStages.vue";
 
 const QUESTION_MAX_LENGTH = 10_000; // Backend contract: RunSubmission.question max_length.
-const props = withDefaults(defineProps<{ submissionEnabled?: boolean }>(), { submissionEnabled: true });
+const props = withDefaults(defineProps<{
+  submissionEnabled?: boolean;
+  service?: DiagnosticSubmission['service'];
+  modelSettings?: Pick<DiagnosticSubmission, 'llm' | 'retrieval'>;
+  sourceOptions?: SourceDescriptor[];
+  credentialHelp?: string;
+}>(), { submissionEnabled: true });
 
 const { filterDomainName, filterOptionName, providerName, sourceName, t } = useLocale();
 const router = useRouter();
@@ -145,9 +151,21 @@ onMounted(async () => {
   await loadSources();
 });
 
+watch(() => props.sourceOptions, value => { if (value) applySources(value); });
+watch(() => props.service?.mode, clearCredentials);
+
+function applySources(value: SourceDescriptor[]): void {
+  sources.value = value;
+  if (!value.some(source => source.id === form.source)) {
+    const preferred = value.find(source => source.default) || value[0];
+    if (preferred) form.source = preferred.id;
+  }
+}
+
 async function loadSources(): Promise<void> {
   sourceError.value = "";
   try {
+    if (props.sourceOptions) { applySources(props.sourceOptions); return; }
     sources.value = await api.sources();
     const preferred = sources.value.find((source) => source.default) || sources.value[0];
     if (preferred) form.source = preferred.id;
@@ -217,13 +235,14 @@ function configurationPayload(): DiagnosticSubmission {
       field_ids: selectedFilter.value?.mode === "native" ? form.fieldIds : [],
       field_hint: selectedFilter.value?.mode === "text" ? form.fieldHint : "",
       citation_enabled: supportsCitationExpansion.value && form.citationEnabled,
-      llm: {
+      service: props.service,
+      llm: props.modelSettings?.llm ?? {
         provider: form.llmProvider,
         api_type: form.llmApiType,
         base_url: form.llmBaseUrl,
         model: form.llmModel,
       },
-      retrieval: {
+      retrieval: props.modelSettings?.retrieval ?? {
         embedding: {
           provider: form.embeddingProvider,
           model: form.embeddingModel,
@@ -236,10 +255,10 @@ function configurationPayload(): DiagnosticSubmission {
         },
       },
       credentials: {
-        llm: { api_key: form.llmApiKey },
+        llm: { api_key: props.modelSettings ? '' : form.llmApiKey },
         source: { api_key: form.sourceApiKey },
-        embedding: { api_key: form.embeddingApiKey },
-        reranker: { api_key: form.rerankerApiKey },
+        embedding: { api_key: props.modelSettings ? '' : form.embeddingApiKey },
+        reranker: { api_key: props.modelSettings ? '' : form.rerankerApiKey },
       },
   };
 }
@@ -250,6 +269,8 @@ function clearCredentials(): void {
   form.embeddingApiKey = "";
   form.rerankerApiKey = "";
 }
+
+defineExpose({ clearCredentials });
 
 async function checkConfiguration(): Promise<void> {
   if (!props.submissionEnabled) return;
@@ -327,6 +348,7 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
               <option v-for="source in sources" :key="source.id" :value="source.id">{{ sourceName(source.id, source.label) }}</option>
             </select>
           </label>
+          <slot name="source-note" :source="selectedSource" />
           <div v-if="sourceError" class="alert" role="alert">
             <strong>{{ t("sources_unavailable") }}</strong>
             <div class="alert-actions">
@@ -396,7 +418,9 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
           </div>
         </section>
 
+        <slot name="service-mode" />
         <section class="form-section" :aria-label="t('modelConfiguration')">
+          <div v-show="!modelSettings" style="display: contents">
           <div>
             <div class="section-kicker">{{ t("configuration") }}</div>
             <h2 class="section-title">{{ t("modelSource") }}</h2>
@@ -413,8 +437,9 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
                 <span class="field-label">{{ t("apiKey") }}</span>
                 <input v-model="form.llmApiKey" type="password" autocomplete="off" />
               </label>
-              <span class="field-help">{{ t("credentialHelp") }}</span>
+              <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
             </div>
+          </div>
           </div>
           <div class="alert-actions">
             <button class="button" type="button" :disabled="!submissionEnabled || busy || diagnosticsBusy" @click="checkConfiguration">
@@ -455,11 +480,11 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
             </div>
           </div>
           <div v-else-if="submitError" class="alert" role="alert">
-            <strong>{{ t(submitError) }}</strong>
+            <slot name="submit-error" :code="submitError"><strong>{{ t(submitError) }}</strong></slot>
           </div>
         </div>
 
-        <details class="advanced-section">
+        <details v-show="!modelSettings" class="advanced-section">
           <summary>
             <svg class="disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
             <span>{{ t("advanced") }}</span>
@@ -488,7 +513,7 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
                   <span class="field-label">{{ t("embeddingApiKey") }}</span>
                   <input v-model="form.embeddingApiKey" type="password" autocomplete="off" />
                 </label>
-                <span class="field-help">{{ t("credentialHelp") }}</span>
+                <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
               </div>
               <label class="field"><span class="field-label">{{ t("rerankerProvider") }}</span>
                 <select v-model="form.rerankerProvider">
@@ -503,7 +528,7 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
                   <span class="field-label">{{ t("rerankerApiKey") }}</span>
                   <input v-model="form.rerankerApiKey" type="password" autocomplete="off" />
                 </label>
-                <span class="field-help">{{ t("credentialHelp") }}</span>
+                <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
               </div>
             </div>
           </div>
