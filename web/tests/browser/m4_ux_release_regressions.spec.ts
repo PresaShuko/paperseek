@@ -76,6 +76,8 @@ test("provider failures have distinct bilingual recovery guidance in the run vie
     await page.getByRole("button", { name: "中文" }).click();
     await expect(primary).toContainText(chinese);
     await expect(primary).not.toContainText(english);
+    await page.setViewportSize({ width: 320, height: 844 });
+    expect(await primary.getByRole("alert").evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
     await page.getByRole("button", { name: "EN", exact: true }).click();
   }
 });

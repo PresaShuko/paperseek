@@ -110,7 +110,7 @@ onBeforeUnmount(() => { if (!props.externalRecovery) stopRunRecovery(); });
             <h2 class="run-panel-question">{{ runState.run?.question || t("run_unavailable") }}</h2>
           </div>
           <span class="badge" :class="statusBadgeClass"><strong data-testid="run-status">{{ t(status) }}</strong></span>
-          <p v-if="runState.run?.error_code" class="field-error" role="alert">{{ runMessage(runState.run.error_code, "error") }}</p>
+          <p v-if="runState.run?.error_code" class="alert" role="alert">{{ runMessage(runState.run.error_code, "error") }}</p>
           <dl class="run-panel-facts">
             <div class="fact"><dt>{{ t("dataSource") }}</dt><dd>{{ sourceName(runState.run?.source || "") }}</dd></div>
             <div class="fact"><dt>{{ t("resultCount") }}</dt><dd>{{ runState.run?.result_count ?? 0 }}</dd></div>
