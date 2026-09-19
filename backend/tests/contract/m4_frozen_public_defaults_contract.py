@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
+from types import SimpleNamespace
 
 from paperseek_community.cli import _parser
+from paperseek_community.composition import CommunityExecutionResolver
 from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_core.execution import NEVER_CANCELLED
 from paperseek_app.submission import (
     LLMRouteInput,
     RunSubmission,
@@ -28,6 +32,37 @@ def settings() -> CommunityDeploymentSettings:
 
 
 class M4FrozenPublicDefaultsContract(unittest.TestCase):
+    def test_each_budget_reaches_the_workflow_with_frozen_limits(self) -> None:
+        # Frozen SearchBudgetPreset values, checked at the product composition boundary.
+        fields = ("max_iterations", "query_portfolio_max", "query_portfolio_limit",
+                  "retrieval_lane_limit", "retrieval_pool_max", "ranking_candidate_limit",
+                  "citation_seed_count", "citation_per_seed", "citation_max_records", "citation_depth")
+        presets = {
+            "fast": (5, 3, 100, 500, 3000, 256, 3, 4, 40, 2),
+            "medium": (7, 3, 100, 750, 4500, 384, 8, 6, 80, 2),
+            "high": (9, 4, 100, 1000, 7000, 512, 16, 8, 160, 3),
+            "max": (12, 6, 100, 1000, 10000, 1024, 30, 10, 320, 3),
+        }
+
+        async def check():
+            resolver = CommunityExecutionResolver(settings(), SimpleNamespace(resolve=lambda _id: {}))
+            for name, values in presets.items():
+                with self.subTest(budget=name):
+                    prepared = prepare_run_submission(RunSubmission(question="limits", search_budget=name), settings())
+                    run = SimpleNamespace(id="controlled", source=prepared.source, question=prepared.question,
+                                          config_snapshot=prepared.config_snapshot)
+                    execution = resolver(run, NEVER_CANCELLED)
+                    try:
+                        request, query = execution.request, execution.request.query_budget
+                        for field, expected in zip(fields, values):
+                            self.assertEqual(getattr(request if field.startswith("citation_") else query, field), expected)
+                        self.assertEqual((query.target_min, query.target_max, query.retrieval_pool_min), (5, 50, 5))
+                        self.assertTrue(query.query_portfolio_enabled)
+                    finally:
+                        await execution.close()
+
+        asyncio.run(check())
+
     def test_omitted_public_options_preserve_frozen_defaults(self) -> None:
         prepared = prepare_run_submission(
             RunSubmission(question="  evidence synthesis  "),

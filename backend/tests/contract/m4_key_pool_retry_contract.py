@@ -129,6 +129,22 @@ def _record() -> PaperRecord:
 
 
 class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
+    async def test_every_protocol_preserves_the_requested_stage_output_limit(self) -> None:
+        for api_type, field in (("openai_chat", "max_tokens"),
+                                ("openai_responses", "max_output_tokens"),
+                                ("anthropic_messages", "max_tokens")):
+            with self.subTest(api_type=api_type):
+                limits = (32, 2048, 4096, 8192)  # Diagnostic, query, planning, large ranking batch.
+                async with ControlledAsyncHttpServer([200] * len(limits)) as server:
+                    adapter, client = await self._llm(server, api_type=api_type, keys="controlled-key")
+                    try:
+                        for limit in limits:
+                            self.assertEqual(await adapter.chat_json(
+                                [{"role": "user", "content": "Return JSON."}], max_tokens=limit), "{}")
+                    finally:
+                        await client.aclose()
+                self.assertEqual([request["body"][field] for request in server.requests], list(limits))
+
     async def test_provider_failures_have_safe_distinct_codes_without_changing_attempts(self) -> None:
         cases = [
             (401, "provider_authentication_failed"), (403, "provider_authentication_failed"),
