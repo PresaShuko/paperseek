@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from alembic import command
@@ -38,6 +38,7 @@ from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_databas
 from paperseek_community.persistence.migrate import database_url
 from paperseek_app.worker import RunExecutor
 from paperseek_core.models import CheckpointDraft, QueryLoopBudget, ResearchWorkflowRequest
+from paperseek_core.errors import LLMRequestError
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "m1_fixed_source.json"
@@ -65,6 +66,22 @@ def _upgrade_to(database: Path, revision: str) -> None:
 
 
 class M3DurableArtifactExecutorContractTest(unittest.TestCase):
+    def test_model_failure_code_is_persisted_without_private_details_or_results(self):
+        run = self._create_run()
+        failure = LLMRequestError("private upstream detail", code="provider_quota_exhausted")
+        execution = self._execution(None, None)
+        execution.llm.chat_json = AsyncMock(side_effect=failure)
+        executor = RunExecutor(self.execution_service, lambda *_: execution, owner_id="test-worker")
+        detail = asyncio.run(executor.run_once())
+        self.assertEqual(detail.status, RunStatus.FAILED)
+        self.assertEqual(detail.error_code, "provider_quota_exhausted")
+        events = self.uow.list_events(run.id)
+        self.assertEqual(events[-1].event_type, "run.failed")
+        self.assertEqual(events[-1].payload["code"], detail.error_code)
+        self.assertNotIn("private upstream", str(events))
+        self.assertEqual(self.query_service.get_results(run.id), [])
+        self.assertEqual(self.query_service.list_artifacts(run.id), [])
+
     def test_execution_can_use_an_ephemeral_observer_without_persistence(self):
         class Observer:
             def __init__(self):

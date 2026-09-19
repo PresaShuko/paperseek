@@ -185,11 +185,12 @@ class RunExecutionService:
             if cancelled is not None:
                 return cancelled
             raise
-        except (LLMRequestError, QueryGenerationError, QuerySourceError, RetrievalSourceError):
+        except (LLMRequestError, QueryGenerationError, QuerySourceError, RetrievalSourceError) as exc:
             cancelled = self._finish_cancel_if_requested(lease, scope)
             if cancelled is not None:
                 return cancelled
-            return self.uow.fail_run(lease, observer.drain(), "research_workflow_failed")
+            code = exc.code if isinstance(exc, LLMRequestError) else "research_workflow_failed"
+            return self.uow.fail_run(lease, observer.drain(), code)
         except ArtifactError:
             cancelled = self._finish_cancel_if_requested(lease, scope)
             if cancelled is not None:

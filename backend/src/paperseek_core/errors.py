@@ -16,3 +16,10 @@ class QuerySourceError(RuntimeError):
 
 class LLMRequestError(RuntimeError):
     """The configured LLM endpoint could not produce a usable response."""
+
+    code = "research_workflow_failed"
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code

@@ -135,7 +135,7 @@ class M4CliProductEntryContract(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertEqual(payload["status"], "failed")
-        self.assertEqual(payload["error_code"], "research_workflow_failed")
+        self.assertEqual(payload["error_code"], "provider_authentication_failed")
         self.assertEqual(payload["results"], [])
 
     def test_worker_once_claims_a_queued_run_through_the_product_executor(self) -> None:

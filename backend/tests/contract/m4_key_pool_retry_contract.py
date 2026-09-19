@@ -21,7 +21,7 @@ from paperseek_core.sources.http import AsyncHttpTransport
 
 
 class ControlledAsyncHttpServer:
-    def __init__(self, actions: list[int | str]) -> None:
+    def __init__(self, actions: list[int | str | tuple[int, object]]) -> None:
         self.actions = list(actions)
         self.requests: list[dict[str, object]] = []
         self.entered = asyncio.Event()
@@ -71,9 +71,12 @@ class ControlledAsyncHttpServer:
                 self.entered.set()
                 await self.release.wait()
                 status = 200
+            elif isinstance(action, tuple):
+                status = action[0]
             else:
                 status = int(action)
-            payload = self._payload(path) if status == 200 else {"error": f"controlled-{status}"}
+            payload = action[1] if isinstance(action, tuple) else (
+                self._payload(path) if status == 200 else {"error": f"controlled-{status}"})
             content = json.dumps(payload).encode("utf-8")
             reason = "OK" if status == 200 else "Controlled Error"
             writer.write(
@@ -126,6 +129,32 @@ def _record() -> PaperRecord:
 
 
 class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
+    async def test_provider_failures_have_safe_distinct_codes_without_changing_attempts(self) -> None:
+        cases = [
+            (401, "provider_authentication_failed"), (403, "provider_authentication_failed"),
+            (402, "provider_quota_exhausted"), (429, "provider_rate_limited"),
+            ((429, {"error": {"code": "insufficient_quota", "message": "private-detail"}}), "provider_quota_exhausted"),
+            ((429, {"error": {"type": "insufficient_quota", "message": "private-detail"}}), "provider_quota_exhausted"),
+            ((429, {"error": {"message": "insufficient_quota private-detail"}}), "provider_rate_limited"),
+            ((429, ["private-detail"]), "provider_rate_limited"),
+            (500, "provider_unavailable"), (503, "provider_unavailable"),
+            (404, "provider_request_rejected"), ("disconnect", "provider_connection_failed"),
+            ((200, {"error": "private-detail"}), "provider_invalid_response"),
+        ]
+        for action, code in cases:
+            with self.subTest(action=action):
+                async with ControlledAsyncHttpServer([action]) as server:
+                    adapter, client = await self._llm(server, keys="private-key")
+                    try:
+                        with self.assertRaises(LLMRequestError) as caught:
+                            await adapter.chat_json([{"role": "user", "content": "Return JSON."}])
+                        self.assertEqual(caught.exception.code, code)
+                        self.assertNotIn("private-", str(caught.exception))
+                        self.assertNotIn(server.base_url, str(caught.exception))
+                    finally:
+                        await client.aclose()
+                self.assertEqual(len(server.requests), 1)
+
     async def _llm(
         self,
         server: ControlledAsyncHttpServer,
@@ -194,11 +223,12 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
                 await client.aclose()
         self.assertEqual([_auth(request) for request in server.requests], ["Bearer key-a"])
 
-        async with ControlledAsyncHttpServer([500, 500, 500, 200]) as server:
+        async with ControlledAsyncHttpServer([500, 500, 429, 200]) as server:
             adapter, client = await self._llm(server)
             try:
-                with self.assertRaises(LLMRequestError):
+                with self.assertRaises(LLMRequestError) as caught:
                     await adapter.chat_json([{"role": "user", "content": "Return JSON."}])
+                self.assertEqual(caught.exception.code, "provider_rate_limited")
             finally:
                 await client.aclose()
         self.assertEqual(

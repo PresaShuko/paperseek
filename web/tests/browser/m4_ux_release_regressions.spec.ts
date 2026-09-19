@@ -55,6 +55,31 @@ async function mockRun(page: Page): Promise<void> {
   }));
 }
 
+test("provider failures have distinct bilingual recovery guidance in the run view", async ({ page }) => {
+  const cases = [
+    ["provider_quota_exhausted", "The model service has insufficient credits or allowance. Check its account or choose another service.", "模型服务余额或额度不足，请检查对应账户或切换服务。"],
+    ["provider_rate_limited", "The model service is rate limiting requests. Wait and retry, or choose another service.", "模型服务请求过于频繁，请稍后重试或切换服务。"],
+    ["provider_unavailable", "The model service is temporarily unavailable. Retry later or choose another service.", "模型服务暂时不可用，请稍后重试或切换服务。"],
+    ["provider_connection_failed", "Could not reach the model service. Check the endpoint and connection, then retry.", "无法连接模型服务，请检查服务地址和网络后重试。"],
+    ["provider_authentication_failed", "The model service rejected access. Check the key and permissions, or reconnect the provider.", "模型服务拒绝访问，请检查密钥和权限，或重新授权。"],
+    ["provider_request_rejected", "The model service rejected the request. Check the model and API settings.", "模型服务拒绝了请求，请检查模型和 API 配置。"],
+    ["provider_invalid_response", "The model service returned an unusable response. Retry or choose another model.", "模型服务返回了无效响应，请重试或选择其他模型。"],
+    ["connection_not_active", "The provider connection is no longer available. Reconnect or choose another service.", "推理连接已不可用，请重新授权或切换服务。"],
+  ];
+  await mockRun(page);
+  for (const [code, english, chinese] of cases) {
+    await page.route(`**/api/v1/runs/${runId}`, (route) => route.fulfill({ json: { ...run, status: "failed", error_code: code, result_count: 0 } }));
+    await page.goto(`/runs/${runId}`);
+    const primary = page.getByTestId("run-primary-summary");
+    await expect(primary).toContainText(english);
+    await expect(primary).not.toContainText(code);
+    await page.getByRole("button", { name: "中文" }).click();
+    await expect(primary).toContainText(chinese);
+    await expect(primary).not.toContainText(english);
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+  }
+});
+
 test("Chinese search localizes capability and credential structure supplied by the API", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("paperseek.locale", "zh"));
   await page.route("**/api/v1/sources", (route) => route.fulfill({

@@ -11,6 +11,18 @@ abstracts for papers with a DOI. The choice is saved with the run for recovery;
 an unavailable abstract only adds a warning. This is separate from the optional
 Crossref candidate citation-count/year enrichment.
 
+## Model service failures
+
+Failed runs retain a safe `error_code` for rejected credentials, insufficient
+credits, rate limiting, unavailable services, connection failures, rejected
+requests or invalid responses. The Web UI translates these codes; upstream
+response bodies and credentials are not persisted. A 429 is rate limiting unless
+its structured error code/type says `insufficient_quota`; free-text messages are
+never parsed. See the [OpenAI error protocol](https://developers.openai.com/api/docs/guides/error-codes)
+and [OpenRouter response status definitions](https://openrouter.ai/docs/client-sdks/typescript/api-reference/responses).
+Key/model retries, cancellation priority and optional ranking degradation remain
+unchanged. These model-service limits are not PaperSeek's own daily allowance.
+
 ## Shared Web source delivery
 
 The Community wheel includes `paperseek_community/web_source.zip`, built from

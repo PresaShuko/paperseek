@@ -132,7 +132,7 @@ def main() -> None:
         "json",
     )
     missing_payload = json.loads(missing_key.stdout)
-    if missing_key.returncode != 1 or missing_payload["error_code"] != "research_workflow_failed":
+    if missing_key.returncode != 1 or missing_payload["error_code"] != "provider_authentication_failed":
         raise AssertionError((missing_key.returncode, missing_payload, missing_key.stderr))
 
     hook = Path(__file__).with_name("cli_test_hook")

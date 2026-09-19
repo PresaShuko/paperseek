@@ -68,7 +68,7 @@ class HttpLLMAdapter:
             message = choice.get("message") or {}
             return str(message.get("content") or message.get("reasoning_content") or "") or self._missing()
         except (ValueError, TypeError, IndexError, AttributeError) as exc:
-            raise LLMRequestError("The LLM chat response is invalid.") from exc
+            raise LLMRequestError("The LLM chat response is invalid.", code="provider_invalid_response") from exc
 
     async def _responses(self, messages, temperature: float, max_tokens: int) -> str:
         instructions = "\n\n".join(item["content"] for item in messages if item.get("role") == "system")
@@ -97,7 +97,7 @@ class HttpLLMAdapter:
             ]
             return "\n".join(texts) or self._missing()
         except (ValueError, TypeError, AttributeError) as exc:
-            raise LLMRequestError("The LLM responses payload is invalid.") from exc
+            raise LLMRequestError("The LLM responses payload is invalid.", code="provider_invalid_response") from exc
 
     async def _anthropic(self, messages, temperature: float, max_tokens: int) -> str:
         body: dict[str, Any] = {
@@ -122,7 +122,7 @@ class HttpLLMAdapter:
             ]
             return "\n".join(texts) or self._missing()
         except (ValueError, TypeError, AttributeError) as exc:
-            raise LLMRequestError("The Anthropic response is invalid.") from exc
+            raise LLMRequestError("The Anthropic response is invalid.", code="provider_invalid_response") from exc
 
     async def _post(
         self,
@@ -134,7 +134,7 @@ class HttpLLMAdapter:
         attempt_keys: tuple[str, ...] | None = None,
     ) -> tuple[httpx.Response, str]:
         if not self.api_keys.available and not url.startswith(("http://127.0.0.1", "http://localhost")):
-            raise LLMRequestError("The configured LLM credential is unavailable.")
+            raise LLMRequestError("The configured LLM credential is unavailable.", code="provider_authentication_failed")
         keys = attempt_keys or self.api_keys.attempts()
         for index, api_key in enumerate(keys):
             try:
@@ -142,12 +142,13 @@ class HttpLLMAdapter:
             except httpx.RequestError as exc:
                 if index + 1 < len(keys):
                     continue
-                raise LLMRequestError("The LLM endpoint could not be reached.") from exc
+                raise LLMRequestError("The LLM endpoint could not be reached.", code="provider_connection_failed") from exc
             if response.status_code in (allow_status or set()) or 200 <= response.status_code < 300:
                 return response, api_key
             if retryable_key_status(response.status_code) and index + 1 < len(keys):
                 continue
-            raise LLMRequestError(f"The LLM endpoint returned HTTP {response.status_code}.")
+            raise LLMRequestError(f"The LLM endpoint returned HTTP {response.status_code}.",
+                                  code=self._response_error_code(response))
         raise LLMRequestError("The LLM endpoint could not be reached.")
 
     async def _cancellable_post(
@@ -189,5 +190,26 @@ class HttpLLMAdapter:
         }
 
     @staticmethod
+    def _response_error_code(response: httpx.Response) -> str:
+        if response.status_code in {401, 403}:
+            return "provider_authentication_failed"
+        if response.status_code == 402:
+            return "provider_quota_exhausted"
+        if response.status_code == 429:
+            # OpenAI-compatible APIs distinguish billing from rate limits by code/type,
+            # never by the provider's free-text message (which may contain private data).
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            error = payload.get("error") if isinstance(payload, dict) else None
+            if isinstance(error, dict) and "insufficient_quota" in (error.get("code"), error.get("type")):
+                return "provider_quota_exhausted"
+            return "provider_rate_limited"
+        if response.status_code >= 500:
+            return "provider_unavailable"
+        return "provider_request_rejected"
+
+    @staticmethod
     def _missing() -> str:
-        raise LLMRequestError("The LLM response did not contain text.")
+        raise LLMRequestError("The LLM response did not contain text.", code="provider_invalid_response")
