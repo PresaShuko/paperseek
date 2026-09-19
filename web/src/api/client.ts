@@ -97,8 +97,8 @@ export const api = {
     );
   },
 
-  deleteHistoryRun(runId: string): Promise<{ run_id: string; status: string }> {
-    return json<{ run_id: string; status: string }>(`/api/v1/history/${runId}`, { method: "DELETE" });
+  deleteHistoryRun(runId: string, signal?: AbortSignal): Promise<{ run_id: string; status: string }> {
+    return json<{ run_id: string; status: string }>(`/api/v1/history/${runId}`, { method: "DELETE", signal });
   },
 
   exportUrl(runId: string, format: "csv" | "json"): string {

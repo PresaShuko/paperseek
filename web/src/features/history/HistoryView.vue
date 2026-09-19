@@ -14,13 +14,18 @@ const pageState = ref<"loading" | "error" | "loaded">("loading");
 const refreshing = ref(false);
 const loadingMore = ref(false);
 const filterQuery = ref("");
-const confirmDeleteFor = ref<RunDetail | null>(null);
+const confirmDeleteFor = ref<RunDetail | "all" | null>(null);
 const deleting = ref(false);
 const deleteError = ref("");
 const deleteButton = ref<HTMLButtonElement | null>(null);
+const clearButton = ref<HTMLButtonElement | null>(null);
+const refreshButton = ref<HTMLButtonElement | null>(null);
 const dialogCancel = ref<HTMLButtonElement | null>(null);
 let generation = 0;
 let controller: AbortController | null = null;
+let deleteController: AbortController | null = null;
+const terminalStatuses = new Set(["completed", "completed_with_warnings", "failed", "cancelled"]);
+const canClear = computed(() => nextCursor.value || items.value.some(item => terminalStatuses.has(item.status)));
 
 const filteredItems = computed(() => {
   const needle = filterQuery.value.trim().toLowerCase();
@@ -82,17 +87,19 @@ async function choose(item: RunDetail): Promise<void> {
   }, controller.signal).catch(() => undefined);
 }
 
-async function askDelete(): Promise<void> {
-  if (!selected.value) return;
+async function askDelete(all = false): Promise<void> {
+  if (deleting.value || (!all && !selected.value)) return;
   deleteError.value = "";
-  confirmDeleteFor.value = selected.value;
+  confirmDeleteFor.value = all ? "all" : selected.value;
   await nextTick();
   dialogCancel.value?.focus();
 }
 
 function closeDeleteDialog(): void {
+  if (deleting.value) return;
+  const trigger = confirmDeleteFor.value === "all" ? clearButton.value : deleteButton.value;
   confirmDeleteFor.value = null;
-  deleteButton.value?.focus();
+  trigger?.focus();
 }
 
 function onDialogKeydown(event: KeyboardEvent): void {
@@ -121,21 +128,46 @@ function onDialogKeydown(event: KeyboardEvent): void {
 async function confirmDelete(): Promise<void> {
   const item = confirmDeleteFor.value;
   if (!item || deleting.value) return;
+  const request = new AbortController();
+  deleteController = request;
   deleting.value = true;
   deleteError.value = "";
   try {
-    await api.deleteHistoryRun(item.id);
-    generation += 1;
-    controller?.abort();
-    selected.value = null;
-    events.value = [];
+    const ids = new Set<string>();
+    if (item === "all") {
+      // Collect before deleting: a failed page read must not clear only the visible page.
+      let cursor: string | undefined;
+      do {
+        const page = await api.history(cursor, request.signal);
+        request.signal.throwIfAborted();
+        for (const run of page.items) if (terminalStatuses.has(run.status)) ids.add(run.id);
+        cursor = page.next_cursor || undefined;
+      } while (cursor);
+    } else ids.add(item.id);
+    for (const id of ids) {
+      request.signal.throwIfAborted();
+      await api.deleteHistoryRun(id, request.signal);
+      request.signal.throwIfAborted();
+      items.value = items.value.filter(run => run.id !== id);
+      if (selected.value?.id === id) {
+        generation += 1;
+        controller?.abort();
+        selected.value = null;
+        events.value = [];
+      }
+    }
     confirmDeleteFor.value = null;
-    deleteButton.value?.focus();
     await refresh(true);
   } catch (error) {
-    deleteError.value = error instanceof Error ? error.message : "loadError";
+    if (!request.signal.aborted) deleteError.value = item === "all" ? "clearHistoryFailed"
+      : error instanceof Error ? error.message : "loadError";
   } finally {
     deleting.value = false;
+    deleteController = null;
+    if (!confirmDeleteFor.value && !request.signal.aborted) {
+      await nextTick();
+      refreshButton.value?.focus();
+    }
   }
 }
 
@@ -143,6 +175,7 @@ onMounted(() => void refresh());
 onBeforeUnmount(() => {
   generation += 1;
   controller?.abort();
+  deleteController?.abort();
 });
 </script>
 
@@ -155,7 +188,8 @@ onBeforeUnmount(() => {
           <span class="sr-only">{{ t("historySearch") }}</span>
           <input v-model="filterQuery" type="search" :placeholder="t('historySearch')" :aria-label="t('historySearch')" />
         </label>
-        <button class="button" type="button" :disabled="refreshing" @click="refresh(true)">{{ t("refreshHistory") }}</button>
+        <button ref="refreshButton" class="button" type="button" :disabled="refreshing || deleting" @click="refresh(true)">{{ t("refreshHistory") }}</button>
+        <button ref="clearButton" class="button button--danger" type="button" :disabled="pageState !== 'loaded' || !canClear || refreshing || loadingMore || deleting" @click="askDelete(true)">{{ t("clearHistory") }}</button>
       </div>
     </header>
 
@@ -187,7 +221,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-if="nextCursor" class="load-more-row">
-          <button class="button" type="button" :disabled="loadingMore" @click="loadMore">{{ t("loadMore") }}</button>
+          <button class="button" type="button" :disabled="loadingMore || deleting" @click="loadMore">{{ t("loadMore") }}</button>
         </div>
       </div>
       <article class="history-detail" data-testid="history-detail">
@@ -222,7 +256,7 @@ onBeforeUnmount(() => {
               <a class="button button--small" :href="api.exportUrl(selected.id, 'csv')">{{ t("exportCsv") }}</a>
               <a class="button button--small" :href="api.exportUrl(selected.id, 'json')">{{ t("exportJson") }}</a>
             </slot>
-            <button ref="deleteButton" class="button button--small button--danger" type="button" @click="askDelete">{{ t("deleteRun") }}</button>
+            <button ref="deleteButton" class="button button--small button--danger" type="button" :disabled="deleting" @click="askDelete()">{{ t("deleteRun") }}</button>
           </div>
         </template>
         <p v-else class="field-help">{{ t("runDetail") }}</p>
@@ -231,9 +265,9 @@ onBeforeUnmount(() => {
 
     <div v-if="confirmDeleteFor" class="dialog-backdrop" @keydown="onDialogKeydown">
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-body">
-        <h2 id="delete-dialog-title">{{ t("deleteRunTitle") }}</h2>
-        <p id="delete-dialog-body">{{ t("deleteRunBody") }}</p>
-        <p><strong>{{ confirmDeleteFor.question }}</strong></p>
+        <h2 id="delete-dialog-title">{{ t(confirmDeleteFor === 'all' ? "clearHistoryTitle" : "deleteRunTitle") }}</h2>
+        <p id="delete-dialog-body">{{ t(confirmDeleteFor === 'all' ? "clearHistoryBody" : "deleteRunBody") }}</p>
+        <p v-if="confirmDeleteFor !== 'all'"><strong>{{ confirmDeleteFor.question }}</strong></p>
         <p v-if="deleteError" class="field-error" role="alert">{{ t(deleteError) }}</p>
         <div class="dialog-actions">
           <button ref="dialogCancel" class="button" type="button" :disabled="deleting" @click="closeDeleteDialog">{{ t("deleteRunCancel") }}</button>
