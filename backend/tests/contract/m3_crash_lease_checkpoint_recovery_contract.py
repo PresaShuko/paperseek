@@ -11,7 +11,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from paperseek_app.errors import RunOwnershipLost
+from paperseek_app.errors import RunOwnershipLost, RunPersistenceError
 from paperseek_app.execution import WorkflowExecution
 from paperseek_app.models import PendingEvent, RunStatus
 from paperseek_app.services import RunExecutionService, RunQueryService, RunSubmissionService
@@ -270,6 +270,57 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
             "run.failed",
             [event.event_type for event in self.query_service.list_events(run.id)],
         )
+
+    async def test_cancel_monitor_database_failure_stops_upstream_before_its_timeout(self) -> None:
+        run = self._create()
+        llm = GatedLLM(self.fixture["llm_responses"])
+        request_closed, client_closed = asyncio.Event(), asyncio.Event()
+        original_chat, original_read = llm.chat_json, self.uow.get_run
+        failure = RunPersistenceError("controlled database unavailable")
+
+        async def tracked_chat(*args, **kwargs):
+            try:
+                return await original_chat(*args, **kwargs)
+            finally:
+                request_closed.set()
+
+        async def close_client():
+            client_closed.set()
+
+        def read_until_request_started(run_id):
+            if llm.started.is_set():
+                raise failure
+            return original_read(run_id)
+
+        llm.chat_json = tracked_chat
+        executor = RunExecutor(self.execution_service,
+            lambda _run, _scope: WorkflowExecution(llm=llm, source=TrackingSource(),
+                request=self._request(), close=close_client),
+            owner_id="monitor-failure-worker", cancellation_poll_seconds=0.01,
+            lease_seconds=60, heartbeat_seconds=20)
+        with patch.object(self.uow, "get_run", side_effect=read_until_request_started):
+            task = asyncio.create_task(executor.run_once())
+            try:
+                await asyncio.wait_for(llm.started.wait(), timeout=2)
+                # wait() observes without cancelling: a watchdog must not manufacture the failure.
+                done, _ = await asyncio.wait({task}, timeout=0.5)
+                self.assertIn(task, done, "Cancellation monitor exited but upstream work is still waiting")
+                with self.assertRaises(RunPersistenceError) as raised:
+                    await task
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertIs(raised.exception, failure)
+        self.assertTrue(llm.started.is_set())
+        self.assertTrue(request_closed.is_set())
+        self.assertTrue(client_closed.is_set())
+        self.assertEqual(llm.calls, 1)
+        self.assertFalse(llm.release.is_set())
+        self.assertEqual(original_read(run.id).status, RunStatus.RUNNING)
+        self.assertEqual(self.uow.get_results(run.id), [])
+        self.assertEqual(self.uow.list_artifacts(run.id), [])
+        self.assertFalse(any(event.event_type in {"run.completed", "run.failed"}
+                             for event in self.uow.list_events(run.id)))
 
     async def test_process_rebuild_reclaims_and_resumes_last_complete_stage(self) -> None:
         run_id, crashed_source = await self._crash_after_retrieval_checkpoint()

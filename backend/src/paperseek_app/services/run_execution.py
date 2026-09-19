@@ -264,10 +264,12 @@ class RunExecutionService:
                 {workflow_task, monitor_task, heartbeat_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if monitor_task in done and scope.cancelled:
-                workflow_task.cancel()
-                await asyncio.gather(workflow_task, return_exceptions=True)
-                raise asyncio.CancelledError
+            if monitor_task in done:
+                await monitor_task
+                if scope.cancelled:
+                    workflow_task.cancel()
+                    await asyncio.gather(workflow_task, return_exceptions=True)
+                    raise asyncio.CancelledError
             if heartbeat_task in done:
                 workflow_task.cancel()
                 await asyncio.gather(workflow_task, return_exceptions=True)
