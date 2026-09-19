@@ -63,6 +63,7 @@ export interface components {
         "search_budget"?: string;
         "service"?: components["schemas"]["ServiceSelectionInput"] | null;
         "source"?: string;
+        "source_contacts"?: components["schemas"]["SourceContactsInput"];
         "wos_db"?: string | null;
       };
     "DiagnosticSummaryOutput": {
@@ -220,6 +221,7 @@ export interface components {
         "search_budget"?: string;
         "service"?: components["schemas"]["ServiceSelectionInput"] | null;
         "source"?: string;
+        "source_contacts"?: components["schemas"]["SourceContactsInput"];
         "wos_db"?: string | null;
       };
     "RunVersions": {
@@ -236,6 +238,12 @@ export interface components {
     "SourceCapabilitiesOutput": {
         "citation_expansion" : boolean;
         "filter" : components["schemas"]["SourceFilterOutput"];
+      };
+    "SourceContactsInput": {
+        "crossref_email"?: string;
+        "openalex_email"?: string;
+        "pubmed_email"?: string;
+        "pubmed_tool"?: string;
       };
     "SourceCredentialOutput": {
         "guidance_label" : string;
@@ -303,6 +311,7 @@ export type RunSubmission = components["schemas"]["RunSubmission"];
 export type RunVersions = components["schemas"]["RunVersions"];
 export type ServiceSelectionInput = components["schemas"]["ServiceSelectionInput"];
 export type SourceCapabilitiesOutput = components["schemas"]["SourceCapabilitiesOutput"];
+export type SourceContactsInput = components["schemas"]["SourceContactsInput"];
 export type SourceCredentialOutput = components["schemas"]["SourceCredentialOutput"];
 export type SourceDescriptorOutput = components["schemas"]["SourceDescriptorOutput"];
 export type SourceFilterOptionOutput = components["schemas"]["SourceFilterOptionOutput"];

@@ -108,6 +108,27 @@ test("source capabilities drive native, text, none and citation controls", async
   await sourceSelect.selectOption("openalex");
 
   await page.getByText("Advanced settings", { exact: true }).click();
+  await page.getByLabel("OpenAlex Email", { exact: true }).fill("openalex@example.test");
+  await sourceSelect.selectOption("crossref");
+  await page.getByLabel("Crossref Email", { exact: true }).fill("crossref@example.test");
+  await sourceSelect.selectOption("pubmed");
+  await page.getByLabel("PubMed Email", { exact: true }).fill("pubmed@example.test");
+  await expect(page.getByLabel("PubMed Tool", { exact: true })).toHaveValue("paperseek");
+  await page.getByLabel("PubMed Tool", { exact: true }).fill("research-team");
+  await page.getByRole("button", { name: "中文" }).click();
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expect(page.getByLabel("PubMed 联系邮箱", { exact: true })).toHaveValue("pubmed@example.test");
+  await expect(page.getByLabel("PubMed 工具名", { exact: true })).toHaveValue("research-team");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.getByLabel("PubMed 联系邮箱", { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("source-contacts-zh320.png") });
+  await page.getByRole("button", { name: "EN", exact: true }).click();
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await sourceSelect.selectOption("wos");
+  await expect(page.getByLabel("WoS Database", { exact: true })).toHaveValue("WOS");
+  await page.getByLabel("WoS Database", { exact: true }).fill("WOK");
+  await sourceSelect.selectOption("openalex");
+  await expect(page.getByLabel("OpenAlex Email", { exact: true })).toHaveValue("openalex@example.test");
   await expect(page.getByLabel("Embedding Provider")).toHaveValue("local");
   await expect(page.getByLabel("Reranker Provider")).toHaveValue("");
   await page.getByLabel("Embedding Provider").selectOption("openai");
@@ -169,6 +190,9 @@ test("source capabilities drive native, text, none and citation controls", async
     field_ids: ["17", "22"],
     field_hint: "",
     citation_enabled: true,
+    wos_db: "WOK",
+    source_contacts: { openalex_email: "openalex@example.test", crossref_email: "crossref@example.test",
+      pubmed_email: "pubmed@example.test", pubmed_tool: "research-team" },
     retrieval: {
       embedding: {
         provider: "openai",

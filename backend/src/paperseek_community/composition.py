@@ -54,6 +54,7 @@ class CommunityExecutionResolver:
         source_credentials = stored.get("source", {})
         embedding_credentials = stored.get("embedding", {})
         reranker_credentials = stored.get("reranker", {})
+        contacts = run.config_snapshot.get("source_contacts", {})
         route = resolve_llm_route(self.settings, dict(run.config_snapshot.get("llm") or {}))
         client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
@@ -68,6 +69,7 @@ class CommunityExecutionResolver:
             transport,
             source_credentials.get("api_key", ""),
             wos_db=str(run.config_snapshot.get("wos_db") or self.settings.wos_db),
+            contacts=contacts,
         )
         budget_name = str(run.config_snapshot.get("search_budget") or "fast")
         field_ids = tuple(
@@ -93,7 +95,7 @@ class CommunityExecutionResolver:
             if isinstance(source, CrossrefSource)
             else CrossrefSource(
                 transport=transport,
-                email=self.settings.contact_email,
+                email=contacts.get("crossref_email") or self.settings.contact_email,
             )
         )
         retrieval = dict(run.config_snapshot.get("retrieval") or {})
@@ -154,6 +156,7 @@ class CommunityExecutionResolver:
         submitted_key: str,
         *,
         wos_db: str,
+        contacts: dict[str, str],
     ):
         key = submitted_key or {
             "openalex": self.settings.openalex_api_key,
@@ -166,18 +169,19 @@ class CommunityExecutionResolver:
             "openalex": lambda: OpenAlexSource(
                 transport=transport,
                 api_key=key,
-                email=self.settings.contact_email,
+                email=contacts.get("openalex_email") or self.settings.contact_email,
             ),
             "arxiv": lambda: ArxivSource(transport=transport),
             "crossref": lambda: CrossrefSource(
                 transport=transport,
-                email=self.settings.contact_email,
+                email=contacts.get("crossref_email") or self.settings.contact_email,
             ),
             "semanticscholar": lambda: SemanticScholarSource(transport=transport, api_key=key),
             "pubmed": lambda: PubMedSource(
                 transport=transport,
                 api_key=key,
-                email=self.settings.contact_email,
+                email=contacts.get("pubmed_email") or self.settings.contact_email,
+                tool=contacts.get("pubmed_tool") or "paperseek",
             ),
             "wos": lambda: WosSource(transport=transport, api_key=key, db=wos_db),
             "googlescholar": lambda: GoogleScholarSource(transport=transport, api_key=key),

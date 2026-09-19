@@ -82,6 +82,8 @@ const form = reactive({
   llmModel: "gpt-5.4-mini",
   llmApiKey: "",
   sourceApiKey: "",
+  wosDb: "WOS",
+  sourceContacts: { openalex_email: "", crossref_email: "", pubmed_email: "", pubmed_tool: "paperseek" },
   embeddingProvider: "local" as keyof typeof retrievalProviderDefaults,
   embeddingModel: "",
   embeddingBaseUrl: "",
@@ -237,6 +239,8 @@ function configurationPayload(): DiagnosticSubmission {
       field_ids: selectedFilter.value?.mode === "native" ? form.fieldIds : [],
       field_hint: selectedFilter.value?.mode === "text" ? form.fieldHint : "",
       citation_enabled: supportsCitationExpansion.value && form.citationEnabled,
+      wos_db: form.wosDb,
+      source_contacts: { ...form.sourceContacts },
       service: props.service,
       llm: props.modelSettings?.llm ?? {
         provider: form.llmProvider,
@@ -492,6 +496,23 @@ function diagnosticActions(check: DiagnosticCheck): string[] {
             <span>{{ t("advanced") }}</span>
           </summary>
           <div class="advanced-body">
+            <div v-if="['openalex', 'crossref', 'pubmed', 'wos'].includes(form.source)" class="field-grid">
+              <label v-if="form.source === 'openalex'" class="field"><span class="field-label">{{ t("openAlexEmail") }}</span>
+                <input v-model="form.sourceContacts.openalex_email" type="email" maxlength="320" autocomplete="off" />
+              </label>
+              <label v-if="form.source === 'crossref'" class="field"><span class="field-label">{{ t("crossrefEmail") }}</span>
+                <input v-model="form.sourceContacts.crossref_email" type="email" maxlength="320" autocomplete="off" />
+              </label>
+              <label v-if="form.source === 'pubmed'" class="field"><span class="field-label">{{ t("pubmedEmail") }}</span>
+                <input v-model="form.sourceContacts.pubmed_email" type="email" maxlength="320" autocomplete="off" />
+              </label>
+              <label v-if="form.source === 'pubmed'" class="field"><span class="field-label">{{ t("pubmedTool") }}</span>
+                <input v-model="form.sourceContacts.pubmed_tool" type="text" maxlength="128" autocomplete="off" />
+              </label>
+              <label v-if="form.source === 'wos'" class="field"><span class="field-label">{{ t("wosDatabase") }}</span>
+                <input v-model="form.wosDb" type="text" maxlength="64" autocomplete="off" />
+              </label>
+            </div>
             <div class="field-grid">
               <label class="field"><span class="field-label">{{ t("apiType") }}</span>
                 <select v-model="form.llmApiType">

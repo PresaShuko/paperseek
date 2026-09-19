@@ -80,6 +80,17 @@ class ServiceSelectionInput(BaseModel):
         return self
 
 
+class SourceContactsInput(BaseModel):
+    """Non-secret contact metadata sent to the fixed source endpoints."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    openalex_email: str = Field(default="", max_length=320)
+    crossref_email: str = Field(default="", max_length=320)
+    pubmed_email: str = Field(default="", max_length=320)
+    pubmed_tool: str = Field(default="paperseek", max_length=128)
+
+
 class RunConfigurationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -90,6 +101,7 @@ class RunConfigurationInput(BaseModel):
     citation_enabled: bool | None = None
     fetch_abstracts: bool = False
     wos_db: str | None = Field(default=None, max_length=64)
+    source_contacts: SourceContactsInput = Field(default_factory=SourceContactsInput)
     llm: LLMRouteInput = Field(default_factory=LLMRouteInput)
     retrieval: RetrievalRouteInput = Field(default_factory=RetrievalRouteInput)
     credentials: RunCredentialsInput = Field(default_factory=RunCredentialsInput)
@@ -207,6 +219,8 @@ def prepare_run_submission(
             "Citation expansion is not supported by the selected source.",
         )
 
+    contacts = {key: value.strip() for key, value in submission.source_contacts.model_dump().items()}
+    contacts["pubmed_tool"] = contacts["pubmed_tool"] or "paperseek"
     snapshot = {
         "question": question,
         "source": source,
@@ -216,6 +230,7 @@ def prepare_run_submission(
         "citation_enabled": citation_enabled,
         "fetch_abstracts": submission.fetch_abstracts,
         "wos_db": normalize_wos_db(submission.wos_db, settings.wos_db),
+        "source_contacts": contacts,
         "llm": resolve_llm_route(settings, submission.llm.model_dump()),
         "retrieval": {
             "crossref_metadata_enrichment": submission.retrieval.crossref_metadata_enrichment,
