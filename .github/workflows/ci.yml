@@ -83,7 +83,9 @@ jobs:
         run: npm run typecheck
 
       - name: Build Web
-        run: npm run build
+        run: |
+          npm run build -- --outDir ../backend/src/paperseek_community/static --emptyOutDir
+          git -C .. diff --exit-code -- backend/src/paperseek_community/static
 
   mcp:
     name: Independent MCP distribution (${{ matrix.os }})
