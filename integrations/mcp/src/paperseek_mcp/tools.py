@@ -39,6 +39,7 @@ def register_tools(server: MCPServer, application: PaperSeekApplication) -> None
         field_ids: list[str] | None = None,
         field_hint: str = "",
         citation_enabled: bool | None = None,
+        fetch_abstracts: bool = False,
         idempotency_key: str = "",
     ) -> dict[str, Any]:
         """Start a durable PaperSeek run and return its run_id immediately."""
@@ -49,6 +50,7 @@ def register_tools(server: MCPServer, application: PaperSeekApplication) -> None
             field_ids=field_ids or [],
             field_hint=field_hint,
             citation_enabled=citation_enabled,
+            fetch_abstracts=fetch_abstracts,
             idempotency_key=idempotency_key,
         )
 

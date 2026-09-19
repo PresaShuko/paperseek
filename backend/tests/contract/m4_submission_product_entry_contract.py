@@ -635,6 +635,7 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "Custom loopback composition",
             "arxiv",
             {
+                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "llm": {
                     "provider": "custom",
@@ -664,6 +665,7 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "External retrieval composition",
             "openalex",
             {
+                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "retrieval": {
                     "embedding": {
@@ -719,6 +721,7 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "Structured source fields",
             "openalex",
             {
+                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "field_ids": ["17", "22"],
                 "field_hint": "",
@@ -753,6 +756,7 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "Context-preserving source search",
             "paperhub",
             {
+                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "field_ids": [],
                 "field_hint": "distributed systems",

@@ -55,6 +55,7 @@ export interface components {
     "DiagnosticSubmission": {
         "citation_enabled"?: boolean | null;
         "credentials"?: components["schemas"]["RunCredentialsInput"];
+        "fetch_abstracts"?: boolean;
         "field_hint"?: string;
         "field_ids"?: Array<string>;
         "llm"?: components["schemas"]["LLMRouteInput"];
@@ -210,6 +211,7 @@ export interface components {
     "RunSubmission": {
         "citation_enabled"?: boolean | null;
         "credentials"?: components["schemas"]["RunCredentialsInput"];
+        "fetch_abstracts"?: boolean;
         "field_hint"?: string;
         "field_ids"?: Array<string>;
         "llm"?: components["schemas"]["LLMRouteInput"];

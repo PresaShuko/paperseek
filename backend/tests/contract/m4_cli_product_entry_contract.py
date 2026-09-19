@@ -85,6 +85,7 @@ class M4CliProductEntryContract(unittest.TestCase):
                     [
                         "search",
                         "durable literature search",
+                        "--fetch-abstracts",
                         "--database",
                         str(database),
                         "--source",
@@ -108,6 +109,7 @@ class M4CliProductEntryContract(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(detail.status, RunStatus.COMPLETED)
+        self.assertTrue(detail.config_snapshot["fetch_abstracts"])
         self.assertEqual([item.record.uid for item in results], ["fixed-001"])
         self.assertEqual([item.id for item in history], [detail.id])
 

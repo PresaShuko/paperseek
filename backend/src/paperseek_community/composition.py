@@ -135,6 +135,7 @@ class CommunityExecutionResolver:
                 ),
                 query_budget=query_budget,
                 citation_enabled=bool(run.config_snapshot.get("citation_enabled", True)),
+                fetch_abstracts=run.config_snapshot["fetch_abstracts"],
                 citation_seed_count=preset.citation_seed_count,
                 citation_per_seed=preset.citation_per_seed,
                 citation_max_records=preset.citation_max_records,

@@ -142,6 +142,7 @@ def main() -> None:
         executable,
         "search",
         "durable literature search",
+        "--fetch-abstracts",
         "--database",
         str(database),
         "--source",
@@ -160,6 +161,8 @@ def main() -> None:
     uow = SQLiteRunUnitOfWork(database)
     try:
         service = RunQueryService(uow, FileArtifactStore(database.parent))
+        assert service.get_run(controlled_payload["run_id"]).config_snapshot["fetch_abstracts"] is True
+        assert service.get_run(missing_payload["run_id"]).config_snapshot["fetch_abstracts"] is False
         results = service.get_result_page(controlled_payload["run_id"], page_size=10).results
         history_ids = {item.id for item in service.get_history_page(page_size=20).items}
     finally:

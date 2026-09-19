@@ -33,6 +33,7 @@ class RecordingApplication:
         return {"operation": name, **values}
 
     def start_search(self, **values):
+        self._record("start_search", values)
         return {"run_id": "00000000-0000-0000-0000-000000000001", "status": "queued"}
 
     def get_search_status(self, **values):
@@ -81,15 +82,19 @@ class M4MCPToolRegistryContract(unittest.TestCase):
         self.assertEqual([tool.name for tool in tools], EXPECTED_TOOLS)
         self.assertEqual(server.name, "paperseek")
         self.assertEqual(server.version, "0.3.0")
+        abstract_option = tools[0].input_schema["properties"]["fetch_abstracts"]
+        self.assertEqual(abstract_option["type"], "boolean")
+        self.assertFalse(abstract_option["default"])
 
     def test_start_returns_run_id_without_waiting_for_completion(self):
         from paperseek_mcp.server import create_server
 
-        server = create_server(RecordingApplication())
+        application = RecordingApplication()
+        server = create_server(application)
         result = asyncio.run(
             server.call_tool(
                 "start_search",
-                {"question": "Durable literature search", "source": "openalex"},
+                {"question": "Durable literature search", "source": "openalex", "fetch_abstracts": True},
             )
         )
 
@@ -97,6 +102,7 @@ class M4MCPToolRegistryContract(unittest.TestCase):
             _payload(result),
             {"run_id": "00000000-0000-0000-0000-000000000001", "status": "queued"},
         )
+        self.assertTrue(application.calls[0][1]["fetch_abstracts"])
 
     def test_cursor_cancel_export_and_capability_arguments_reach_one_application(self):
         from paperseek_mcp.server import create_server

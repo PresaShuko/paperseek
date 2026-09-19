@@ -234,13 +234,17 @@ class M4CrossrefAbstractCompositionContract(unittest.IsolatedAsyncioTestCase):
         credentials = EncryptedRunCredentialStore(database)
         return database, uow, submission_service, execution_service, query_service, credentials
 
-    def _submit(self, service: RunSubmissionService, *, source: str = "openalex"):
+    def _submit(
+        self, service: RunSubmissionService, *, source: str = "openalex",
+        fetch_abstracts: bool | None = True,
+    ):
         prepared = prepare_run_submission(
             RunSubmission(
                 question="controlled Community abstract composition",
                 source=source,
                 search_budget="fast",
                 citation_enabled=False,
+                **({"fetch_abstracts": fetch_abstracts} if fetch_abstracts is not None else {}),
             ),
             _settings(),
         )
@@ -258,11 +262,12 @@ class M4CrossrefAbstractCompositionContract(unittest.IsolatedAsyncioTestCase):
         *,
         crossref_outcome: str,
         with_doi: bool = True,
+        fetch_abstracts: bool | None = True,
     ):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             database, uow, submission, execution, query, credentials = self._create_services(root)
-            run = self._submit(submission)
+            run = self._submit(submission, fetch_abstracts=fetch_abstracts)
             controlled = ControlledProductHTTP(
                 crossref_outcome=crossref_outcome,
                 with_doi=with_doi,
@@ -339,6 +344,18 @@ class M4CrossrefAbstractCompositionContract(unittest.IsolatedAsyncioTestCase):
                 if "execution" in locals() and execution.close is not None:
                     await execution.close()
                 uow.close()
+
+    async def test_default_product_run_does_not_request_external_abstracts(self) -> None:
+        for option in (None, False):
+            with self.subTest(fetch_abstracts=option):
+                detail, results, _artifacts, controlled, _database = await self._execute_product_run(
+                    crossref_outcome="success", fetch_abstracts=option,
+                )
+                self.assertEqual(detail.status, RunStatus.COMPLETED)
+                self.assertEqual(len(results), 5)
+                self.assertTrue(all(item.record.doi for item in results))
+                self.assertTrue(all(item.record.abstract == "" for item in results))
+                self.assertEqual(controlled.abstract_requests, [])
 
     async def test_product_run_enriches_doi_and_preserves_provider_record(self) -> None:
         detail, results, _artifacts, controlled, _database = await self._execute_product_run(

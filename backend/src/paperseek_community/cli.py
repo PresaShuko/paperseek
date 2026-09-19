@@ -88,6 +88,10 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument("--field-hint", default="")
     search.add_argument("--wos-db", default=None)
     search.add_argument(
+        "--fetch-abstracts", action="store_true",
+        help="Fill missing abstracts from Crossref DOI records (off by default).",
+    )
+    search.add_argument(
         "--citation-enabled",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -270,6 +274,7 @@ def _search(
         field_hint=args.field_hint,
         wos_db=args.wos_db,
         citation_enabled=args.citation_enabled,
+        fetch_abstracts=args.fetch_abstracts,
         retrieval=RetrievalRouteInput(
             crossref_metadata_enrichment=args.retrieval_crossref_enrichment,
         ),

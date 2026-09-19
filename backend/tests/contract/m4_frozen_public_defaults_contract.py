@@ -39,6 +39,7 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
         self.assertEqual(prepared.config_snapshot["question"], "evidence synthesis")
         self.assertEqual(prepared.config_snapshot["search_budget"], "fast")
         self.assertTrue(prepared.config_snapshot["citation_enabled"])
+        self.assertFalse(prepared.config_snapshot["fetch_abstracts"])
         self.assertEqual(
             prepared.config_snapshot["llm"],
             {
@@ -75,6 +76,19 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
                 settings(),
             )
         self.assertEqual(raised.exception.code, "unsupported_source_capability")
+
+    def test_abstract_enrichment_is_explicit_and_part_of_run_identity(self) -> None:
+        omitted = prepare_run_submission(RunSubmission(question="evidence synthesis"), settings())
+        disabled = prepare_run_submission(
+            RunSubmission(question="evidence synthesis", fetch_abstracts=False), settings()
+        )
+        enabled = prepare_run_submission(
+            RunSubmission(question="evidence synthesis", fetch_abstracts=True), settings()
+        )
+        self.assertEqual(omitted.config_snapshot, disabled.config_snapshot)
+        self.assertEqual(omitted.request_digest, disabled.request_digest)
+        self.assertTrue(enabled.config_snapshot["fetch_abstracts"])
+        self.assertNotEqual(enabled.request_digest, disabled.request_digest)
 
     def test_public_values_are_normalized_and_blank_question_is_rejected(self) -> None:
         prepared = prepare_run_submission(
@@ -119,6 +133,9 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
         self.assertEqual(args.source, "openalex")
         self.assertEqual(args.search_budget, "fast")
         self.assertIsNone(args.citation_enabled)
+        self.assertFalse(args.fetch_abstracts)
+        enabled = _parser().parse_args(["search", "evidence synthesis", "--fetch-abstracts"])
+        self.assertTrue(enabled.fetch_abstracts)
 
 
 if __name__ == "__main__":

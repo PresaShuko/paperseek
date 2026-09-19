@@ -88,6 +88,7 @@ class RunConfigurationInput(BaseModel):
     field_ids: list[str] = Field(default_factory=list, max_length=100)
     field_hint: str = Field(default="", max_length=500)
     citation_enabled: bool | None = None
+    fetch_abstracts: bool = False
     wos_db: str | None = Field(default=None, max_length=64)
     llm: LLMRouteInput = Field(default_factory=LLMRouteInput)
     retrieval: RetrievalRouteInput = Field(default_factory=RetrievalRouteInput)
@@ -213,6 +214,7 @@ def prepare_run_submission(
         "field_ids": field_ids,
         "field_hint": field_hint,
         "citation_enabled": citation_enabled,
+        "fetch_abstracts": submission.fetch_abstracts,
         "wos_db": normalize_wos_db(submission.wos_db, settings.wos_db),
         "llm": resolve_llm_route(settings, submission.llm.model_dump()),
         "retrieval": {
