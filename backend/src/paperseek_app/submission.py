@@ -131,6 +131,13 @@ class PreparedRunSubmission:
     request_digest: str
 
 
+def run_config_digest(snapshot: dict[str, object]) -> str:
+    """Fingerprint the resolved, credential-free configuration at submission time."""
+    return hashlib.sha256(
+        json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _invalid(code: str, message: str) -> None:
     raise SubmissionValidationError(code, message)
 
@@ -264,19 +271,11 @@ def prepare_run_submission(
         snapshot["service_mode"] = submission.service.mode
         if submission.service.connection_id is not None:
             snapshot["connection_id"] = str(submission.service.connection_id)
-    digest = hashlib.sha256(
-        json.dumps(
-            snapshot,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
     return PreparedRunSubmission(
         question=question,
         source=source,
         config_snapshot=snapshot,
-        request_digest=digest,
+        request_digest=run_config_digest(snapshot),
     )
 
 
@@ -287,4 +286,5 @@ __all__ = [
     "RunSubmission",
     "SubmissionValidationError",
     "prepare_run_submission",
+    "run_config_digest",
 ]
