@@ -138,10 +138,10 @@ export interface components {
         "rank" : number;
         "reasoning"?: string;
         "relevance_reason"?: string;
-        "relevance_score"?: number;
+        "relevance_score"?: number | null;
         "retrieval_lanes"?: Array<string>;
         "retrieval_score"?: number;
-        "score"?: number;
+        "score"?: number | null;
         "source"?: string;
         "source_rank"?: number;
         "source_raw_id"?: string;

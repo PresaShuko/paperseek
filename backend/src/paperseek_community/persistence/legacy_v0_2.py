@@ -579,7 +579,7 @@ def _mapped_results(
             links = raw.get("links") if isinstance(raw.get("links"), dict) else {}
             year = _optional_int(row["year"] if row["year"] is not None else raw.get("year"))
             citations = _nonnegative_int(row["citation_count"], raw.get("citation_count"), 0)
-            score = _float(row["relevance_score"], raw.get("relevance_score"), raw.get("score"), 0.0)
+            score = _float_or_none(row["relevance_score"], raw.get("relevance_score"), raw.get("score"))
             uid = str(row["paper_uid"] or raw.get("uid") or raw.get("id") or "").strip()
             url = str(row["url"] or raw.get("url") or raw.get("id") or uid).strip()
             venue = str(row["venue"] or raw.get("venue") or raw.get("source") or "").strip()
@@ -783,6 +783,15 @@ def _float(*values: Any) -> float:
         except (TypeError, ValueError):
             continue
     return 0.0
+
+
+def _float_or_none(*values: Any) -> float | None:
+    for value in values:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _json_dump(value: Any) -> str:

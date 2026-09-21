@@ -83,7 +83,7 @@ class RankingScore(CoreModel):
 
 class RankedPaper(CoreModel):
     document: PaperRecord
-    score: float = 0
+    score: float | None = None
     reasoning: str = ""
     provenance: dict[str, Any] = Field(default_factory=dict)
 
@@ -684,7 +684,7 @@ class FinalPaperResult(CoreModel):
     abstract: str = ""
     keywords: str = ""
     citation_count: int = 0
-    relevance_score: float = 0
+    relevance_score: float | None = None
     relevance_reason: str = ""
     source_rank: int = 0
     retrieval_score: float = 0
@@ -693,7 +693,7 @@ class FinalPaperResult(CoreModel):
     links: dict[str, Any] = Field(default_factory=dict)
     keywords_text: str = ""
     authors_text: str = ""
-    score: float = 0
+    score: float | None = None
     provider: str = ""
     uid: str = ""
     publish_year: int | None = None

@@ -66,9 +66,23 @@ class HttpLLMAdapter:
         try:
             choice = (response.json().get("choices") or [])[0]
             message = choice.get("message") or {}
-            return str(message.get("content") or message.get("reasoning_content") or "") or self._missing()
+            content = message.get("content")
+            if content:
+                # JSON calls must use the final answer only. A reasoning trace is
+                # never a valid JSON response, even when the provider leaves
+                # "content" empty (frozen-baseline rule for response_format calls).
+                return str(content)
         except (ValueError, TypeError, IndexError, AttributeError) as exc:
             raise LLMRequestError("The LLM chat response is invalid.", code="provider_invalid_response") from exc
+        if choice.get("finish_reason") == "length":
+            raise LLMRequestError(
+                "The LLM response was truncated before the final content completed.",
+                code="provider_output_truncated",
+            )
+        raise LLMRequestError(
+            "The LLM response did not contain final content.",
+            code="provider_empty_content",
+        )
 
     async def _responses(self, messages, temperature: float, max_tokens: int) -> str:
         instructions = "\n\n".join(item["content"] for item in messages if item.get("role") == "system")

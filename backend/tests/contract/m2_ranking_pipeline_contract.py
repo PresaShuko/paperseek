@@ -401,7 +401,7 @@ class M2RankingPipelineContractTest(unittest.TestCase):
         )
 
         self.assertEqual([item.document.uid for item in result.items], [record.uid for record in documents()])
-        self.assertTrue(all(item.score == 0 for item in result.items))
+        self.assertTrue(all(item.score is None for item in result.items))
         self.assertEqual(result.warnings, ["ranking_failed_local_order_retained"])
         self.assertIn("ranking.degraded", [event.event_type for event in observer.events])
         self.assertEqual(observer.checkpoints, [])

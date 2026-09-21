@@ -605,6 +605,7 @@ class RankingPipeline:
                                     "candidate_count": len(batch),
                                     "concurrency": workers,
                                     "rate_limited": self._is_rate_limit_error(outcome),
+                                    "error_code": str(getattr(outcome, "code", "") or ""),
                                 },
                             )
                             continue
@@ -762,6 +763,7 @@ class RankingPipeline:
             {
                 "code": "ranking_failed_local_order_retained",
                 "error_type": type(exc).__name__,
+                "error_code": str(getattr(exc, "code", "") or ""),
                 "failed_batches": failed_batches,
                 "failed_candidates": failed_candidates,
             },

@@ -211,7 +211,9 @@ class FinalResultAssembler:
         return output.getvalue()
 
     @staticmethod
-    def _number(value: float) -> str:
+    def _number(value: float | None) -> str:
+        if value is None:
+            return ""
         return str(int(value)) if float(value).is_integer() else str(value)
 
     @staticmethod
