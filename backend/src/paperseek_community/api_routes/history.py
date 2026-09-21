@@ -19,12 +19,14 @@ def register_history_routes(app: FastAPI, *, database: Path) -> None:
     def get_history(
         cursor: str | None = None,
         page_size: int = Query(default=50, ge=1, le=200),
+        query: str | None = None,
     ) -> HistoryPage:
         run_service, uow = open_query_service(database)
         try:
             return run_service.get_history_page(
                 cursor=cursor,
                 page_size=page_size,
+                query=query,
             ).model_dump(mode="json")
         except InvalidCursor as exc:
             raise ApiError(400, "invalid_cursor", "The history cursor is invalid.") from exc

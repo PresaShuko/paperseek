@@ -5,7 +5,7 @@ import binascii
 from datetime import datetime
 import json
 
-from paperseek_app.errors import ArtifactNotFound, InvalidCursor
+from paperseek_app.errors import ArtifactNotFound, InvalidCursor, InvalidResultQuery
 from paperseek_app.models import (
     ArtifactContent,
     ArtifactDescriptor,
@@ -62,47 +62,144 @@ class RunQueryService:
         self.uow.get_run(run_id)
         return self.uow.list_artifacts(run_id)
 
+    _RESULT_SORTS = frozenset({"rank", "score", "citations", "year"})
+    _RESULT_METADATA_FILTERS = frozenset({"abstract", "doi", "pdf"})
+
     def get_result_page(
         self,
         run_id: str,
         *,
         cursor: str | None = None,
         page_size: int = 50,
+        query: str | None = None,
+        min_score: float | None = None,
+        metadata: str | None = None,
+        sort: str = "rank",
     ) -> ResultPage:
         self._validate_page_size(page_size)
+        if sort not in self._RESULT_SORTS:
+            raise InvalidResultQuery("The result sort is unsupported.")
+        if metadata is not None and metadata not in self._RESULT_METADATA_FILTERS:
+            raise InvalidResultQuery("The metadata filter is unsupported.")
+        if min_score is not None and not 0 <= min_score <= 10:
+            raise InvalidResultQuery("The minimum score is out of range.")
         run = self.uow.get_run(run_id)
-        after_rank = 0
-        if cursor:
-            payload = self._decode_cursor(cursor, "results")
-            if payload.get("run_id") != run_id:
-                raise InvalidCursor("The result cursor belongs to another run.")
-            try:
-                after_rank = int(payload["rank"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise InvalidCursor("The result cursor is invalid.") from exc
-            if after_rank < 1:
-                raise InvalidCursor("The result cursor is invalid.")
-        rows = self.uow.get_results(
-            run_id,
-            after_rank=after_rank,
-            limit=page_size + 1,
-        )
-        visible = [
+        items = [
             item.model_copy(
                 update={"metadata_status": self._metadata_status(item.record, run.warnings)}
             )
-            for item in rows[:page_size]
+            for item in self.uow.get_results(run_id)
         ]
+        fingerprint = self._result_fingerprint(query, min_score, metadata, sort)
+        offset = 0
+        if cursor:
+            payload = self._decode_cursor(cursor, "results")
+            if payload.get("run_id") != run_id or payload.get("filter") != fingerprint:
+                raise InvalidCursor("The result cursor belongs to another run or filter.")
+            try:
+                offset = int(payload["offset"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise InvalidCursor("The result cursor is invalid.") from exc
+            if offset < 1:
+                raise InvalidCursor("The result cursor is invalid.")
+        matched = [
+            item
+            for item in items
+            if self._result_matches(item.record, query, min_score, metadata)
+        ]
+        ordered = self._sort_results(matched, sort)
+        visible = ordered[offset:offset + page_size]
         next_cursor = None
-        if len(rows) > page_size:
+        if len(ordered) > offset + page_size:
             next_cursor = self._encode_cursor(
                 {
                     "scope": "results",
                     "run_id": run_id,
-                    "rank": visible[-1].rank,
+                    "filter": fingerprint,
+                    "offset": offset + page_size,
                 }
             )
-        return ResultPage(results=visible, next_cursor=next_cursor)
+        scored = [item.record.score for item in items if item.record.score is not None]
+        return ResultPage(
+            results=visible,
+            next_cursor=next_cursor,
+            total_count=len(items),
+            matched_count=len(matched),
+            scored_count=len(scored),
+            max_score=max(scored) if scored else None,
+        )
+
+    @staticmethod
+    def _result_fingerprint(
+        query: str | None,
+        min_score: float | None,
+        metadata: str | None,
+        sort: str,
+    ) -> str:
+        return json.dumps(
+            {
+                "query": (query or "").strip(),
+                "min_score": min_score,
+                "metadata": metadata or "",
+                "sort": sort,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _result_matches(
+        record,
+        query: str | None,
+        min_score: float | None,
+        metadata: str | None,
+    ) -> bool:
+        if min_score is not None and (record.score is None or record.score < min_score):
+            return False
+        if metadata == "abstract" and not record.abstract.strip():
+            return False
+        if metadata == "doi" and not record.doi.strip():
+            return False
+        if metadata == "pdf" and not record.pdf_url.strip():
+            return False
+        if query and query.strip():
+            haystack = " ".join(
+                [
+                    record.title,
+                    record.authors_text,
+                    record.abstract,
+                    record.doi,
+                    record.venue,
+                    record.source,
+                    record.keywords_text,
+                ]
+            ).casefold()
+            if query.strip().casefold() not in haystack:
+                return False
+        return True
+
+    @staticmethod
+    def _sort_results(items: list[PersistedResult], sort: str) -> list[PersistedResult]:
+        if sort == "score":
+            return sorted(
+                items,
+                key=lambda item: (
+                    item.record.score is None,
+                    -(item.record.score or 0),
+                    item.rank,
+                ),
+            )
+        if sort == "citations":
+            return sorted(items, key=lambda item: (-item.record.citation_count, item.rank))
+        if sort == "year":
+            return sorted(
+                items,
+                key=lambda item: (
+                    -(item.record.publish_year or item.record.year or 0),
+                    item.rank,
+                ),
+            )
+        return sorted(items, key=lambda item: item.rank)
 
     @staticmethod
     def _metadata_status(record, warnings: list[str]) -> str:
@@ -120,8 +217,11 @@ class RunQueryService:
         *,
         cursor: str | None = None,
         page_size: int = 50,
+        query: str | None = None,
     ) -> HistoryPage:
         self._validate_page_size(page_size)
+        if query is not None and query.strip():
+            return self._search_history_page(cursor=cursor, page_size=page_size, query=query)
         before_created_at = None
         before_id = None
         if cursor:
@@ -139,20 +239,7 @@ class RunQueryService:
             limit=page_size + 1,
         )
         visible = rows[:page_size]
-        items = [
-            HistoryItem(
-                id=item.id,
-                question=item.question,
-                source=item.source,
-                status=item.status,
-                result_count=item.result_count,
-                error_code=item.error_code,
-                warnings=item.warnings,
-                created_at=item.created_at,
-                finished_at=item.finished_at,
-            )
-            for item in visible
-        ]
+        items = [self._history_item(item) for item in visible]
         next_cursor = None
         if len(rows) > page_size:
             last = visible[-1]
@@ -164,6 +251,71 @@ class RunQueryService:
                 }
             )
         return HistoryPage(items=items, next_cursor=next_cursor)
+
+    def _search_history_page(
+        self,
+        *,
+        cursor: str | None,
+        page_size: int,
+        query: str,
+    ) -> HistoryPage:
+        needle = query.strip().casefold()
+        offset = 0
+        if cursor:
+            payload = self._decode_cursor(cursor, "history-search")
+            if payload.get("query") != needle:
+                raise InvalidCursor("The history cursor belongs to another search.")
+            try:
+                offset = int(payload["offset"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise InvalidCursor("The history cursor is invalid.") from exc
+            if offset < 1:
+                raise InvalidCursor("The history cursor is invalid.")
+        matched = [
+            item
+            for item in self._list_all_history_items()
+            if needle
+            in " ".join([item.question, item.source, item.status, item.error_code]).casefold()
+        ]
+        visible = matched[offset:offset + page_size]
+        next_cursor = None
+        if len(matched) > offset + page_size:
+            next_cursor = self._encode_cursor(
+                {"scope": "history-search", "query": needle, "offset": offset + page_size}
+            )
+        return HistoryPage(items=visible, next_cursor=next_cursor, matched_count=len(matched))
+
+    def _list_all_history_items(self) -> list[HistoryItem]:
+        items: list[HistoryItem] = []
+        before_created_at = None
+        before_id = None
+        while True:
+            rows = self.uow.list_history(
+                before_created_at=before_created_at,
+                before_id=before_id,
+                limit=self._MAX_PAGE_SIZE + 1,
+            )
+            visible = rows[: self._MAX_PAGE_SIZE]
+            items.extend(self._history_item(item) for item in visible)
+            if len(rows) <= self._MAX_PAGE_SIZE:
+                return items
+            last = visible[-1]
+            before_created_at = last.created_at
+            before_id = last.id
+
+    @staticmethod
+    def _history_item(item) -> HistoryItem:
+        return HistoryItem(
+            id=item.id,
+            question=item.question,
+            source=item.source,
+            status=item.status,
+            result_count=item.result_count,
+            error_code=item.error_code,
+            warnings=item.warnings,
+            created_at=item.created_at,
+            finished_at=item.finished_at,
+        )
 
     def list_user_artifacts(self, run_id: str) -> list[ArtifactDescriptor]:
         self.uow.get_run(run_id)

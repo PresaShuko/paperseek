@@ -32,6 +32,10 @@ class InvalidCursor(RunError):
     pass
 
 
+class InvalidResultQuery(RunError):
+    pass
+
+
 class IncompatibleCheckpoint(RunError):
     pass
 

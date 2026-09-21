@@ -92,6 +92,7 @@ export interface components {
       };
     "HistoryPage": {
         "items"?: Array<components["schemas"]["HistoryItem"]>;
+        "matched_count"?: number;
         "next_cursor"?: string | null;
       };
     "LLMRouteInput": {
@@ -152,8 +153,12 @@ export interface components {
         "year"?: number | null;
       };
     "ResultPageOutput": {
+        "matched_count"?: number;
+        "max_score"?: number | null;
         "next_cursor"?: string | null;
         "results"?: Array<components["schemas"]["ResultOutput"]>;
+        "scored_count"?: number;
+        "total_count"?: number;
       };
     "RetrievalRouteInput": {
         "crossref_metadata_enrichment"?: boolean;

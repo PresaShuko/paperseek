@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
 
-from paperseek_app.errors import ArtifactNotFound, InvalidCursor, RunNotFound
+from paperseek_app.errors import ArtifactNotFound, InvalidCursor, InvalidResultQuery, RunNotFound
 from paperseek_app.models import RunAudit
 from paperseek_community.api_dependencies import ApiError, content_response, open_query_service
 from paperseek_app.api_schemas import CitationMapOutput, ResultPageOutput
@@ -17,6 +17,10 @@ def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
         run_id: str,
         cursor: str | None = None,
         page_size: int = Query(default=50, ge=1, le=200),
+        query: str | None = None,
+        min_score: float | None = None,
+        metadata: str | None = None,
+        sort: str = "rank",
     ) -> ResultPageOutput:
         run_service, uow = open_query_service(database)
         try:
@@ -24,6 +28,10 @@ def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
                 run_id,
                 cursor=cursor,
                 page_size=page_size,
+                query=query,
+                min_score=min_score,
+                metadata=metadata,
+                sort=sort,
             )
             return {
                 "results": [
@@ -34,11 +42,17 @@ def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
                     for item in page.results
                 ],
                 "next_cursor": page.next_cursor,
+                "total_count": page.total_count,
+                "matched_count": page.matched_count,
+                "scored_count": page.scored_count,
+                "max_score": page.max_score,
             }
         except RunNotFound as exc:
             raise ApiError(404, "run_not_found", "Run not found.") from exc
         except InvalidCursor as exc:
             raise ApiError(400, "invalid_cursor", "The result cursor is invalid.") from exc
+        except InvalidResultQuery as exc:
+            raise ApiError(400, "invalid_result_query", str(exc) or "The result query is invalid.") from exc
         finally:
             uow.close()
 
