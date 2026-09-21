@@ -108,6 +108,7 @@ test("Chinese search localizes capability and credential structure supplied by t
 
   await page.goto("/search");
   await expect(page.getByTestId("source-filter")).toContainText("研究领域");
+  await page.getByTestId("field-selector-toggle").click();
   await expect(page.getByTestId("source-filter")).toContainText("医学");
   await expect(page.getByTestId("source-filter")).toContainText("健康科学");
   await expect(page.getByTestId("source-credential")).toContainText("OpenAlex API 密钥");
@@ -174,25 +175,29 @@ test("workflow primary stages and normal progress use structured facts while mac
   await expect(page.getByTestId("stage-ranking-audit")).not.toContainText("batch_count");
   await expect(page.getByTestId("stage-ranking-audit")).not.toContainText("enriched_count");
 
+  const details = page.getByTestId("run-details");
+  await expect(page.getByTestId("run-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(details.getByTestId("system-log-audit")).toHaveCount(0);
+  await page.getByTestId("run-details-toggle").click();
+
+  await page.getByTestId("run-details-tab-process").click();
   for (const area of ["retrieval", "ranking", "enrichment"]) {
-    await page.getByTestId(`${area}-progress-toggle`).click();
-    const section = page.getByTestId(`${area}-progress`);
-    await expect(section.locator("pre")).toHaveCount(0);
-    await expect(page.getByTestId(`${area}-progress-rows`)).toBeVisible();
+    const rows = page.getByTestId(`${area}-progress-audit`);
+    await expect(rows).toBeVisible();
+    await expect(rows.locator("pre")).toHaveCount(0);
   }
   await expect(page.getByTestId("retrieval-progress-audit")).not.toContainText("candidate_count");
   await expect(page.getByTestId("ranking-progress-audit")).not.toContainText("batch_count");
   await expect(page.getByTestId("enrichment-progress-audit")).not.toContainText("enriched_count");
 
-  await page.getByTestId("query-portfolio-toggle").click();
-  await expect(page.getByTestId("query-portfolio").locator("pre")).toHaveCount(0);
-  await expect(page.getByTestId("query-portfolio")).toContainText("Direct evidence");
+  await expect(page.getByTestId("query-portfolio-audit")).toContainText("Direct evidence");
+  await expect(page.getByTestId("run-details-tab-process")).toHaveAttribute("aria-selected", "true");
 
-  await expect(page.getByTestId("system-log-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.getByTestId("run-details-tab-log").click();
+  await expect(page.getByTestId("system-log-audit")).toContainText("candidate_count");
+  await page.getByTestId("run-details-tab-diagnostics").click();
   await expect(page.getByTestId("technical-audit-section")).not.toHaveAttribute("open", "");
   await expect(page.getByTestId("candidate-recovery-section")).not.toHaveAttribute("open", "");
-  await page.getByTestId("system-log-toggle").click();
-  await expect(page.getByTestId("system-log-audit")).toContainText("candidate_count");
   await page.getByTestId("technical-audit-toggle").click();
   await expect(page.getByTestId("technical-audit")).toContainText("candidate_queue");
 });
@@ -202,14 +207,16 @@ test("full run identifier is kept out of the default primary layer", async ({ pa
   await page.goto(`/runs/${runId}`);
 
   await expect(page.getByTestId("run-primary-summary")).not.toContainText(runId);
-  await expect(page.getByTestId("run-primary-summary")).toContainText("OpenAlex");
+  await expect(page.locator(".search-form--readonly")).toContainText("OpenAlex");
   await expect(page.getByTestId("run-primary-summary").getByText("openalex", { exact: true })).toHaveCount(0);
-  const diagnostics = page.getByTestId("run-diagnostics-toggle");
-  await expect(diagnostics).toBeVisible();
-  await expect(diagnostics).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByTestId("run-diagnostics").getByText(runId, { exact: true })).toBeHidden();
-  await diagnostics.click();
-  await expect(page.getByTestId("run-diagnostics").getByText(runId, { exact: true })).toBeVisible();
+  const details = page.getByTestId("run-details");
+  const toggle = page.getByTestId("run-details-toggle");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(details.getByText(runId, { exact: true })).toHaveCount(0);
+  await toggle.click();
+  await page.getByTestId("run-details-tab-diagnostics").click();
+  await expect(details.getByText(runId, { exact: true })).toBeVisible();
 });
 
 test("minimum score has a dedicated localized all-scores option", async ({ page }) => {
@@ -320,14 +327,15 @@ test("history keeps run identifiers and raw durable events in a folded technical
   await expect(primary).toContainText("Ranking was degraded; the available order was retained.");
   await expect(primary).toContainText("The run completed with an additional warning.");
   for (const code of warningCodes) await expect(primary).not.toContainText(code);
-  const audit = page.getByTestId("history-technical-audit");
-  await expect(audit).not.toHaveAttribute("open", "");
-  await expect(audit.getByText(runId, { exact: true })).toBeHidden();
-  await page.getByTestId("history-technical-audit-toggle").click();
+  const audit = page.getByTestId("history-run-details");
+  await expect(page.getByTestId("history-run-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(audit.getByText(runId, { exact: true })).toHaveCount(0);
+  await page.getByTestId("history-run-details-toggle").click();
+  await expect(audit.getByTestId("system-log-audit")).toContainText("ranking.completed");
+  await expect(audit.getByTestId("system-log-audit")).toContainText("candidate_count");
+  for (const code of warningCodes) await expect(audit.getByTestId("system-log-audit")).toContainText(code);
+  await page.getByTestId("history-run-details-tab-diagnostics").click();
   await expect(audit.getByText(runId, { exact: true })).toBeVisible();
-  await expect(audit).toContainText("ranking.completed");
-  await expect(audit).toContainText("candidate_count");
-  for (const code of warningCodes) await expect(audit).toContainText(code);
 
   await page.getByRole("button", { name: "中文" }).click();
   await expect(primary).toContainText("部分数据源召回通道已降级。");
@@ -358,6 +366,6 @@ test("run warning projection is bilingual while the folded system log preserves 
   await page.getByRole("button", { name: "中文" }).click();
   await expect(primary).toContainText("部分数据源召回通道已降级。");
   await expect(primary).toContainText("部分摘要未能补全。");
-  await page.getByTestId("system-log-toggle").click();
+  await page.getByTestId("run-details-toggle").click();
   for (const code of warningCodes) await expect(page.getByTestId("system-log-audit")).toContainText(code);
 });

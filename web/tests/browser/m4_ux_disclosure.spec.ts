@@ -84,7 +84,7 @@ test("idle search keeps four stages collapsed without placeholder progress", asy
     await expect(page.getByTestId(`stage-${key}-toggle`)).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByTestId(`stage-${key}`)).toHaveAttribute("data-state", "idle");
   }
-  await expect(page.getByTestId("system-log")).toHaveCount(0);
+  await expect(page.getByTestId("run-details")).toHaveCount(0);
 });
 
 test("active stage expands with server-time elapsed; manual close survives later events", async ({ page }) => {
@@ -172,4 +172,40 @@ test("a cancelled run freezes stages and marks them cancelled", async ({ page })
   await expect(page.getByTestId("run-status")).toHaveText("Cancelled", { timeout: 15_000 });
   await expect(page.getByText("Cancelled at the last confirmed progress; late responses were discarded.").first()).toBeAttached();
   await expect(page.getByTestId("stage-results")).toHaveAttribute("data-state", "idle");
+});
+
+test("run details stays closed by default and gates technical content behind tabs", async ({ page }) => {
+  const events = buildEvents();
+  const gate = await mockTimeline(page, events, "completed");
+  gate.released = events.length;
+  await page.goto(`/runs/${runId}`);
+  await expect(page.getByTestId("run-status")).toHaveText("Completed", { timeout: 15_000 });
+
+  const toggle = page.getByTestId("run-details-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
+  await expect(page.getByTestId("technical-audit")).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const logTab = page.getByTestId("run-details-tab-log");
+  await expect(logTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("system-log-audit")).toContainText("workflow.completed");
+
+  // W3C tabs: arrows move focus without activating, Enter activates (§12).
+  await logTab.focus();
+  await page.keyboard.press("ArrowRight");
+  const processTab = page.getByTestId("run-details-tab-process");
+  await expect(processTab).toBeFocused();
+  await expect(processTab).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByTestId("system-log-audit")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(processTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
+  await expect(page.getByTestId("retrieval-progress-audit")).toBeVisible();
+
+  // Closing the container removes its content from the tab order entirely.
+  await toggle.click();
+  await expect(page.getByTestId("run-details-tab-log")).toHaveCount(0);
+  await expect(page.getByTestId("retrieval-progress-audit")).toHaveCount(0);
 });

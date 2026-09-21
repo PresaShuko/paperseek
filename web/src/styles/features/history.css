@@ -77,46 +77,10 @@
   overflow-wrap: anywhere;
 }
 
-.history-primary-detail,
-.history-technical-audit {
+.history-primary-detail {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-
-.history-technical-audit {
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border);
-}
-
-.history-technical-audit > summary {
-  display: flex;
-  align-items: center;
-  min-height: var(--control-h);
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: var(--text-meta);
-  font-weight: 600;
-}
-
-.history-detail .run-id {
-  font-family: var(--font-mono);
-  font-size: var(--text-meta);
-  color: var(--color-text-muted);
-  overflow-wrap: anywhere;
-}
-
-.history-event-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  max-height: 320px;
-  overflow: auto;
-  font-size: var(--text-meta);
-}
-
-.history-event-list code {
-  font-family: var(--font-mono);
 }
 
 .history-detail-actions {

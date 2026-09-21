@@ -10,7 +10,9 @@ test("installed Community entry serves Vue and records an explicit no-key failur
   await expect(page.getByLabel("Data Source")).toHaveValue("openalex");
   await expect(page.getByLabel("Data Source").locator("option")).toHaveCount(8);
   await expect(page.getByRole("group", { name: "Fields of study" })).toBeVisible();
+  await page.getByTestId("field-selector-toggle").click();
   await expect(page.getByLabel("Computer Science", { exact: true })).toBeVisible();
+  await page.getByTestId("field-selector-close").click();
   await expect(page.getByLabel("Expand Citations")).toBeVisible();
   await page.getByText("Advanced settings", { exact: true }).click();
   await expect(page.getByLabel("Embedding Provider")).toHaveValue("local");
@@ -86,8 +88,10 @@ test("installed Community entry serves Vue and records an explicit no-key failur
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("LLM re-ranking");
   await page.getByTestId("stage-results-toggle").click();
   await expect(page.getByTestId("stage-results-audit")).toContainText("Final output");
-  await page.getByTestId("query-portfolio-toggle").click();
+  await page.getByTestId("run-details-toggle").click();
+  await page.getByTestId("run-details-tab-process").click();
   await expect(page.getByTestId("query-portfolio-audit")).toContainText("No query portfolio records.");
+  await page.getByTestId("run-details-tab-diagnostics").click();
   await page.getByTestId("technical-audit-toggle").click();
   await expect(page.getByTestId("technical-audit")).toContainText('"action": "accept"');
   await expect(page.getByTestId("technical-audit")).toContainText("candidate_queue");
@@ -97,6 +101,8 @@ test("installed Community entry serves Vue and records an explicit no-key failur
   await page.reload();
   await page.getByTestId("stage-query-toggle").click();
   await expect(page.getByTestId("stage-query-audit")).toContainText("Search plan prepared");
+  await page.getByTestId("run-details-toggle").click();
+  await page.getByTestId("run-details-tab-diagnostics").click();
   await page.getByTestId("technical-audit-toggle").click();
   await expect(page.getByTestId("technical-audit")).toContainText('"action": "accept"');
   await page.goto(`/runs/${completed.id}/results`);

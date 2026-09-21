@@ -176,7 +176,14 @@ export async function recoverRun(runId: string, loadAudit: typeof api.audit | nu
   const generation = recoveryGeneration;
   const controller = new AbortController();
   recoveryController = controller;
-  resetRunState();
+  // Recovering the run that is already on screen (e.g. right after a 202 accept)
+  // revalidates in place so the workbench does not flash back to a placeholder.
+  if (state.run?.id === runId) {
+    state.error = "";
+    state.cancelPending = false;
+  } else {
+    resetRunState();
+  }
   const initialSnapshot = await api.run(runId, controller.signal);
   if (!isCurrentGeneration(generation) || initialSnapshot.id !== runId) return;
   state.run = initialSnapshot;

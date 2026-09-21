@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { api } from "../../api/client";
 import type { RunDetail, RunEvent } from "../../api/types";
 import { useLocale } from "../../locales";
+import RunDetails from "../search/RunDetails.vue";
 
 const { language, runMessage, sourceName, t } = useLocale();
 const items = ref<RunDetail[]>([]);
@@ -238,16 +239,14 @@ onBeforeUnmount(() => {
             <p v-if="selected.warnings?.length"><strong>{{ t("warnings") }}:</strong> {{ selected.warnings.map((warning) => runMessage(warning)).join(" · ") }}</p>
             <p v-if="selected.error_code"><strong>{{ t("error") }}:</strong> {{ runMessage(selected.error_code, "error") }}</p>
           </div>
-          <details class="history-technical-audit" data-testid="history-technical-audit">
-            <summary data-testid="history-technical-audit-toggle">{{ t("historyTechnicalAudit") }}</summary>
-            <code class="run-id">{{ selected.id }}</code>
-            <section v-if="events.length">
-              <h4>{{ t("events") }}</h4>
-              <div class="history-event-list">
-                <p v-for="event in events" :key="event.sequence"><code>{{ String(event.sequence).padStart(6, "0") }} {{ event.event_type }}</code> · {{ event.stage }} · {{ JSON.stringify(event.payload) }}</p>
-              </div>
-            </section>
-          </details>
+          <RunDetails
+            id-prefix="history-run-details"
+            :run-id="selected.id"
+            :events="events"
+            :audit="null"
+            :last-event-sequence="selected.last_event_sequence ?? events[events.length - 1]?.sequence ?? 0"
+            :versions="selected.versions || null"
+          />
           <div class="history-detail-actions">
             <RouterLink class="button button--small" :to="`/runs/${selected.id}`">{{ t("workflow") }}</RouterLink>
             <RouterLink class="button button--small" :to="`/runs/${selected.id}/results`">{{ t("results") }}</RouterLink>

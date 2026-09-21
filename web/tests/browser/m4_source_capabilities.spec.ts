@@ -157,12 +157,16 @@ test("source capabilities drive native, text, none and citation controls", async
   await sourceSelect.selectOption("openalex");
 
   await expect(page.getByRole("group", { name: "Fields of study" })).toBeVisible();
+  await page.getByTestId("field-selector-toggle").click();
   await expect(page.getByLabel("Computer Science", { exact: true })).toBeVisible();
+  await page.getByTestId("field-selector-close").click();
   await expect(page.getByLabel("Expand Citations")).toBeVisible();
 
   await sourceSelect.selectOption("wos");
   await expect(page.getByRole("group", { name: "Web of Science Category" })).toBeVisible();
+  await page.getByTestId("field-selector-toggle").click();
   await expect(page.getByLabel("Computer Science, Artificial Intelligence", { exact: true })).toBeVisible();
+  await page.getByTestId("field-selector-close").click();
   await expect(page.getByLabel("Expand Citations")).toHaveCount(0);
 
   await sourceSelect.selectOption("googlescholar");
@@ -174,6 +178,14 @@ test("source capabilities drive native, text, none and citation controls", async
   await expect(page.locator('[data-testid="source-filter"]')).toHaveCount(0);
 
   await sourceSelect.selectOption("openalex");
+  await page.getByTestId("field-selector-toggle").click();
+  await page.getByLabel("Computer Science", { exact: true }).check();
+  await page.getByLabel("Engineering", { exact: true }).check();
+  // The collapsed summary always reflects the active restriction (§4.3).
+  await expect(page.getByTestId("field-selector-summary")).toContainText("Computer Science");
+  await expect(page.getByTestId("field-selector-summary")).toContainText("Engineering");
+  await page.getByTestId("field-selector-clear").click();
+  await expect(page.getByTestId("field-selector-summary")).toHaveText("No restriction");
   await page.getByLabel("Computer Science", { exact: true }).check();
   await page.getByLabel("Engineering", { exact: true }).check();
   await page.getByLabel("OpenAlex API Key").fill("ephemeral-source-key");
@@ -213,7 +225,9 @@ test("source capabilities drive native, text, none and citation controls", async
   });
   expect(submittedBody).not.toHaveProperty("field");
 
-  await page.goBack();
+  // Submission used history.replace, so return through the workspace navigation
+  // instead of the browser back button; the draft stays but secrets are cleared.
+  await page.getByRole("navigation", { name: "Workspace section" }).getByRole("link", { name: "Search", exact: true }).click();
   await expect(page).toHaveURL("/search");
   await expect(page.getByLabel("OpenAlex API Key")).toHaveValue("");
   await expect(page.getByLabel("Embedding API Key")).toHaveValue("");

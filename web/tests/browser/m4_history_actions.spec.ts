@@ -150,8 +150,8 @@ test("history refreshes, shows durable detail and deletes one confirmed terminal
   await expect(page.getByTestId("history-primary-detail")).toContainText("Retrieval completed with partial coverage.");
   await expect(page.getByTestId("history-primary-detail")).toContainText("Ranking failed.");
   await expect(page.getByTestId("history-primary-detail")).not.toContainText("ranking_failed");
-  await page.getByTestId("history-technical-audit-toggle").click();
-  await expect(page.getByTestId("history-technical-audit")).toContainText("000002 ranking.failed");
+  await page.getByTestId("history-run-details-toggle").click();
+  await expect(page.getByTestId("history-run-details").getByTestId("system-log-audit")).toContainText("000002 ranking.failed");
 
   await expect(detail.getByRole("link", { name: "Workflow" })).toHaveAttribute("href", `/runs/${runId}`);
   await expect(detail.getByRole("link", { name: "Results" })).toHaveAttribute("href", `/runs/${runId}/results`);

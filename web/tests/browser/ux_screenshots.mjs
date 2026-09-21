@@ -104,8 +104,8 @@ currentRun = runningRun; currentEvents = events;
 await page.goto(`${base}/runs/${runId}`, { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(1200);
 await shot("desktop-run-reconnecting");
-await page.getByTestId("system-log-toggle").click();
-await shot("desktop-run-system-log");
+await page.getByTestId("run-details-toggle").click();
+await shot("desktop-run-details-log");
 
 const viewports = [
   ["desktop", 1366, 900],

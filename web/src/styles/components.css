@@ -311,6 +311,7 @@
 }
 
 [open] > summary .disclosure-icon,
-details[open] .disclosure-icon {
+details[open] .disclosure-icon,
+.disclosure-icon--open {
   transform: rotate(90deg);
 }

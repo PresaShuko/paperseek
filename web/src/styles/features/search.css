@@ -97,12 +97,104 @@ fieldset.filter-group legend {
   color: var(--color-text-muted);
 }
 
-.filter-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+/* Collapsed field selector (§4.3): one-line summary, anchored option panel */
+.field-selector-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-h);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.field-selector-summary:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+.field-selector-value {
+  font-size: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.field-selector-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgb(23 23 23 / 0.12);
+}
+
+.field-selector-search {
+  min-height: var(--control-h);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  width: 100%;
+}
+
+.field-selector-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   max-height: 280px;
   overflow-y: auto;
+}
+
+.field-selector-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field-selector-domain {
+  font-size: var(--text-meta);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.field-selector-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.field-selector-static .field-selector-value {
+  padding: var(--space-2) 0;
+}
+
+/* Run mode: the same form turns read-only but stays readable (§2.2) */
+.search-form--readonly input:disabled,
+.search-form--readonly select:disabled,
+.search-form--readonly textarea:disabled {
+  color: var(--color-text);
+  -webkit-text-fill-color: var(--color-text);
+  opacity: 1;
+  background: var(--color-surface-subtle);
+  cursor: default;
+}
+
+.search-form--readonly .toggle-field:has(input:disabled) {
+  cursor: default;
+}
+
+.run-status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 /* Credential block: requirement note + guidance link beside the input (§5.3) */

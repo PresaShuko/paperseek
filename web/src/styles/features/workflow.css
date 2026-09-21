@@ -293,43 +293,97 @@
   flex-wrap: wrap;
 }
 
-/* System log (§6.4): collapsed by default, monospace, stable order, export entry */
-.log-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+/* Run details (§12): one low-emphasis entry below the four stages; tabs gate all
+   technical content and render lazily only while the container is open. */
+.run-details {
+  border-top: 1px solid var(--color-border);
 }
 
-.log-card > summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 56px;
-  padding: var(--space-3) var(--space-4);
-  cursor: pointer;
-  list-style: none;
-}
-
-.log-card > summary::-webkit-details-marker {
-  display: none;
-}
-
-.log-title {
-  flex: 1;
+.run-details-toggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
   font-weight: 600;
-  min-width: 0;
+  cursor: pointer;
+  text-align: left;
 }
 
-.log-body {
-  border-top: 1px solid var(--color-border);
-  padding: var(--space-4);
+.run-details-toggle:hover {
+  color: var(--color-text);
+}
+
+.run-details-toggle:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+.run-details-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-4);
+}
+
+.run-details-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.run-details-tab {
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--text-body);
+}
+
+.run-details-tab--active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.run-details-tab:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: -2px;
+}
+
+.run-details-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.run-details-heading {
+  font-size: var(--text-body);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+
+.run-details-group + .run-details-group {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.run-details-raw > summary {
+  min-height: var(--control-h);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  font-weight: 600;
 }
 
 .log-toolbar {
@@ -359,26 +413,10 @@
 }
 
 /* Run sidebar summary (left pane of /runs/:id) */
-.run-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
 .run-panel-primary {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-}
-
-.run-panel > .badge {
-  align-self: flex-start;
-}
-
-.run-panel-question {
-  font-size: var(--text-section-title);
-  font-weight: 600;
-  overflow-wrap: anywhere;
 }
 
 .run-panel-facts {
@@ -404,26 +442,6 @@
 .run-panel-facts .fact dd {
   margin: 0;
   text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.run-diagnostics {
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--text-meta);
-}
-
-.run-diagnostics > summary {
-  min-height: var(--control-h);
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.run-diagnostics code {
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
