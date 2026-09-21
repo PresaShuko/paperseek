@@ -153,6 +153,7 @@ export interface components {
         "year"?: number | null;
       };
     "ResultPageOutput": {
+        "high_score_count"?: number;
         "matched_count"?: number;
         "max_score"?: number | null;
         "next_cursor"?: string | null;
@@ -236,6 +237,10 @@ export interface components {
         "prompt_version"?: string;
         "workflow_version"?: string;
       };
+    "SelectedExportInput": {
+        "format" : string;
+        "uids"?: Array<string>;
+      };
     "ServiceSelectionInput": {
         "connection_id"?: string | null;
         "mode" : "paperseek" | "third_party" | "byok";
@@ -314,6 +319,7 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type RunStatus = components["schemas"]["RunStatus"];
 export type RunSubmission = components["schemas"]["RunSubmission"];
 export type RunVersions = components["schemas"]["RunVersions"];
+export type SelectedExportInput = components["schemas"]["SelectedExportInput"];
 export type ServiceSelectionInput = components["schemas"]["ServiceSelectionInput"];
 export type SourceCapabilitiesOutput = components["schemas"]["SourceCapabilitiesOutput"];
 export type SourceContactsInput = components["schemas"]["SourceContactsInput"];

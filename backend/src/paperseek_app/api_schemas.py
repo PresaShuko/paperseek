@@ -75,7 +75,13 @@ class ResultPageOutput(BaseModel):
     total_count: int = 0
     matched_count: int = 0
     scored_count: int = 0
+    high_score_count: int = 0
     max_score: float | None = None
+
+
+class SelectedExportInput(BaseModel):
+    format: str = Field(min_length=1)
+    uids: list[str] = Field(default_factory=list)
 
 
 class CitationNodeOutput(BaseModel):

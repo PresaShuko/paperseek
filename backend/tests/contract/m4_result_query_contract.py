@@ -263,6 +263,50 @@ class M4ResultQueryContractTest(unittest.TestCase):
         self.assertEqual(payload["matched_count"], 1)
         self.assertEqual(payload["items"][0]["question"], "Visible through the API")
 
+    def test_high_score_count_uses_full_set_threshold(self) -> None:
+        run = self._seed_results()
+        page = self.query_service.get_result_page(run.id, page_size=1)
+        self.assertEqual(page.high_score_count, 3)
+        client = TestClient(create_app(self.database))
+        payload = client.get(f"/api/v1/runs/{run.id}/results").json()
+        self.assertEqual(payload["high_score_count"], 3)
+
+    def test_selected_export_csv_and_json_use_full_records(self) -> None:
+        run = self._seed_results()
+        csv_content = self.query_service.get_selected_export(run.id, "csv", ["paper-1", "paper-5"])
+        text = csv_content.content.decode("utf-8")
+        self.assertIn("Alpha study", text)
+        self.assertIn("Epsilon study", text)
+        self.assertNotIn("Beta study", text)
+        self.assertEqual(csv_content.filename, "export-selected.csv")
+        json_content = self.query_service.get_selected_export(run.id, "json", ["paper-6"])
+        payload = json.loads(json_content.content.decode("utf-8"))
+        self.assertEqual([item["title"] for item in payload["ranked"]], ["Transformer survey"])
+        self.assertIsNone(payload["ranked"][0]["score"])
+
+    def test_selected_export_rejects_empty_or_foreign_selection(self) -> None:
+        run = self._seed_results()
+        with self.assertRaises(InvalidResultQuery):
+            self.query_service.get_selected_export(run.id, "csv", [])
+        with self.assertRaises(InvalidResultQuery):
+            self.query_service.get_selected_export(run.id, "csv", ["not-in-this-run"])
+        with self.assertRaises(InvalidResultQuery):
+            self.query_service.get_selected_export(run.id, "xml", ["paper-1"])
+        client = TestClient(create_app(self.database))
+        response = client.post(
+            f"/api/v1/runs/{run.id}/export-selected",
+            json={"format": "csv", "uids": ["paper-1"]},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.headers["content-type"])
+        self.assertIn("attachment", response.headers["content-disposition"])
+        bad = client.post(
+            f"/api/v1/runs/{run.id}/export-selected",
+            json={"format": "csv", "uids": []},
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(bad.json()["error"]["code"], "invalid_result_query")
+
 
 if __name__ == "__main__":
     unittest.main()

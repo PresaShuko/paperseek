@@ -153,6 +153,7 @@ class ResultPage(AppModel):
     total_count: int = 0
     matched_count: int = 0
     scored_count: int = 0
+    high_score_count: int = 0
     max_score: float | None = None
 
 

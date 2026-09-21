@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 from datetime import datetime
+import hashlib
 import json
 
 from paperseek_app.errors import ArtifactNotFound, InvalidCursor, InvalidResultQuery
@@ -21,6 +22,7 @@ from paperseek_app.models import (
     StoredArtifact,
 )
 from paperseek_app.ports import ArtifactStore, RunUnitOfWork
+from paperseek_core.final_result import FinalResultAssembler
 
 
 class RunQueryService:
@@ -126,6 +128,7 @@ class RunQueryService:
             total_count=len(items),
             matched_count=len(matched),
             scored_count=len(scored),
+            high_score_count=sum(1 for score in scored if score >= 5),
             max_score=max(scored) if scored else None,
         )
 
@@ -347,6 +350,47 @@ class RunQueryService:
         if kind is None:
             raise ValueError("The export format must be json or csv.")
         return self._read_user_artifact_by_kind(run_id, kind)
+
+    def get_selected_export(self, run_id: str, export_format: str, uids: list[str]) -> ArtifactContent:
+        wanted = {str(uid) for uid in uids if str(uid).strip()}
+        if not wanted:
+            raise InvalidResultQuery("No papers were selected for export.")
+        run = self.uow.get_run(run_id)
+        records = [
+            item.record
+            for item in self.uow.get_results(run_id)
+            if item.record.uid and item.record.uid in wanted
+        ]
+        if not records:
+            raise InvalidResultQuery("The selected papers do not belong to this run.")
+        if export_format.casefold() == "csv":
+            content = FinalResultAssembler._csv(records).encode("utf-8")
+            filename = "export-selected.csv"
+            media_type = "text/csv"
+        elif export_format.casefold() == "json":
+            content = (
+                json.dumps(
+                    {
+                        "question": run.question,
+                        "ranked": [record.model_dump(mode="json") for record in records],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n"
+            ).encode("utf-8")
+            filename = "export-selected.json"
+            media_type = "application/json"
+        else:
+            raise InvalidResultQuery("The export format must be json or csv.")
+        return ArtifactContent(
+            id="selected-export",
+            filename=filename,
+            media_type=media_type,
+            sha256=hashlib.sha256(content).hexdigest().upper(),
+            size=len(content),
+            content=content,
+        )
 
     def get_citation_map(self, run_id: str) -> ArtifactContent:
         return self._read_user_artifact_by_kind(run_id, "citation_map")

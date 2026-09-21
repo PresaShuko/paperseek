@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from paperseek_app.errors import ArtifactNotFound, InvalidCursor, InvalidResultQuery, RunNotFound
 from paperseek_app.models import RunAudit
 from paperseek_community.api_dependencies import ApiError, content_response, open_query_service
-from paperseek_app.api_schemas import CitationMapOutput, ResultPageOutput
+from paperseek_app.api_schemas import CitationMapOutput, ResultPageOutput, SelectedExportInput
 
 
 def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
@@ -45,6 +45,7 @@ def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
                 "total_count": page.total_count,
                 "matched_count": page.matched_count,
                 "scored_count": page.scored_count,
+                "high_score_count": page.high_score_count,
                 "max_score": page.max_score,
             }
         except RunNotFound as exc:
@@ -53,6 +54,19 @@ def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
             raise ApiError(400, "invalid_cursor", "The result cursor is invalid.") from exc
         except InvalidResultQuery as exc:
             raise ApiError(400, "invalid_result_query", str(exc) or "The result query is invalid.") from exc
+        finally:
+            uow.close()
+
+    @app.post("/api/v1/runs/{run_id}/export-selected")
+    def export_selected(run_id: str, payload: SelectedExportInput) -> Response:
+        run_service, uow = open_query_service(database)
+        try:
+            content = run_service.get_selected_export(run_id, payload.format, payload.uids)
+            return content_response(content, disposition=True)
+        except RunNotFound as exc:
+            raise ApiError(404, "run_not_found", "Run not found.") from exc
+        except InvalidResultQuery as exc:
+            raise ApiError(400, "invalid_result_query", str(exc) or "The selection is invalid.") from exc
         finally:
             uow.close()
 
