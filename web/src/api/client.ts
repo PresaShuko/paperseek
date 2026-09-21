@@ -11,6 +11,24 @@ import type {
   SourceDescriptor,
 } from "./types";
 
+export interface ResultPageQuery {
+  cursor?: string | null;
+  query?: string;
+  minScore?: number | null;
+  metadata?: "abstract" | "doi" | "pdf" | "";
+  sort?: "rank" | "score" | "citations" | "year";
+}
+
+export interface HistoryQuery {
+  cursor?: string | null;
+  query?: string;
+}
+
+export interface DownloadedFile {
+  blob: Blob;
+  filename: string;
+}
+
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 let request: typeof fetch = (input, init) => fetch(input, init);
 
@@ -73,13 +91,19 @@ export const api = {
     return json<RunDetail>(`/api/v1/runs/${runId}/cancel`, { method: "POST", signal });
   },
 
-  resultPage(runId: string, cursor?: string, signal?: AbortSignal): Promise<ResultPage> {
-    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-    return json<ResultPage>(`/api/v1/runs/${runId}/results${query}`, { signal });
+  resultPage(runId: string, options: ResultPageQuery = {}, signal?: AbortSignal): Promise<ResultPage> {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.query) params.set("query", options.query);
+    if (options.minScore !== undefined && options.minScore !== null) params.set("min_score", String(options.minScore));
+    if (options.metadata) params.set("metadata", options.metadata);
+    if (options.sort && options.sort !== "rank") params.set("sort", options.sort);
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return json<ResultPage>(`/api/v1/runs/${runId}/results${suffix}`, { signal });
   },
 
   async results(runId: string, signal?: AbortSignal): Promise<PaperResult[]> {
-    return (await this.resultPage(runId, undefined, signal)).results || [];
+    return (await this.resultPage(runId, {}, signal)).results || [];
   },
 
   citationMap(runId: string, signal?: AbortSignal): Promise<CitationMap> {
@@ -90,11 +114,30 @@ export const api = {
     return json<RunAudit>(`/api/v1/runs/${runId}/audit`, { signal });
   },
 
-  async history(cursor?: string, signal?: AbortSignal): Promise<{ items: RunDetail[]; next_cursor: string | null }> {
-    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-    return json<{ items: RunDetail[]; next_cursor?: string | null }>(`/api/v1/history${query}`, { signal }).then(
-      (page) => ({ items: page.items || [], next_cursor: page.next_cursor ?? null }),
+  async history(options: HistoryQuery = {}, signal?: AbortSignal): Promise<{ items: RunDetail[]; next_cursor: string | null; matched_count: number | null }> {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.query) params.set("query", options.query);
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return json<{ items: RunDetail[]; next_cursor?: string | null; matched_count?: number | null }>(`/api/v1/history${suffix}`, { signal }).then(
+      (page) => ({ items: page.items || [], next_cursor: page.next_cursor ?? null, matched_count: page.matched_count ?? null }),
     );
+  },
+
+  async exportSelected(runId: string, format: "csv" | "json", uids: string[], signal?: AbortSignal): Promise<DownloadedFile> {
+    const response = await request(`${apiBase}/api/v1/runs/${runId}/export-selected`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format, uids }),
+      signal,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, payload?.error?.code || `http_${response.status}`);
+    }
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = /filename="?([^";]+)"?/.exec(disposition);
+    return { blob: await response.blob(), filename: match?.[1] || `export-selected.${format}` };
   },
 
   deleteHistoryRun(runId: string, signal?: AbortSignal): Promise<{ run_id: string; status: string }> {

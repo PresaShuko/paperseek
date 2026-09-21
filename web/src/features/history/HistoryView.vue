@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { api } from "../../api/client";
 import type { RunDetail, RunEvent } from "../../api/types";
@@ -14,7 +14,9 @@ const events = ref<RunEvent[]>([]);
 const pageState = ref<"loading" | "error" | "loaded">("loading");
 const refreshing = ref(false);
 const loadingMore = ref(false);
-const filterQuery = ref("");
+const searchInput = ref("");
+const searchQuery = ref("");
+const matchedCount = ref<number | null>(null);
 const confirmDeleteFor = ref<RunDetail | "all" | null>(null);
 const deleting = ref(false);
 const deleteError = ref("");
@@ -25,16 +27,9 @@ const dialogCancel = ref<HTMLButtonElement | null>(null);
 let generation = 0;
 let controller: AbortController | null = null;
 let deleteController: AbortController | null = null;
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 const terminalStatuses = new Set(["completed", "completed_with_warnings", "failed", "cancelled"]);
 const canClear = computed(() => nextCursor.value || items.value.some(item => terminalStatuses.has(item.status)));
-
-const filteredItems = computed(() => {
-  const needle = filterQuery.value.trim().toLowerCase();
-  if (!needle) return items.value;
-  return items.value.filter((item) =>
-    [item.question, item.source, sourceName(item.source), item.status, t(item.status)].filter(Boolean).join(" ").toLowerCase().includes(needle),
-  );
-});
 
 function formatTime(value?: string | null): string {
   if (!value) return "";
@@ -43,13 +38,24 @@ function formatTime(value?: string | null): string {
   return new Intl.DateTimeFormat(language.value === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(parsed);
 }
 
+// History search is server-side: the query reloads the list from page one and
+// the cursor stays bound to that query (§9.2).
+watch(searchInput, (value) => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    searchQuery.value = value.trim();
+    void refresh();
+  }, 180);
+});
+
 async function refresh(background = false): Promise<void> {
   if (!background) pageState.value = "loading";
   refreshing.value = background;
   try {
-    const page = await api.history();
+    const page = await api.history({ query: searchQuery.value || undefined });
     items.value = page.items;
     nextCursor.value = page.next_cursor;
+    matchedCount.value = page.matched_count;
     pageState.value = "loaded";
     if (selected.value && !page.items.some((item) => item.id === selected.value?.id)) {
       selected.value = null;
@@ -66,7 +72,7 @@ async function loadMore(): Promise<void> {
   if (!nextCursor.value || loadingMore.value) return;
   loadingMore.value = true;
   try {
-    const page = await api.history(nextCursor.value);
+    const page = await api.history({ cursor: nextCursor.value, query: searchQuery.value || undefined });
     const known = new Set(items.value.map((item) => item.id));
     items.value = [...items.value, ...page.items.filter((item) => !known.has(item.id))];
     nextCursor.value = page.next_cursor;
@@ -137,9 +143,10 @@ async function confirmDelete(): Promise<void> {
     const ids = new Set<string>();
     if (item === "all") {
       // Collect before deleting: a failed page read must not clear only the visible page.
+      // Clear always walks the full unfiltered history, regardless of the search box (§9.3).
       let cursor: string | undefined;
       do {
-        const page = await api.history(cursor, request.signal);
+        const page = await api.history({ cursor }, request.signal);
         request.signal.throwIfAborted();
         for (const run of page.items) if (terminalStatuses.has(run.status)) ids.add(run.id);
         cursor = page.next_cursor || undefined;
@@ -177,6 +184,7 @@ onBeforeUnmount(() => {
   generation += 1;
   controller?.abort();
   deleteController?.abort();
+  if (searchTimer) clearTimeout(searchTimer);
 });
 </script>
 
@@ -187,12 +195,13 @@ onBeforeUnmount(() => {
       <div class="alert-actions">
         <label class="field">
           <span class="sr-only">{{ t("historySearch") }}</span>
-          <input v-model="filterQuery" type="search" :placeholder="t('historySearch')" :aria-label="t('historySearch')" />
+          <input v-model="searchInput" type="search" :placeholder="t('historySearch')" :aria-label="t('historySearch')" />
         </label>
         <button ref="refreshButton" class="button" type="button" :disabled="refreshing || deleting" @click="refresh(true)">{{ t("refreshHistory") }}</button>
         <button ref="clearButton" class="button button--danger" type="button" :disabled="pageState !== 'loaded' || !canClear || refreshing || loadingMore || deleting" @click="askDelete(true)">{{ t("clearHistory") }}</button>
       </div>
     </header>
+    <p v-if="searchQuery && matchedCount !== null" class="field-help" data-testid="history-matched">{{ t("historyMatched").replace("{n}", String(matchedCount)) }}</p>
 
     <div v-if="pageState === 'loading'" class="state-block" data-testid="history-loading">
       <span>{{ t("active") }}…</span>
@@ -201,11 +210,11 @@ onBeforeUnmount(() => {
       <strong>{{ t("loadError") }}</strong>
       <button class="button" type="button" @click="refresh()">{{ t("retry") }}</button>
     </div>
+    <div v-else-if="!items.length && searchQuery" class="state-block">{{ t("noFilteredResults") }}</div>
     <div v-else-if="!items.length" class="state-block">{{ t("noHistory") }}</div>
-    <div v-else-if="!filteredItems.length" class="state-block">{{ t("noFilteredResults") }}</div>
     <section v-else class="history-layout">
       <div class="history-list">
-        <div v-for="item in filteredItems" :key="item.id" class="history-item" :class="{ 'history-item--active': selected?.id === item.id }">
+        <div v-for="item in items" :key="item.id" class="history-item" :class="{ 'history-item--active': selected?.id === item.id }">
           <button class="history-open" type="button" @click="choose(item)">
             <strong>{{ item.question }}</strong>
             <span class="history-item-meta">

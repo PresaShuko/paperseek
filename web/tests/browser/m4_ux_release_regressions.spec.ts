@@ -324,7 +324,7 @@ test("history keeps run identifiers and raw durable events in a folded technical
   await expect(primary).toContainText("A query variant was repaired or skipped.");
   await expect(primary).toContainText("Citation expansion was only partially available.");
   await expect(primary).toContainText("Some abstracts could not be completed.");
-  await expect(primary).toContainText("Ranking was degraded; the available order was retained.");
+  await expect(primary).toContainText("Some papers were not scored; unscored items are kept.");
   await expect(primary).toContainText("The run completed with an additional warning.");
   for (const code of warningCodes) await expect(primary).not.toContainText(code);
   const audit = page.getByTestId("history-run-details");
@@ -340,6 +340,7 @@ test("history keeps run identifiers and raw durable events in a folded technical
   await page.getByRole("button", { name: "中文" }).click();
   await expect(primary).toContainText("部分数据源召回通道已降级。");
   await expect(primary).toContainText("部分摘要未能补全。");
+  await expect(primary).toContainText("部分论文未完成评分，未评分项已保留。");
   await expect(primary).toContainText("运行包含一项额外警告。");
 });
 

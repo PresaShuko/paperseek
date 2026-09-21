@@ -63,6 +63,76 @@ test("citation map supports wheel zoom, pan, node drag/select, legend and seed f
 
   await page.getByLabel("Seed focus").selectOption(citationMap.nodes[0].id);
   await expect(page.getByTestId("graph-node")).toHaveCount(3);
+  await page.getByTestId("citation-text-list").getByText("Text list").click();
   await page.getByRole("button", { name: citationMap.nodes[0].title, exact: true }).click();
   await expect(page.getByTestId("citation-detail")).toContainText(citationMap.nodes[0].title);
+});
+
+test("force layout is stable, legend glyphs match node shapes and seed labels show", async ({ page }) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === `/api/v1/runs/${runId}`) await route.fulfill({ json: run });
+    else if (path === `/api/v1/runs/${runId}/citation-map`) await route.fulfill({ json: citationMap });
+    else await route.fulfill({ status: 404, json: { error: { code: "not_found" } } });
+  });
+
+  await page.goto(`/runs/${runId}/citation-map`);
+  await expect(page.getByTestId("graph-node")).toHaveCount(citationMap.nodes.length);
+
+  // Force layout: nodes spread across the canvas instead of sharing one ring.
+  const transforms = await page.getByTestId("graph-node").evaluateAll((elements) =>
+    elements.map((element) => {
+      const match = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(element.getAttribute("transform") || "");
+      return match ? { x: Number(match[1]), y: Number(match[2]) } : { x: 0, y: 0 };
+    }));
+  const distances = transforms.map((point) => Math.hypot(point.x - 320, point.y - 230));
+  const min = Math.min(...distances);
+  const max = Math.max(...distances);
+  expect(max - min).toBeGreaterThan(40);
+
+  // Layout is deterministic: a reload reproduces the same positions.
+  const original = await page.getByTestId("graph-node").evaluateAll((elements) => elements.map((element) => element.getAttribute("transform")));
+  await page.reload();
+  const reloaded = await page.getByTestId("graph-node").evaluateAll((elements) => elements.map((element) => element.getAttribute("transform")));
+  expect(reloaded).toEqual(original);
+
+  // Legend glyphs use the same element kind as the node shape per role.
+  const legendShapes = await page.getByRole("list", { name: "Citation legend" }).locator("svg.legend-glyph > *").evaluateAll(
+    (elements) => elements.map((element) => element.tagName),
+  );
+  expect(legendShapes).toEqual(["circle", "rect", "path", "path"]);
+  for (const [role, tag] of [["result", "circle"], ["seed", "rect"], ["forward", "path"], ["backward", "path"]] as const) {
+    const shapeTag = await page.locator(`.citation-node[data-role="${role}"] .citation-node-shape`).first().evaluate((element) => element.tagName);
+    expect(shapeTag.toLowerCase()).toBe(tag);
+  }
+
+  // Seeds show a short title by default; rankless nodes never show a dash row.
+  const seed = citationMap.nodes.find((node: { roles?: string[] }) => node.roles?.includes("seed"));
+  const seedNode = page.locator(`.citation-node[data-node-id="${seed.id}"]`);
+  await expect(seedNode.locator("text")).toContainText(seed.title.slice(0, 28));
+  const rankless = page.locator(`.citation-node[data-role="forward"] text`, { hasText: "—" });
+  await expect(rankless).toHaveCount(0);
+
+  // The first seed is the default detail selection.
+  await expect(page.getByTestId("citation-detail")).toContainText(seed.title);
+});
+
+test("citation map classifies empty states instead of a blank canvas", async ({ page }) => {
+  const cases = [
+    { map: { enabled: false, supported: true, nodes: [], edges: [] }, text: "Citation expansion was not enabled for this run." },
+    { map: { enabled: true, supported: false, nodes: [], edges: [] }, text: "This source does not support citation traversal." },
+    { map: { enabled: true, supported: true, status: "complete", nodes: [], edges: [] }, text: "No citation data is available yet." },
+  ];
+  for (const entry of cases) {
+    await page.unrouteAll();
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === `/api/v1/runs/${runId}`) await route.fulfill({ json: run });
+      else if (path === `/api/v1/runs/${runId}/citation-map`) await route.fulfill({ json: entry.map });
+      else await route.fulfill({ status: 404, json: { error: { code: "not_found" } } });
+    });
+    await page.goto(`/runs/${runId}/citation-map`);
+    await expect(page.getByTestId("citation-empty")).toContainText(entry.text);
+    await expect(page.getByTestId("graph-node")).toHaveCount(0);
+  }
 });

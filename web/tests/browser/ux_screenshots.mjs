@@ -68,7 +68,12 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 await page.route("**/api/v1/sources", (route) => route.fulfill({ json: sources }));
-await page.route(`**/api/v1/runs/${runId}/results**`, (route) => route.fulfill({ json: { results: papers, next_cursor: null } }));
+let currentResults = {
+  results: papers, next_cursor: null,
+  total_count: papers.length, matched_count: papers.length, scored_count: papers.length,
+  high_score_count: papers.filter((paper) => paper.score >= 5).length, max_score: 9.2,
+};
+await page.route(`**/api/v1/runs/${runId}/results**`, (route) => route.fulfill({ json: currentResults }));
 await page.route(`**/api/v1/runs/${runId}/citation-map`, (route) => route.fulfill({ json: citationMap }));
 await page.route(`**/api/v1/runs/${runId}/audit**`, (route) => route.fulfill({ json: { query_portfolio: [], loop_decisions: [], candidate_queue: {}, candidate_lifecycle: {}, recovery: {} } }));
 await page.route("**/api/v1/history**", (route) => route.fulfill({ json: { items: [completedRun], next_cursor: null } }));
@@ -165,6 +170,18 @@ currentRun = completedRun; currentEvents = completedEvents;
 await page.goto(`${base}/history`, { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(800);
 await shot("desktop-history-zh");
+
+// Scoring-failure results state: banner + unscored cards (§8.1/§8.2)
+await page.evaluate(() => { document.body.style.zoom = "100%"; });
+await page.setViewportSize({ width: 1366, height: 900 });
+currentRun = { ...completedRun, warnings: ["ranking_failed_local_order_retained"] };
+currentResults = {
+  results: papers.map((paper) => ({ ...paper, score: null })), next_cursor: null,
+  total_count: papers.length, matched_count: papers.length, scored_count: 0, high_score_count: 0, max_score: null,
+};
+await page.goto(`${base}/runs/${runId}/results`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(900);
+await shot("desktop-results-scoring-failed");
 
 await browser.close();
 console.log("screenshots written to", out);

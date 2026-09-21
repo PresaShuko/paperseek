@@ -179,10 +179,10 @@ test("run URL refresh replays, de-duplicates and reconnects with Last-Event-ID",
   await page.goto(`/runs/${runId}/results`);
   await expect(page.getByRole("heading", { name: firstQuestion })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recovered result" })).toBeVisible();
-  await expect(page.getByTestId("metadata-status")).toHaveText("Complete");
+  await expect(page.getByTestId("result-score")).toHaveText("Not scored");
   await page.goto(`/runs/${runId}/citation-map`);
   await expect(page.getByRole("heading", { name: firstQuestion })).toBeVisible();
-  await expect(page.getByText("Recovered node")).toBeVisible();
+  await expect(page.getByTestId("citation-detail")).toContainText("Recovered node");
 
   await page.goto("/history");
   const flow = page.getByTestId(`history-flow-${runId}`);

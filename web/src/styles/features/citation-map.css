@@ -43,36 +43,36 @@
   gap: var(--space-1);
 }
 
-.legend-mark {
-  width: 12px;
-  height: 12px;
+/* Legend glyphs reuse the exact node geometry: role = color + shape (§10.1) */
+.legend-glyph {
+  width: 16px;
+  height: 16px;
   flex: none;
-  border-radius: 999px;
-  border: 2px solid var(--color-border-strong);
-  background: var(--color-surface);
+  overflow: visible;
 }
 
-.legend-mark--result {
-  border-color: var(--color-link);
-  background: var(--color-link-soft);
+.legend-shape {
+  stroke-width: 2;
 }
 
-.legend-mark--seed {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
+.legend-shape--result {
+  fill: var(--color-link-soft);
+  stroke: var(--color-link);
 }
 
-.legend-mark--forward {
-  border-color: var(--color-success);
-  background: var(--color-success-soft);
-  border-radius: 2px;
+.legend-shape--seed {
+  fill: var(--color-accent-soft);
+  stroke: var(--color-accent);
 }
 
-.legend-mark--backward {
-  border-color: var(--color-text-muted);
-  background: var(--color-surface-subtle);
-  border-radius: 2px;
-  transform: rotate(45deg);
+.legend-shape--forward {
+  fill: var(--color-success-soft);
+  stroke: var(--color-success);
+}
+
+.legend-shape--backward {
+  fill: var(--color-surface-subtle);
+  stroke: var(--color-text-muted);
 }
 
 .citation-graph {
@@ -109,28 +109,31 @@
   fill: transparent;
 }
 
-.citation-node .citation-node-mark {
-  fill: var(--color-link-soft);
-  stroke: var(--color-link);
+.citation-node .citation-node-shape {
   stroke-width: 2;
 }
 
-.citation-node[data-role~="seed"] .citation-node-mark {
+.citation-node[data-role="result"] .citation-node-shape {
+  fill: var(--color-link-soft);
+  stroke: var(--color-link);
+}
+
+.citation-node[data-role="seed"] .citation-node-shape {
   fill: var(--color-accent-soft);
   stroke: var(--color-accent);
 }
 
-.citation-node[data-role~="forward"] .citation-node-mark {
+.citation-node[data-role="forward"] .citation-node-shape {
   fill: var(--color-success-soft);
   stroke: var(--color-success);
 }
 
-.citation-node[data-role~="backward"] .citation-node-mark {
+.citation-node[data-role="backward"] .citation-node-shape {
   fill: var(--color-surface-subtle);
   stroke: var(--color-text-muted);
 }
 
-.citation-node[data-selected="true"] .citation-node-mark {
+.citation-node[data-selected="true"] .citation-node-shape {
   stroke-width: 4;
 }
 
@@ -144,11 +147,19 @@
   fill: none;
 }
 
-.citation-node text {
+.citation-node-label {
   font-size: 11px;
   fill: var(--color-text-muted);
   font-family: var(--font-mono);
   pointer-events: none;
+}
+
+.citation-node-label--title {
+  font-family: var(--font-sans);
+  fill: var(--color-text);
+  paint-order: stroke;
+  stroke: var(--color-surface);
+  stroke-width: 3;
 }
 
 .citation-detail-panel {
@@ -207,6 +218,28 @@
 .citation-text-list .node-button[aria-pressed="true"] {
   border-color: var(--color-accent);
   background: var(--color-accent-soft);
+}
+
+.citation-text-equivalent > summary {
+  min-height: var(--control-h);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.citation-text-equivalent[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.citation-detail-card .detail-label {
+  font-weight: 700;
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
 }
 
 @media (max-width: 900px) {

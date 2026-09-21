@@ -30,7 +30,7 @@ test("results load failure shows an actionable error, not an empty list", async 
   expect(attempts).toBe(2);
 });
 
-test("history distinguishes failure from empty and supports search and cursor paging", async ({ page }) => {
+test("history distinguishes failure from empty and supports server-side search and cursor paging", async ({ page }) => {
   const itemsPage1 = Array.from({ length: 3 }, (_, index) => ({
     ...activeRun,
     id: `44444444-4444-4444-8444-44444444444${index}`,
@@ -38,17 +38,24 @@ test("history distinguishes failure from empty and supports search and cursor pa
     status: "completed",
   }));
   const itemsPage2 = [{ ...activeRun, id: "55555555-5555-4555-8555-555555555555", question: "oncology survey", status: "failed" }];
+  const allItems = [...itemsPage1, ...itemsPage2];
   let allowSuccess = false;
+  const seenQueries: Array<string | null> = [];
   await page.route("**/api/v1/history**", async (route) => {
     if (!allowSuccess) {
       await route.fulfill({ status: 500, json: { error: { code: "internal" } } });
       return;
     }
     const url = new URL(route.request().url());
+    const query = url.searchParams.get("query");
+    seenQueries.push(query);
+    const matching = query
+      ? allItems.filter((item) => item.question.toLowerCase().includes(query.toLowerCase()))
+      : allItems;
     if (url.searchParams.get("cursor") === "page-2") {
-      await route.fulfill({ json: { items: itemsPage2, next_cursor: null } });
+      await route.fulfill({ json: { items: matching.filter((item) => item.id === itemsPage2[0].id), next_cursor: null, matched_count: query ? matching.length : null } });
     } else {
-      await route.fulfill({ json: { items: itemsPage1, next_cursor: "page-2" } });
+      await route.fulfill({ json: { items: matching.slice(0, 3), next_cursor: query ? null : "page-2", matched_count: query ? matching.length : null } });
     }
   });
   await page.goto("/history");
@@ -61,7 +68,10 @@ test("history distinguishes failure from empty and supports search and cursor pa
 
   await page.getByLabel("Search history").fill("review 2");
   await expect(page.getByRole("button", { name: /cardiology review/ })).toHaveCount(1);
+  expect(seenQueries.at(-1)).toBe("review 2");
+  await expect(page.getByTestId("history-matched")).toHaveText("1 matched");
   await page.getByLabel("Search history").fill("");
+  await expect(page.getByRole("button", { name: /cardiology review/ })).toHaveCount(3);
 
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByRole("button", { name: /oncology survey/ })).toBeVisible();

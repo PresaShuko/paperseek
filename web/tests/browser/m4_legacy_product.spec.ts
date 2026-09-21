@@ -141,7 +141,7 @@ test("Vue preserves the four-stage bilingual search, result, graph, export and h
 
   await page.getByRole("link", { name: "Results", exact: true }).click();
   await expect(page.getByRole("heading", { name: finalResult.ranked[0].title })).toBeVisible();
-  const exportLink = page.getByRole("link", { name: "Export CSV" });
+  const exportLink = page.getByRole("link", { name: "Export all CSV" });
   await expect(exportLink).toHaveAttribute("href", new RegExp(`/api/v1/runs/${runId}/export\\?format=csv$`));
   const exportResult = await page.evaluate(async (href) => {
     const response = await fetch(href);
@@ -155,6 +155,7 @@ test("Vue preserves the four-stage bilingual search, result, graph, export and h
 
   await page.getByRole("link", { name: "Citation Map", exact: true }).click();
   await expect(page.getByText(`${citationMap.nodes.length} nodes`)).toBeVisible();
+  await page.getByTestId("citation-text-list").getByText("Text list").click();
   await expect(page.getByRole("button", { name: citationMap.nodes[0].title, exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "History" }).click();
