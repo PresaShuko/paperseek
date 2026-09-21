@@ -37,3 +37,6 @@ docs/.vitepress/dist/
 
 .DS_Store
 Thumbs.db
+
+# Playwright output
+web/test-results/
