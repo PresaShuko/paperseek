@@ -88,6 +88,67 @@ class TestJsonFinalContentExtraction(unittest.IsolatedAsyncioTestCase):
         self.assertIn("response_format", requests[0])
         self.assertNotIn("response_format", requests[1])
 
+    async def test_json_calls_suppress_or_minimize_thinking(self) -> None:
+        bodies: list[dict] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(200, json=_payload('{"scores": [[1, 8]]}'))
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        async def call(base_url: str, model: str) -> None:
+            adapter = HttpLLMAdapter(
+                client=client,
+                cancellation=NEVER_CANCELLED,
+                api_type="openai_chat",
+                base_url=base_url,
+                model=model,
+                api_key="fixture-key",
+            )
+            await adapter.chat_json([{"role": "user", "content": "score"}])
+
+        await call("https://api.deepseek.com", "deepseek-v4-flash")
+        self.assertEqual(bodies[0].get("thinking"), {"type": "disabled"})
+
+        await call("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3-max")
+        self.assertEqual(bodies[1].get("enable_thinking"), False)
+
+        await call("https://api.openai.com/v1", "gpt-5-mini")
+        self.assertEqual(bodies[2].get("reasoning_effort"), "minimal")
+
+        await call("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3-flash")
+        self.assertEqual(bodies[3].get("reasoning_effort"), "low")
+
+        await call("http://llm.fixture", "plain-model")
+        self.assertNotIn("thinking", bodies[4])
+        self.assertNotIn("enable_thinking", bodies[4])
+        self.assertNotIn("reasoning_effort", bodies[4])
+
+    async def test_rejected_thinking_control_is_dropped_on_retry(self) -> None:
+        bodies: list[dict] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content.decode("utf-8")))
+            if len(bodies) == 1:
+                return httpx.Response(400, json={"error": {"message": "unknown parameter"}})
+            return httpx.Response(200, json=_payload('{"scores": [[1, 8]]}'))
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        adapter = HttpLLMAdapter(
+            client=client,
+            cancellation=NEVER_CANCELLED,
+            api_type="openai_chat",
+            base_url="https://api.deepseek.com",
+            model="deepseek-v4-flash",
+            api_key="fixture-key",
+        )
+        result = await adapter.chat_json([{"role": "user", "content": "score"}])
+        self.assertEqual(result, '{"scores": [[1, 8]]}')
+        self.assertIn("thinking", bodies[0])
+        self.assertNotIn("thinking", bodies[1])
+        self.assertNotIn("response_format", bodies[1])
+
 
 def _documents(count: int = 4) -> list[PaperRecord]:
     return [

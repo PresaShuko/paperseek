@@ -49,6 +49,8 @@ class HttpLLMAdapter:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
+        thinking_control = self._thinking_control()
+        body.update(thinking_control)
         response, api_key = await self._post(
             f"{self.base_url}/chat/completions",
             body,
@@ -57,6 +59,8 @@ class HttpLLMAdapter:
         )
         if response.status_code in {400, 422}:
             body.pop("response_format")
+            for key in thinking_control:
+                body.pop(key, None)
             response, _ = await self._post(
                 f"{self.base_url}/chat/completions",
                 body,
@@ -94,6 +98,9 @@ class HttpLLMAdapter:
         }
         if instructions:
             body["instructions"] = instructions
+        if self.model.lower().startswith(("o1", "o3", "o4", "gpt-5")):
+            # JSON extraction calls never consume a visible reasoning trace.
+            body["reasoning"] = {"effort": "minimal"}
         response, _ = await self._post(
             f"{self.base_url}/responses",
             body,
@@ -223,6 +230,28 @@ class HttpLLMAdapter:
         if response.status_code >= 500:
             return "provider_unavailable"
         return "provider_request_rejected"
+
+    def _thinking_control(self) -> dict[str, Any]:
+        """Suppress or minimize visible reasoning for JSON extraction calls.
+
+        Scoring and query generation consume only the final JSON answer, so a
+        reasoning trace is pure budget cost: on thinking-by-default models it
+        can exhaust max_tokens before any final content is produced. Providers
+        that reject the parameter fall through the 400/422 retry, which drops
+        these fields together with response_format.
+        """
+        model = self.model.lower()
+        if self.api_type != "openai_chat":
+            return {}
+        if "api.deepseek.com" in self.base_url and model.startswith("deepseek-"):
+            return {"thinking": {"type": "disabled"}}
+        if "dashscope" in self.base_url or model.startswith("qwen"):
+            return {"enable_thinking": False}
+        if model.startswith(("o1", "o3", "o4", "gpt-5")):
+            return {"reasoning_effort": "minimal"}
+        if "generativelanguage.googleapis.com" in self.base_url and model.startswith("gemini-"):
+            return {"reasoning_effort": "low"}
+        return {}
 
     @staticmethod
     def _missing() -> str:
