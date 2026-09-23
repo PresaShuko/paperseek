@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch, watchEffect } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, watchEffect } from "vue";
 
 import { useLocale } from "../../locales";
 import { runState, type StageKey } from "../../state/run";
@@ -90,8 +90,15 @@ function isOpen(key: StageKey): boolean {
   return runState.stages[key] === "active" && !runTerminal.value;
 }
 
-function toggleDisclosure(key: StageKey): void {
+function toggleDisclosure(key: StageKey, event?: MouseEvent): void {
   disclosure[key] = isOpen(key) ? "manually_closed" : "manually_open";
+  // A manual open near the viewport bottom would otherwise expand out of view.
+  if (disclosure[key] !== "manually_open" || !event) return;
+  const card = (event.currentTarget as HTMLElement | null)?.closest("details");
+  nextTick(() => {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    card?.scrollIntoView({ behavior, block: "nearest" });
+  });
 }
 
 // Elapsed time derives from the server event time, recomputed on a timer (§6).
@@ -345,7 +352,7 @@ watchEffect(() => {
           class="stage-summary"
           :data-testid="`stage-${key}-toggle`"
           :aria-expanded="isOpen(key)"
-          @click.prevent="toggleDisclosure(key)"
+          @click.prevent="toggleDisclosure(key, $event)"
         >
           <span class="stage-number" aria-hidden="true">{{ number }}</span>
           <span class="stage-heading">

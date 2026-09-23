@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 
 import { api } from "../../api/client";
 import type { RunVersions } from "../../api/generated";
@@ -42,6 +42,18 @@ function openTab(tab: TabId): void {
 }
 
 defineExpose({ openTab });
+
+// A manual open near the viewport bottom would otherwise expand out of view;
+// bring the panel into the visible area (user-initiated only, never on events).
+function toggleOpen(event: MouseEvent): void {
+  open.value = !open.value;
+  if (!open.value) return;
+  const section = (event.currentTarget as HTMLElement).closest(".run-details");
+  nextTick(() => {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    section?.scrollIntoView({ behavior, block: "nearest" });
+  });
+}
 
 // Manual-activation tabs (W3C APG): arrows/Home/End move focus, Enter/Space activate.
 function onTablistKeydown(event: KeyboardEvent): void {
@@ -122,7 +134,7 @@ async function copyDiagnostics(): Promise<void> {
       :data-testid="`${idPrefix}-toggle`"
       :aria-expanded="open"
       :aria-controls="`${idPrefix}-body`"
-      @click="open = !open"
+      @click="toggleOpen"
     >
       <svg class="disclosure-icon" :class="{ 'disclosure-icon--open': open }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
       <span>{{ t("runDetails") }}</span>
