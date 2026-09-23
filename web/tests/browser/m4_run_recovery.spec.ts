@@ -122,9 +122,8 @@ test("run URL refresh replays, de-duplicates and reconnects with Last-Event-ID",
   await page.goto(`/runs/${runId}`);
   await expect(page).toHaveURL(new RegExp(`/runs/${runId}$`));
   await expect(page.getByTestId("run-status")).toHaveText("Completed");
-  await expect(page.getByTestId("run-details-toggle")).toHaveAttribute("aria-expanded", "false");
-  await page.getByTestId("run-details-toggle").click();
-  await page.getByTestId("run-details-tab-diagnostics").click();
+  // Diagnostic facts live in the log panel header, visible without expanding (§12).
+  await expect(page.getByTestId("system-log-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("last-event-sequence")).toHaveText("8");
   await expect(page.getByTestId("event-count")).toHaveText("8");
   expect(cursors.slice(0, 2)).toEqual(["0", "2"]);
@@ -133,47 +132,49 @@ test("run URL refresh replays, de-duplicates and reconnects with Last-Event-ID",
   await expect(page.getByTestId("stage-query-audit")).toContainText("Recover durable research facts");
   await expect(page.getByTestId("stage-query-audit")).toContainText("durable run recovery");
   await expect(page.getByTestId("stage-search-audit")).not.toContainText("Source retrieval");
+  await page.getByTestId("stage-ranking-toggle").click();
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("Loaded candidates 24");
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("Fused candidates 31");
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("LLM re-ranking");
-  await expect(page.getByTestId("stage-results-audit")).toContainText("Final output: 1");
-  await page.getByTestId("run-details-tab-process").click();
+  await page.getByTestId("stage-results-toggle").click();
+  await expect(page.getByTestId("stage-results-audit")).toContainText("Results");
+  // Retrieval/ranking/enrichment event rows live in stage 03's folded detail section.
+  await page.getByTestId("stage-ranking-process-toggle").click();
   await expect(page.getByTestId("retrieval-progress-audit")).toContainText("Loaded candidates 24");
   await expect(page.getByTestId("retrieval-progress-audit")).toContainText("Fused candidates 31");
   await expect(page.getByTestId("ranking-progress-audit")).toContainText("Ranking batches 0 / 2");
   await expect(page.getByTestId("ranking-progress-audit")).toContainText("Sent to LLM 24");
   await expect(page.getByTestId("enrichment-progress-audit")).toContainText("Abstracts completed 1 / 1");
-  await page.getByTestId("run-details-tab-log").click();
-  await expect(page.getByTestId("system-log-audit")).toContainText("000008 workflow.completed");
+  await page.getByTestId("system-log-toggle").click();
+  await expect(page.getByTestId("system-log-audit")).toContainText("000008");
+  await expect(page.getByTestId("system-log-audit")).toContainText("workflow.completed");
   await expect(page.getByTestId("system-log-export")).toHaveAttribute("href", `/api/v1/runs/${runId}/logs`);
   await page.getByRole("button", { name: "中文" }).click();
-  await expect(page.getByTestId("run-details-toggle")).toHaveText("运行详情");
-  await expect(page.getByTestId("run-details-tab-log")).toHaveText("日志");
-  await expect(page.getByTestId("run-details-tab-process")).toHaveText("检索过程");
-  await expect(page.getByTestId("run-details-tab-diagnostics")).toHaveText("恢复与诊断");
+  await expect(page.getByTestId("system-log-toggle")).toContainText("系统日志");
+  await expect(page.getByTestId("stage-search-portfolio-toggle")).toHaveText("查询组合");
+  await expect(page.getByTestId("stage-search-audit-toggle")).toHaveText("技术审计");
+  await expect(page.getByTestId("stage-ranking-audit-toggle")).toHaveText("恢复与候选审计");
   await page.getByRole("button", { name: "EN" }).click();
   await expect(page.getByTestId("stage-query-toggle")).toHaveAttribute("aria-expanded", "true");
 
-  await page.getByTestId("run-details-tab-process").click();
+  await page.getByTestId("stage-search-toggle").click();
+  await page.getByTestId("stage-search-portfolio-toggle").click();
   await expect(page.getByTestId("query-portfolio-audit")).toContainText("durable recovery audit");
-  await expect(page.getByTestId("retrieval-progress-audit")).toContainText("Loaded candidates 24");
   await expect(page.getByTestId("query-portfolio-audit")).toContainText("New candidates 4");
-  await page.getByTestId("run-details-tab-diagnostics").click();
-  await page.getByTestId("technical-audit-toggle").click();
+  await page.getByTestId("stage-search-audit-toggle").click();
   await expect(page.getByTestId("technical-audit")).toContainText("Accepted the durable recovery query.");
   await expect(page.getByTestId("technical-audit")).toContainText("duplicate_count");
-  await page.getByTestId("candidate-recovery-toggle").click();
+  await page.getByTestId("stage-ranking-audit-toggle").click();
   await expect(page.getByTestId("candidate-recovery-audit")).toContainText("ledger_candidates");
   await expect(page.getByTestId("candidate-recovery-audit")).toContainText('"total": 1');
 
   await page.reload();
   await expect(page.getByTestId("run-status")).toHaveText("Completed");
-  await page.getByTestId("run-details-toggle").click();
-  await page.getByTestId("run-details-tab-diagnostics").click();
   await expect(page.getByTestId("event-count")).toHaveText("8");
   await page.getByTestId("stage-query-toggle").click();
   await expect(page.getByTestId("stage-query-audit")).toContainText("Recover durable research facts");
-  await page.getByTestId("run-details-tab-process").click();
+  await page.getByTestId("stage-search-toggle").click();
+  await page.getByTestId("stage-search-portfolio-toggle").click();
   await expect(page.getByTestId("query-portfolio-audit")).toContainText("durable recovery audit");
 
   await page.goto(`/runs/${runId}/results`);
@@ -231,9 +232,9 @@ test("a failed stage automatically exposes its durable structured fact", async (
   await expect(page.getByTestId("stage-query-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("Ranking failed.");
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("Affected candidates 24");
-  await expect(page.getByTestId("run-details-toggle")).toHaveAttribute("aria-expanded", "false");
-  await page.getByTestId("run-details-toggle").click();
-  await page.getByTestId("run-details-tab-log").click();
+  // A terminal failed run keeps the log folded; the user opens it (§12).
+  await expect(page.getByTestId("system-log-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.getByTestId("system-log-toggle").click();
   await expect(page.getByTestId("system-log-audit")).toContainText("ranking_failed");
 });
 
@@ -280,13 +281,14 @@ test("running audit is restored from durable decision, portfolio and recovery ev
   });
 
   await page.goto(`/runs/${runId}`);
-  await page.getByTestId("run-details-toggle").click();
-  await page.getByTestId("run-details-tab-process").click();
+  // Stage 02 is the live stage, so it is already expanded (§5.2).
+  await expect(page.getByTestId("stage-search-toggle")).toHaveAttribute("aria-expanded", "true");
+  await page.getByTestId("stage-search-portfolio-toggle").click();
   await expect(page.getByTestId("query-portfolio-audit")).toContainText("live portfolio query");
-  await page.getByTestId("run-details-tab-diagnostics").click();
-  await page.getByTestId("technical-audit-toggle").click();
+  await page.getByTestId("stage-search-audit-toggle").click();
   await expect(page.getByTestId("technical-audit")).toContainText("Accepted live query");
-  await page.getByTestId("candidate-recovery-toggle").click();
+  await page.getByTestId("stage-ranking-toggle").click();
+  await page.getByTestId("stage-ranking-audit-toggle").click();
   await expect(page.getByTestId("candidate-recovery-audit")).toContainText('"total": 2');
 });
 

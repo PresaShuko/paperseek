@@ -20,12 +20,12 @@
 }
 
 .alert--warning {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
 }
 
 .alert--warning strong {
-  color: var(--color-accent);
+  color: var(--color-warning);
 }
 
 /* Selection counts inside the shared toolbar align with the compact controls */
@@ -44,9 +44,9 @@
 }
 
 .result-card {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -55,30 +55,45 @@
 }
 
 .result-card--selected {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
+  background: var(--color-surface-subtle);
+  border-color: var(--color-text-subtle);
 }
 
-/* Fixed-width score area: real scores keep the /10 scale, unscored says so (§8.2) */
+.result-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.result-card-header input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  flex: none;
+  accent-color: var(--color-primary);
+}
+
+/* Score: green badge for real scores (incl. 0/10), plain muted text when unscored (§8.2) */
 .result-score {
-  font-size: var(--text-section-title);
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid var(--color-success);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  font-size: var(--text-aux);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--color-accent);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.result-score .result-score-scale {
-  font-size: var(--text-meta);
-  font-weight: 500;
-  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 .result-score--none {
-  font-size: var(--text-meta);
-  font-weight: 500;
+  border: 0;
+  background: transparent;
   color: var(--color-text-muted);
+  font-weight: 500;
+  padding: 2px 0;
 }
 
 .result-copy {
@@ -86,20 +101,6 @@
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-}
-
-.result-title-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-
-.result-title-row input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  margin-top: 3px;
-  flex: none;
-  accent-color: var(--color-accent);
 }
 
 .result-title {
@@ -120,18 +121,19 @@
   text-decoration: underline;
 }
 
-.result-rank {
-  flex: none;
-  font-size: var(--text-meta);
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .result-meta {
   font-size: var(--text-meta);
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
+}
+
+.result-meta code {
+  font-family: var(--font-mono);
+}
+
+.result-authors {
+  font-size: var(--text-aux);
+  color: var(--color-text);
 }
 
 .result-abstract,
@@ -240,15 +242,4 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) 0 var(--space-6);
-}
-
-@media (max-width: 900px) {
-  .result-card {
-    grid-template-columns: 1fr;
-    gap: var(--space-2);
-  }
-
-  .result-score {
-    justify-self: start;
-  }
 }

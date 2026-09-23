@@ -175,12 +175,10 @@ test("workflow primary stages and normal progress use structured facts while mac
   await expect(page.getByTestId("stage-ranking-audit")).not.toContainText("batch_count");
   await expect(page.getByTestId("stage-ranking-audit")).not.toContainText("enriched_count");
 
-  const details = page.getByTestId("run-details");
-  await expect(page.getByTestId("run-details-toggle")).toHaveAttribute("aria-expanded", "false");
-  await expect(details.getByTestId("system-log-audit")).toHaveCount(0);
-  await page.getByTestId("run-details-toggle").click();
-
-  await page.getByTestId("run-details-tab-process").click();
+  // Folded technical sections live inside their stages and stay closed (§12).
+  await expect(page.getByTestId("stage-ranking-process-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("stage-ranking-audit-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.getByTestId("stage-ranking-process-toggle").click();
   for (const area of ["retrieval", "ranking", "enrichment"]) {
     const rows = page.getByTestId(`${area}-progress-audit`);
     await expect(rows).toBeVisible();
@@ -190,16 +188,15 @@ test("workflow primary stages and normal progress use structured facts while mac
   await expect(page.getByTestId("ranking-progress-audit")).not.toContainText("batch_count");
   await expect(page.getByTestId("enrichment-progress-audit")).not.toContainText("enriched_count");
 
+  await page.getByTestId("stage-search-portfolio-toggle").click();
   await expect(page.getByTestId("query-portfolio-audit")).toContainText("Direct evidence");
-  await expect(page.getByTestId("run-details-tab-process")).toHaveAttribute("aria-selected", "true");
-
-  await page.getByTestId("run-details-tab-log").click();
-  await expect(page.getByTestId("system-log-audit")).toContainText("candidate_count");
-  await page.getByTestId("run-details-tab-diagnostics").click();
-  await expect(page.getByTestId("technical-audit-section")).not.toHaveAttribute("open", "");
-  await expect(page.getByTestId("candidate-recovery-section")).not.toHaveAttribute("open", "");
-  await page.getByTestId("technical-audit-toggle").click();
+  await expect(page.getByTestId("query-portfolio-audit").locator("pre")).toHaveCount(0);
+  await page.getByTestId("stage-search-audit-toggle").click();
   await expect(page.getByTestId("technical-audit")).toContainText("candidate_queue");
+
+  await expect(page.getByTestId("system-log-toggle")).toHaveAttribute("aria-expanded", "false");
+  await page.getByTestId("system-log-toggle").click();
+  await expect(page.getByTestId("system-log-audit")).toContainText("candidate_count");
 });
 
 test("full run identifier is kept out of the default primary layer", async ({ page }) => {
@@ -209,14 +206,14 @@ test("full run identifier is kept out of the default primary layer", async ({ pa
   await expect(page.getByTestId("run-primary-summary")).not.toContainText(runId);
   await expect(page.locator(".search-form--readonly")).toContainText("OpenAlex");
   await expect(page.getByTestId("run-primary-summary").getByText("openalex", { exact: true })).toHaveCount(0);
-  const details = page.getByTestId("run-details");
-  const toggle = page.getByTestId("run-details-toggle");
+  // The run identifier lives in the log panel header (§12); the log body stays folded.
+  const toggle = page.getByTestId("system-log-toggle");
   await expect(toggle).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(details.getByText(runId, { exact: true })).toHaveCount(0);
+  await expect(page.locator(".log-run-id")).toHaveText(runId);
+  await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
   await toggle.click();
-  await page.getByTestId("run-details-tab-diagnostics").click();
-  await expect(details.getByText(runId, { exact: true })).toBeVisible();
+  await expect(page.getByTestId("system-log-audit")).toBeVisible();
 });
 
 test("minimum score has a dedicated localized all-scores option", async ({ page }) => {
@@ -327,15 +324,15 @@ test("history keeps run identifiers and raw durable events in a folded technical
   await expect(primary).toContainText("Some papers were not scored; unscored items are kept.");
   await expect(primary).toContainText("The run completed with an additional warning.");
   for (const code of warningCodes) await expect(primary).not.toContainText(code);
-  const audit = page.getByTestId("history-run-details");
-  await expect(page.getByTestId("history-run-details-toggle")).toHaveAttribute("aria-expanded", "false");
-  await expect(audit.getByText(runId, { exact: true })).toHaveCount(0);
-  await page.getByTestId("history-run-details-toggle").click();
+  const audit = page.getByTestId("history-system-log");
+  await expect(page.getByTestId("history-system-log-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(audit.getByTestId("system-log-audit")).toHaveCount(0);
+  // The run identifier sits in the log panel header (§12).
+  await expect(audit.locator(".log-run-id")).toHaveText(runId);
+  await page.getByTestId("history-system-log-toggle").click();
   await expect(audit.getByTestId("system-log-audit")).toContainText("ranking.completed");
   await expect(audit.getByTestId("system-log-audit")).toContainText("candidate_count");
   for (const code of warningCodes) await expect(audit.getByTestId("system-log-audit")).toContainText(code);
-  await page.getByTestId("history-run-details-tab-diagnostics").click();
-  await expect(audit.getByText(runId, { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "中文" }).click();
   await expect(primary).toContainText("部分数据源召回通道已降级。");
@@ -367,6 +364,6 @@ test("run warning projection is bilingual while the folded system log preserves 
   await page.getByRole("button", { name: "中文" }).click();
   await expect(primary).toContainText("部分数据源召回通道已降级。");
   await expect(primary).toContainText("部分摘要未能补全。");
-  await page.getByTestId("run-details-toggle").click();
+  await page.getByTestId("system-log-toggle").click();
   for (const code of warningCodes) await expect(page.getByTestId("system-log-audit")).toContainText(code);
 });

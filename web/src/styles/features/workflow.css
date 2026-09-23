@@ -308,106 +308,6 @@
   flex-wrap: wrap;
 }
 
-/* Run details (§12): one low-emphasis entry below the four stages; tabs gate all
-   technical content and render lazily only while the container is open. */
-.run-details {
-  border-top: 1px solid var(--color-border);
-  margin-top: var(--space-1);
-}
-
-.run-details-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: var(--control-h);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--text-aux);
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-}
-
-.run-details-toggle:hover {
-  color: var(--color-text);
-}
-
-.run-details-toggle:focus-visible {
-  outline: 2px solid var(--color-link);
-  outline-offset: 2px;
-}
-
-.run-details-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3) 0 var(--space-4);
-}
-
-.run-details-tabs {
-  display: flex;
-  gap: var(--space-1);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.run-details-tab {
-  min-height: var(--control-h);
-  padding: 0 var(--space-3);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: var(--text-body);
-}
-
-.run-details-tab--active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
-  font-weight: 600;
-}
-
-.run-details-tab:focus-visible {
-  outline: 2px solid var(--color-link);
-  outline-offset: -2px;
-}
-
-.run-details-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.run-details-heading {
-  font-size: var(--text-body);
-  font-weight: 600;
-  margin: 0 0 var(--space-2);
-}
-
-.run-details-group + .run-details-group {
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--space-3);
-}
-
-.run-details-raw > summary {
-  min-height: var(--control-h);
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: var(--text-meta);
-  font-weight: 600;
-}
-
-.log-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
 .log-content {
   margin: 0;
   max-height: 320px;
@@ -468,9 +368,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  border: 1px solid var(--color-accent);
+  border: 1px solid var(--color-warning);
   border-radius: var(--radius-sm);
-  background: var(--color-accent-soft);
+  background: var(--color-warning-soft);
   color: var(--color-text);
   font-size: var(--text-meta);
 }
@@ -513,4 +413,364 @@
   .mobile-stage-bar .stage-elapsed {
     margin-left: auto;
   }
+}
+
+/* ---- Rich stage bodies (legacy organization, shadcn surface) ---- */
+.stage-rich {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.stage-empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-aux);
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.metric strong {
+  font-size: var(--text-section-title);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric span {
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+}
+
+.detail-label {
+  font-size: var(--text-meta);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.intent-summary p {
+  margin-top: var(--space-1);
+}
+
+.chip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-subtle);
+  font-size: var(--text-meta);
+}
+
+.query-output {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.query-output small {
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+}
+
+.query-output code {
+  font-family: var(--font-mono);
+  font-size: var(--text-aux);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+/* Folded technical sections inside a stage (§12) */
+.stage-disclosure {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.stage-disclosure-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-aux);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stage-disclosure-toggle:hover {
+  color: var(--color-text);
+}
+
+.stage-disclosure-toggle:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+.stage-disclosure-body {
+  padding: var(--space-2) 0 var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.intent-detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-aux);
+}
+
+.intent-detail-group > strong {
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+}
+
+.query-view-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: var(--text-aux);
+}
+
+.query-view-row code {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+/* Iteration rows (stage 02) */
+.iteration-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.iteration-row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.iteration-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.iteration-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: var(--text-aux);
+  color: var(--color-text-muted);
+}
+
+.iteration-meta strong {
+  color: var(--color-text);
+}
+
+.action-pill {
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  font-size: var(--text-meta);
+  color: var(--color-text-muted);
+}
+
+.action-pill[data-action="accept"] {
+  color: var(--color-success);
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.action-pill[data-action="stop"] {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.iteration-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+  font-size: var(--text-aux);
+}
+
+.iteration-body code {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+.iteration-body p {
+  color: var(--color-text-muted);
+}
+
+/* ---- System log panel (§12): dark console docked at the pane bottom ---- */
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-4);
+  background: var(--color-console);
+  border: 1px solid var(--color-console-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  color: var(--color-console-text);
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+  min-height: 38px;
+  padding: var(--space-1) var(--space-3);
+}
+
+.log-toggle span {
+  white-space: nowrap;
+}
+
+.log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-console-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.log-toggle:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: -2px;
+}
+
+.log-toggle .disclosure-icon {
+  color: var(--color-console-muted);
+}
+
+.log-error-badge {
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: var(--color-primary-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.log-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--color-console-muted);
+}
+
+.log-fact {
+  font-variant-numeric: tabular-nums;
+}
+
+.log-run-id {
+  font-size: var(--text-meta);
+  color: var(--color-console-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.log-utility {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-console-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-console-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.log-utility:hover {
+  border-color: var(--color-console-muted);
+  text-decoration: none;
+}
+
+.log-output {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-console-border);
+  color: var(--color-console-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+
+.process-group + .process-group {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.process-heading {
+  font-size: var(--text-body);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
 }

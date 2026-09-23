@@ -60,23 +60,23 @@
 }
 
 .legend-shape--result {
-  fill: var(--color-link-soft);
-  stroke: var(--color-link);
+  fill: var(--color-graph-result);
+  stroke: var(--color-graph-result);
 }
 
 .legend-shape--seed {
-  fill: var(--color-accent-soft);
-  stroke: var(--color-accent);
+  fill: var(--color-graph-seed);
+  stroke: var(--color-graph-seed);
 }
 
 .legend-shape--forward {
-  fill: var(--color-success-soft);
-  stroke: var(--color-success);
+  fill: var(--color-graph-forward);
+  stroke: var(--color-graph-forward);
 }
 
 .legend-shape--backward {
-  fill: var(--color-surface-subtle);
-  stroke: var(--color-text-muted);
+  fill: var(--color-graph-backward);
+  stroke: var(--color-graph-backward);
 }
 
 .citation-graph {
@@ -118,27 +118,28 @@
 }
 
 .citation-node[data-role="result"] .citation-node-shape {
-  fill: var(--color-link-soft);
-  stroke: var(--color-link);
+  fill: var(--color-graph-result);
+  stroke: var(--color-graph-result);
 }
 
 .citation-node[data-role="seed"] .citation-node-shape {
-  fill: var(--color-accent-soft);
-  stroke: var(--color-accent);
+  fill: var(--color-graph-seed);
+  stroke: var(--color-graph-seed);
 }
 
 .citation-node[data-role="forward"] .citation-node-shape {
-  fill: var(--color-success-soft);
-  stroke: var(--color-success);
+  fill: var(--color-graph-forward);
+  stroke: var(--color-graph-forward);
 }
 
 .citation-node[data-role="backward"] .citation-node-shape {
-  fill: var(--color-surface-subtle);
-  stroke: var(--color-text-muted);
+  fill: var(--color-graph-backward);
+  stroke: var(--color-graph-backward);
 }
 
 .citation-node[data-selected="true"] .citation-node-shape {
-  stroke-width: 4;
+  stroke: var(--color-text);
+  stroke-width: 3;
 }
 
 .citation-node:focus-visible {

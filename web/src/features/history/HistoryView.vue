@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { api } from "../../api/client";
 import type { RunDetail, RunEvent } from "../../api/types";
 import { useLocale } from "../../locales";
-import RunDetails from "../search/RunDetails.vue";
+import SystemLogPanel from "../search/SystemLogPanel.vue";
 
 const { language, runMessage, sourceName, t } = useLocale();
 const items = ref<RunDetail[]>([]);
@@ -248,13 +248,11 @@ onBeforeUnmount(() => {
             <p v-if="selected.warnings?.length"><strong>{{ t("warnings") }}:</strong> {{ selected.warnings.map((warning) => runMessage(warning)).join(" · ") }}</p>
             <p v-if="selected.error_code"><strong>{{ t("error") }}:</strong> {{ runMessage(selected.error_code, "error") }}</p>
           </div>
-          <RunDetails
-            id-prefix="history-run-details"
+          <SystemLogPanel
+            id-prefix="history-system-log"
             :run-id="selected.id"
             :events="events"
-            :audit="null"
-            :last-event-sequence="selected.last_event_sequence ?? events[events.length - 1]?.sequence ?? 0"
-            :versions="selected.versions || null"
+            :terminal="terminalStatuses.has(selected.status)"
           />
           <div class="history-detail-actions">
             <RouterLink class="button button--small" :to="`/runs/${selected.id}`">{{ t("workflow") }}</RouterLink>

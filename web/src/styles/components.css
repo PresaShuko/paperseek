@@ -8,8 +8,8 @@
   gap: var(--space-2);
   min-height: var(--control-h);
   padding: 0 var(--space-4);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
@@ -25,21 +25,22 @@
 }
 
 .button:disabled {
-  opacity: 0.55;
+  color: var(--color-text-subtle);
   cursor: not-allowed;
 }
 
 .button--primary {
   min-height: var(--control-h-primary);
   padding: 0 var(--space-6);
-  background: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-surface);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-foreground);
   font-weight: 600;
 }
 
 .button--primary:hover:not(:disabled) {
   background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
 }
 
 /* Disabled primary keeps its shape and position: gray fill, muted text (§13.2) */
@@ -93,7 +94,7 @@
   min-height: var(--control-h);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--color-surface);
   width: 100%;
 }
@@ -139,11 +140,11 @@
   }
 }
 
-/* Segmented control (budget, language) */
+/* Segmented control (budget, language): white track, dark selected segment */
 .segmented {
   display: inline-flex;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--color-surface);
 }
@@ -179,8 +180,8 @@
 
 .segmented label:has(input:checked),
 .segmented button.active {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
   font-weight: 600;
 }
 

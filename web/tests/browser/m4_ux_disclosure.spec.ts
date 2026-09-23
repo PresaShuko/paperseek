@@ -84,7 +84,8 @@ test("idle search keeps four stages collapsed without placeholder progress", asy
     await expect(page.getByTestId(`stage-${key}-toggle`)).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByTestId(`stage-${key}`)).toHaveAttribute("data-state", "idle");
   }
-  await expect(page.getByTestId("run-details")).toHaveCount(0);
+  await expect(page.getByTestId("system-log-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
 });
 
 test("active stage expands with server-time elapsed; manual close survives later events", async ({ page }) => {
@@ -121,15 +122,15 @@ test("durable events advance through the four product stages with one active sta
 
   await expect(page.getByTestId("stage-query")).toHaveAttribute("data-state", "active");
   await expect(page.getByTestId("stage-search")).toHaveAttribute("data-state", "idle");
-  await expect(page.getByTestId("stage-query-audit")).toContainText("Search plan prepared");
+  await expect(page.getByTestId("stage-query-audit")).toContainText("Map durable disclosure facts");
 
   gate.released = 3;
   await expect(page.getByTestId("stage-query")).toHaveAttribute("data-state", "complete", { timeout: 10_000 });
   await expect(page.getByTestId("stage-search")).toHaveAttribute("data-state", "active");
   await expect(page.getByTestId("stage-search-toggle")).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByTestId("stage-search-audit")).toContainText("Search iteration reviewed");
+  await expect(page.getByTestId("stage-search-audit")).toContainText("Iteration 1");
   await expect(page.getByTestId("stage-search-audit")).toContainText("Accepted");
-  await expect(page.getByTestId("stage-query-audit")).not.toContainText("Search iteration reviewed");
+  await expect(page.getByTestId("stage-query-audit")).not.toContainText("Iteration 1");
   await expect(page.getByTestId("stage-search-toggle")).toContainText("1 iterations");
   await expect(page.getByTestId("stage-search-toggle")).toContainText("Source hits 12");
   await expect(page.getByTestId("stage-search-toggle")).toContainText("Accepted");
@@ -174,38 +175,47 @@ test("a cancelled run freezes stages and marks them cancelled", async ({ page })
   await expect(page.getByTestId("stage-results")).toHaveAttribute("data-state", "idle");
 });
 
-test("run details stays closed by default and gates technical content behind tabs", async ({ page }) => {
+test("the system log panel folds by default and manual state wins", async ({ page }) => {
   const events = buildEvents();
   const gate = await mockTimeline(page, events, "completed");
   gate.released = events.length;
   await page.goto(`/runs/${runId}`);
   await expect(page.getByTestId("run-status")).toHaveText("Completed", { timeout: 15_000 });
 
-  const toggle = page.getByTestId("run-details-toggle");
+  const toggle = page.getByTestId("system-log-toggle");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
-  await expect(page.getByTestId("technical-audit")).toHaveCount(0);
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  const logTab = page.getByTestId("run-details-tab-log");
-  await expect(logTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("system-log-audit")).toContainText("workflow.completed");
+  // Header facts stay visible in both states (§12).
+  await expect(page.getByTestId("event-count")).toHaveText(String(events.length));
 
-  // W3C tabs: arrows move focus without activating, Enter activates (§12).
-  await logTab.focus();
-  await page.keyboard.press("ArrowRight");
-  const processTab = page.getByTestId("run-details-tab-process");
-  await expect(processTab).toBeFocused();
-  await expect(processTab).toHaveAttribute("aria-selected", "false");
-  await expect(page.getByTestId("system-log-audit")).toBeVisible();
-  await page.keyboard.press("Enter");
-  await expect(processTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
-  await expect(page.getByTestId("retrieval-progress-audit")).toBeVisible();
-
-  // Closing the container removes its content from the tab order entirely.
   await toggle.click();
-  await expect(page.getByTestId("run-details-tab-log")).toHaveCount(0);
-  await expect(page.getByTestId("retrieval-progress-audit")).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("system-log-audit")).toHaveCount(0);
+});
+
+test("a real error auto-opens the log panel while the run is live", async ({ page }) => {
+  const events = [
+    ...buildEvents().slice(0, 8),
+    { sequence: 9, event_type: "ranking.failed", stage: "rank.results", payload: { code: "ranking_failed" } },
+    { sequence: 10, event_type: "workflow.completed", stage: "workflow.completed", payload: { result_count: 0, warning_count: 1 } },
+  ];
+  const gate = await mockTimeline(page, events, "failed");
+  // Hold back the final event so the run stays live after the failure lands.
+  gate.released = 9;
+  await page.goto(`/runs/${runId}`);
+
+  const toggle = page.getByTestId("system-log-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
+  await expect(page.getByTestId("system-log-audit")).toContainText("ranking_failed");
+
+  // Manual close wins, and the terminal transition must not reopen it (§12).
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  gate.released = events.length;
+  await expect(page.getByTestId("run-status")).toHaveText("Failed", { timeout: 15_000 });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
 });

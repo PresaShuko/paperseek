@@ -101,7 +101,16 @@
 }
 
 .workbench-pane--audit {
-  align-self: start;
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+}
+
+/* The workflow area scrolls; the dark log panel stays docked at the bottom (§12) */
+.workbench-pane--audit > .workflow {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Single-column tool pages (results, history, citation map) */

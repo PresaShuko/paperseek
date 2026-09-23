@@ -58,14 +58,17 @@ function authors(paper: PaperResult): string {
 }
 
 function metaLine(paper: PaperResult): string {
-  const parts = [
-    paper.year ?? paper.publish_year ?? "",
-    paper.venue || paper.source || "",
-    paper.provider ? sourceName(paper.provider, paper.provider) : "",
-  ].filter((value) => value !== "" && value !== null && value !== undefined);
+  const parts: string[] = [];
+  if (paper.rank) parts.push(`${t("rankLabel")} ${paper.rank}`);
+  const score = paperScore(paper);
+  if (score !== null) parts.push(`${score}/10`);
+  const year = paper.year ?? paper.publish_year;
+  if (year) parts.push(String(year));
   const citations = Number(paper.citation_count ?? paper.citations ?? 0);
   parts.push(`${citations} ${t("citations")}`);
-  return parts.join(" · ");
+  if (paper.provider) parts.push(sourceName(paper.provider, paper.provider));
+  if (paper.venue || paper.source) parts.push(paper.venue || paper.source || "");
+  return parts.filter(Boolean).join(" · ");
 }
 
 const filtersActive = computed(
@@ -363,26 +366,27 @@ onBeforeUnmount(() => {
       </div>
       <section class="results-list">
         <article v-for="paper in results" :key="paperId(paper)" class="result-card" :class="{ 'result-card--selected': selectedIds.has(paperId(paper)) }" data-testid="result-card">
-          <div class="result-score" data-testid="result-score" :class="{ 'result-score--none': paperScore(paper) === null }">
-            <template v-if="paperScore(paper) !== null">{{ paperScore(paper) }}<span class="result-score-scale">/10</span></template>
-            <span v-else>{{ t("notScored") }}</span>
+          <div class="result-card-header">
+            <input type="checkbox" :checked="selectedIds.has(paperId(paper))" :aria-label="`${t('selected')}: ${paper.title}`" @change="toggleSelection(paper)">
+            <span class="result-score" data-testid="result-score" :class="paperScore(paper) === null ? 'result-score--none' : 'result-score--scored'">
+              <template v-if="paperScore(paper) !== null">{{ paperScore(paper) }}/10</template>
+              <template v-else>{{ t("notScored") }}</template>
+            </span>
+            <h3 class="result-title">
+              <a v-if="paper.url" :href="paper.url" target="_blank" rel="noopener">{{ paper.title }}</a>
+              <template v-else>{{ paper.title }}</template>
+            </h3>
           </div>
           <div class="result-copy">
-            <div class="result-title-row">
-              <input type="checkbox" :checked="selectedIds.has(paperId(paper))" :aria-label="`${t('selected')}: ${paper.title}`" @change="toggleSelection(paper)">
-              <h3 class="result-title">
-                <a v-if="paper.url" :href="paper.url" target="_blank" rel="noopener">{{ paper.title }}</a>
-                <template v-else>{{ paper.title }}</template>
-              </h3>
-              <span class="result-rank">{{ t("rankLabel") }} {{ paper.rank }}</span>
-            </div>
             <div class="result-clamp-block">
-              <p class="result-meta" :class="{ 'result-clamp result-clamp--2': !isExpanded(`${paperId(paper)}:authors`) }">{{ authors(paper) }}</p>
+              <p class="result-meta result-authors" :class="{ 'result-clamp result-clamp--2': !isExpanded(`${paperId(paper)}:authors`) }">{{ authors(paper) }}</p>
               <button v-if="authors(paper).length > 120" class="clamp-toggle" type="button" @click="toggleExpanded(`${paperId(paper)}:authors`)">
                 {{ isExpanded(`${paperId(paper)}:authors`) ? t("collapse") : t("expandAll") }}
               </button>
             </div>
             <p class="result-meta">{{ metaLine(paper) }}</p>
+            <p v-if="paper.doi" class="result-meta"><span class="detail-label">DOI</span> <code>{{ paper.doi }}</code> <a :href="`https://doi.org/${paper.doi}`" target="_blank" rel="noopener">doi.org</a></p>
+            <p v-if="paper.keywords" class="result-meta"><span class="detail-label">{{ t("keywords") }}</span> {{ Array.isArray(paper.keywords) ? paper.keywords.join('; ') : paper.keywords }}</p>
             <div class="result-clamp-block">
               <template v-if="paper.abstract">
                 <p class="result-abstract" :class="{ 'result-clamp result-clamp--3': !isExpanded(`${paperId(paper)}:abstract`) }"><span class="detail-label">{{ t("abstract") }}</span> {{ paper.abstract }}</p>
@@ -408,8 +412,6 @@ onBeforeUnmount(() => {
                   {{ t("bibliographicDetails") }}
                 </summary>
                 <div class="result-details-body">
-                  <p v-if="paper.doi"><span class="detail-label">DOI</span> <code>{{ paper.doi }}</code> <a :href="`https://doi.org/${paper.doi}`" target="_blank" rel="noopener">doi.org</a></p>
-                  <p v-if="paper.keywords"><span class="detail-label">{{ t("keywords") }}</span> {{ Array.isArray(paper.keywords) ? paper.keywords.join('; ') : paper.keywords }}</p>
                   <p v-if="paper.document_types?.length || paper.publication_type"><span class="detail-label">{{ t("publicationType") }}</span> {{ (paper.document_types?.length ? paper.document_types.join('; ') : paper.publication_type) }}</p>
                   <p v-if="paper.venue || paper.source"><span class="detail-label">{{ t("venue") }}</span> {{ paper.venue || paper.source }}</p>
                   <p v-if="paper.provider"><span class="detail-label">{{ t("dataSource") }}</span> {{ sourceName(paper.provider, paper.provider) }}</p>

@@ -1,20 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, watchEffect } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch, watchEffect } from "vue";
 
 import { useLocale } from "../../locales";
 import { runState, type StageKey } from "../../state/run";
-import RunDetails from "./RunDetails.vue";
-import { eventDetail, eventLabel, eventStage, localizedDecision, localizedFailure, type StructuredRow } from "./workflow-format";
+import StageQueryBody from "./StageQueryBody.vue";
+import StageRankingBody from "./StageRankingBody.vue";
+import StageResultsBody from "./StageResultsBody.vue";
+import StageSearchBody from "./StageSearchBody.vue";
+import SystemLogPanel from "./SystemLogPanel.vue";
+import { eventStage, localizedDecision } from "./workflow-format";
 
 type Disclosure = "auto" | "manually_open" | "manually_closed";
-type StepStatus = "pending" | "current" | "done" | "degraded" | "failed";
-
-interface StepRow {
-  id: string;
-  status: StepStatus;
-  detail: string;
-  progress: { current: number; total: number } | null;
-}
 
 const { t } = useLocale();
 const stages: Array<[StageKey, string, string]> = [
@@ -24,7 +20,7 @@ const stages: Array<[StageKey, string, string]> = [
   ["results", "04", "resultsStage"],
 ];
 
-// Three-state disclosure per stage, valid only within the current run (§6).
+// Three-state disclosure per stage, valid only within the current run (§5.2).
 const disclosure = reactive<Record<StageKey, Disclosure>>({
   query: "auto",
   search: "auto",
@@ -39,7 +35,7 @@ function resetDisclosure(): void {
 watch(() => runState.run?.id, resetDisclosure);
 
 // A newly failed stage always opens once, even if the user closed it before;
-// a manual close after that failure is respected (§6 priority order).
+// a manual close after that failure is respected (§5.2 priority order).
 for (const key of ["query", "search", "ranking", "results"] as StageKey[]) {
   watch(() => runState.stages[key], (next, previous) => {
     if (next === "failed" && previous !== "failed") disclosure[key] = "auto";
@@ -48,14 +44,6 @@ for (const key of ["query", "search", "ranking", "results"] as StageKey[]) {
 
 function eventsFor(key: StageKey) {
   return runState.events.filter((event) => eventStage(event) === key);
-}
-
-function structuredEventsFor(key: StageKey): StructuredRow[] {
-  return eventsFor(key).map((event) => ({
-    sequence: event.sequence,
-    label: eventLabel(t, event.event_type),
-    detail: eventDetail(t, event),
-  }));
 }
 
 function lastPayload(prefix: string): Record<string, unknown> | null {
@@ -86,22 +74,15 @@ function isOpen(key: StageKey): boolean {
   if (manual === "manually_closed") return false;
   if (runState.stages[key] === "failed") return true;
   // "Current stage" only exists while the run is actually live; a stale active
-  // stage in a terminal run stays collapsed (§6).
+  // stage in a terminal run stays collapsed (§5.2).
   return runState.stages[key] === "active" && !runTerminal.value;
 }
 
-function toggleDisclosure(key: StageKey, event?: MouseEvent): void {
+function toggleDisclosure(key: StageKey): void {
   disclosure[key] = isOpen(key) ? "manually_closed" : "manually_open";
-  // A manual open near the viewport bottom would otherwise expand out of view.
-  if (disclosure[key] !== "manually_open" || !event) return;
-  const card = (event.currentTarget as HTMLElement | null)?.closest("details");
-  nextTick(() => {
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    card?.scrollIntoView({ behavior, block: "nearest" });
-  });
 }
 
-// Elapsed time derives from the server event time, recomputed on a timer (§6).
+// Elapsed time derives from the server event time, recomputed on a timer (§5.2).
 const now = ref(Date.now());
 const timer = setInterval(() => {
   now.value = Date.now();
@@ -136,18 +117,8 @@ const queryPlanned = computed(() => lastPayload("query.planned"));
 const iterations = computed(() => runState.events
   .filter((event) => event.event_type === "query.progress")
   .map((event) => ({ sequence: event.sequence, ...(event.payload || {}) } as { sequence: number } & Record<string, unknown>)));
-const retrievalCompleted = computed(() => {
-  for (let index = runState.events.length - 1; index >= 0; index -= 1) {
-    if (runState.events[index].event_type === "retrieval.completed") return runState.events[index].payload || {};
-  }
-  return null;
-});
-const workflowCompleted = computed(() => {
-  for (let index = runState.events.length - 1; index >= 0; index -= 1) {
-    if (runState.events[index].event_type === "workflow.completed") return runState.events[index].payload || {};
-  }
-  return null;
-});
+const retrievalCompleted = computed(() => lastPayload("retrieval.completed"));
+const workflowCompleted = computed(() => lastPayload("workflow.completed"));
 
 function summaryLine(key: StageKey): string {
   if (key === "query") {
@@ -183,140 +154,14 @@ function summaryLine(key: StageKey): string {
   return "";
 }
 
-const rankingSteps = computed<StepRow[]>(() => {
-  const rows: StepRow[] = [];
-  const retrievalEvents = runState.events.filter((event) => event.event_type.startsWith("retrieval."));
-  if (retrievalEvents.length) {
-    const progress = lastPayload("retrieval.progress");
-    const completed = retrievalCompleted.value;
-    const failed = retrievalEvents.some((event) => event.event_type === "retrieval.failed");
-    const degradedPayload = lastPayload("retrieval.degraded");
-    let status: StepStatus = "current";
-    if (failed) status = "failed";
-    else if (completed) status = "done";
-    else if (degradedPayload && !completed) status = "degraded";
-    const detail = completed
-      ? `${t("fusedCandidates")} ${Number(completed.total_candidates ?? 0)} · ${t("loadedCandidates")} ${Number(completed.candidate_count ?? 0)}`
-      : progress
-        ? `${Number(progress.completed_lanes ?? 0)} / ${Number(progress.total_lanes ?? 0)} · ${Number(progress.candidate_count ?? 0)} ${t("candidates")}`
-        : "";
-    rows.push({
-      id: "stepMultiLane",
-      status,
-      detail,
-      progress: progress && !completed
-        ? { current: Number(progress.completed_lanes ?? 0), total: Number(progress.total_lanes ?? 0) }
-        : null,
-    });
-  }
-  const citationEvents = runState.events.filter((event) => event.event_type.startsWith("citation."));
-  if (citationEvents.length) {
-    const latest = citationEvents[citationEvents.length - 1];
-    const payload = latest.payload || {};
-    let status: StepStatus = "current";
-    let detail = "";
-    if (latest.event_type === "citation.completed") {
-      status = "done";
-      detail = `${Number(payload.added_candidates ?? 0)} / ${Number(payload.candidate_count ?? 0)} ${t("candidates")}`;
-    } else if (latest.event_type === "citation.skipped") {
-      status = "done";
-      detail = t("not_requested");
-    } else if (latest.event_type === "citation.degraded") {
-      status = "degraded";
-      detail = String(payload.code || t("degraded"));
-    } else {
-      detail = `${Number(payload.processed_seeds ?? 0)} / ${Number(payload.seed_count ?? 0)}`;
-    }
-    rows.push({
-      id: "stepCitation",
-      status,
-      detail,
-      progress: status === "current"
-        ? { current: Number(payload.processed_seeds ?? 0), total: Number(payload.seed_count ?? 0) }
-        : null,
-    });
-  }
-  const rankingEvents = runState.events.filter((event) => event.event_type.startsWith("ranking."));
-  if (rankingEvents.length) {
-    const completedPayload = lastPayload("ranking.completed");
-    const failedPayload = lastPayload("ranking.failed");
-    const batch = lastPayload("ranking.batch_completed") || lastPayload("ranking.started");
-    const degradedPayload = lastPayload("ranking.degraded");
-    let status: StepStatus = "current";
-    if (failedPayload) status = "failed";
-    else if (completedPayload) status = "done";
-    else if (degradedPayload) status = "degraded";
-    const current = Number(batch?.completed_batches ?? 0);
-    const total = Number(batch?.batch_count ?? 0);
-    const detail = failedPayload
-      ? `${localizedFailure(t, failedPayload.code)}${failedPayload.failed_candidates !== undefined ? ` · ${t("failedCandidates")} ${Number(failedPayload.failed_candidates)}` : ""}`
-      : completedPayload
-      ? `${Number(completedPayload.scored_count ?? 0)} / ${Number(completedPayload.candidate_count ?? 0)}${Number(completedPayload.warning_count ?? 0) ? ` · ${Number(completedPayload.warning_count)} ${t("warnings")}` : ""}`
-      : batch
-        ? `${current} / ${total}`
-        : "";
-    rows.push({
-      id: "stepLlmRanking",
-      status,
-      detail,
-      progress: status === "current" && total ? { current, total } : null,
-    });
-  }
-  const enrichmentEvents = runState.events.filter((event) => event.event_type.startsWith("enrichment."));
-  if (enrichmentEvents.length) {
-    const latest = enrichmentEvents[enrichmentEvents.length - 1];
-    const payload = latest.payload || {};
-    let status: StepStatus = "current";
-    let detail = "";
-    if (latest.event_type === "enrichment.completed") {
-      status = "done";
-      detail = `${Number(payload.enriched_count ?? 0)} / ${Number(payload.total ?? payload.request_count ?? 0)}`;
-    } else if (latest.event_type === "enrichment.skipped") {
-      status = "done";
-      detail = t("not_requested");
-    } else if (latest.event_type === "enrichment.degraded") {
-      status = "degraded";
-      detail = String(payload.code || t("degraded"));
-    } else {
-      detail = `${Number(payload.current ?? 0)} / ${Number(payload.total ?? payload.request_count ?? 0)}`;
-    }
-    rows.push({
-      id: "stepEnrichment",
-      status,
-      detail,
-      progress: status === "current"
-        ? { current: Number(payload.current ?? 0), total: Number(payload.total ?? payload.request_count ?? 0) }
-        : null,
-    });
-  }
-  return rows;
-});
-
-function stepIcon(status: StepStatus): string {
-  if (status === "done") return "step-icon--done";
-  if (status === "current") return "step-icon--current";
-  if (status === "failed") return "step-icon--failed";
-  if (status === "degraded") return "step-icon--degraded";
-  return "step-icon--pending";
-}
-
-function stepStatusText(status: StepStatus): string {
-  if (status === "done") return t("complete");
-  if (status === "current") return t("active");
-  if (status === "failed") return t("failed");
-  if (status === "degraded") return t("degraded");
-  return t("idle");
-}
-
-// The folded run-details container is the single home for log/process/diagnostics (§12).
-const runDetails = ref<InstanceType<typeof RunDetails> | null>(null);
-const hasRunDetails = computed(() => Boolean(runState.events.length || runState.audit));
+// The dark log panel is the single home for the ordered event stream (§12).
+const logPanel = ref<InstanceType<typeof SystemLogPanel> | null>(null);
 
 function openLog(): void {
-  runDetails.value?.openTab("log");
+  logPanel.value?.openPanel();
 }
 
-// Dedicated concise announcer; the workflow container itself is not a live region (§8).
+// Dedicated concise announcer; the workflow container itself is not a live region (§15).
 const announcement = ref("");
 let lastAnnouncedStage: string | null = null;
 let lastAnnouncedStatus = "";
@@ -352,7 +197,7 @@ watchEffect(() => {
           class="stage-summary"
           :data-testid="`stage-${key}-toggle`"
           :aria-expanded="isOpen(key)"
-          @click.prevent="toggleDisclosure(key, $event)"
+          @click.prevent="toggleDisclosure(key)"
         >
           <span class="stage-number" aria-hidden="true">{{ number }}</span>
           <span class="stage-heading">
@@ -370,29 +215,10 @@ watchEffect(() => {
           </span>
         </summary>
         <div class="stage-body">
-          <template v-if="key === 'ranking' && rankingSteps.length">
-            <ol class="step-list" :data-testid="`stage-${key}-audit`">
-              <li v-for="step in rankingSteps" :key="step.id" class="step-row">
-                <span class="step-icon" :class="stepIcon(step.status)" aria-hidden="true">
-                  <svg v-if="step.status === 'done'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                  <svg v-else-if="step.status === 'current'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-                  <svg v-else-if="step.status === 'failed' || step.status === 'degraded'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 9 4 4m0-4-4 4M12 3 2 21h20L12 3z" /></svg>
-                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /></svg>
-                </span>
-                <span class="step-name">{{ t(step.id) }}</span>
-                <span class="step-detail" :class="{ 'step-detail--accent': step.status === 'current' }">{{ stepStatusText(step.status) }}<template v-if="step.detail"> · {{ step.detail }}</template></span>
-                <span v-if="step.progress && step.progress.total" class="step-progress" role="progressbar" :aria-valuenow="step.progress.current" :aria-valuemax="step.progress.total">
-                  <span :style="{ width: `${Math.min(100, (step.progress.current / step.progress.total) * 100)}%` }"></span>
-                </span>
-              </li>
-            </ol>
-          </template>
-          <ol v-else class="audit-list" :data-testid="`stage-${key}-audit`">
-            <li v-for="row in structuredEventsFor(key)" :key="row.sequence" class="audit-item structured-event-row">
-              <strong>{{ row.label }}</strong>
-              <span v-if="row.detail">{{ row.detail }}</span>
-            </li>
-          </ol>
+          <StageQueryBody v-if="key === 'query'" :events="eventsFor('query')" :source="runState.run?.source || ''" />
+          <StageSearchBody v-else-if="key === 'search'" :events="eventsFor('search')" :audit="runState.audit" :stage-active="runState.stages.search === 'active'" />
+          <StageRankingBody v-else-if="key === 'ranking'" :events="runState.events" :audit="runState.audit" />
+          <StageResultsBody v-else :run="runState.run" :events="eventsFor('results')" />
           <p v-if="runCancelled && runState.stages[key] !== 'complete'" class="field-help">{{ t("stageCancelledNote") }}</p>
           <div v-if="failedStage === key" class="stage-recovery">
             <RouterLink class="button button--small" to="/search">{{ t("checkConfigAction") }}</RouterLink>
@@ -408,20 +234,16 @@ watchEffect(() => {
       </div>
     </template>
 
-    <RunDetails
-      v-if="hasRunDetails"
-      ref="runDetails"
-      :run-id="runState.run?.id || ''"
-      :events="runState.events"
-      :audit="runState.audit"
-      :last-event-sequence="runState.lastEventSequence"
-      :versions="runState.run?.versions || null"
-    >
-      <template v-if="$slots['log-export']" #log-export="scope"><slot name="log-export" v-bind="scope" /></template>
-    </RunDetails>
-
     <div v-if="runState.error" class="alert" role="alert">
       <strong>{{ t(runState.error) }}</strong>
     </div>
   </div>
+  <SystemLogPanel
+    ref="logPanel"
+    :run-id="runState.run?.id || ''"
+    :events="runState.events"
+    :terminal="runTerminal"
+  >
+    <template v-if="$slots['log-export']" #log-export="scope"><slot name="log-export" v-bind="scope" /></template>
+  </SystemLogPanel>
 </template>
