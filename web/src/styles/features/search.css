@@ -34,9 +34,10 @@
   color: var(--color-text-muted);
 }
 
-/* Research question: comfortable default height, counter bottom-right */
+/* Research question: compact default height (about three lines), user-resizable */
 #research-question {
-  min-height: 120px;
+  min-height: 88px;
+  max-height: 40vh;
 }
 
 .question-count {
