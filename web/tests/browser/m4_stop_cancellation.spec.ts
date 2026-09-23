@@ -29,8 +29,10 @@ test("Stop uses the cancel API and stale work cannot revive a cancelled run", as
   let streamCalls = 0;
   let cancelCalls = 0;
   let acknowledgeCancel!: () => void;
+  let releaseCancelResponse!: () => void;
   let finishCancellation!: () => void;
   const cancelRequested = new Promise<void>((resolve) => { acknowledgeCancel = resolve; });
+  const cancelResponseGate = new Promise<void>((resolve) => { releaseCancelResponse = resolve; });
   const terminalAllowed = new Promise<void>((resolve) => { finishCancellation = resolve; });
 
   const events = [
@@ -54,6 +56,7 @@ test("Stop uses the cancel API and stale work cannot revive a cancelled run", as
     if (path === `/api/v1/runs/${runId}/cancel`) {
       cancelCalls += 1;
       expect(request.method()).toBe("POST");
+      await cancelResponseGate;
       await route.fulfill({ status: 202, json: run("cancelling") });
       acknowledgeCancel();
     } else if (path === `/api/v1/runs/${runId}/events`) {
@@ -81,21 +84,26 @@ test("Stop uses the cancel API and stale work cannot revive a cancelled run", as
   });
 
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveText("Running");
+  await expect(page.locator('.stage-card[data-state="active"] .badge').first()).toHaveText("In progress");
   const stop = page.getByRole("button", { name: "Stop" });
   await expect(stop).toBeEnabled();
   await stop.click();
-  await expect(page.getByTestId("run-status")).toHaveText("Cancelling");
+  // In-flight cancel: the same control shows the pending state and blocks repeats (§5.3).
+  const stopping = page.getByRole("button", { name: "Stopping…" });
+  await expect(stopping).toBeDisabled();
+  expect(cancelCalls).toBe(1);
+
+  releaseCancelResponse();
+  await expect(page.locator('.stage-card[data-state="active"] .badge').first()).toHaveText("Cancelling");
   // The Stop control leaves the page once cancellation is in flight (§5.1);
   // it must not linger as a permanently disabled button.
   await expect(stop).toHaveCount(0);
-  expect(cancelCalls).toBe(1);
 
   await page.waitForTimeout(200);
-  await expect(page.getByTestId("run-status")).toHaveText("Cancelling");
+  await expect(page.locator('.stage-card[data-state="active"] .badge').first()).toHaveText("Cancelling");
 
   finishCancellation();
-  await expect(page.getByTestId("run-status")).toHaveText("Cancelled");
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Cancelled");
   await expect(page.getByTestId("stage-results")).not.toHaveAttribute("data-state", "complete");
   await expect(stop).toHaveCount(0);
   expect(cancelCalls).toBe(1);

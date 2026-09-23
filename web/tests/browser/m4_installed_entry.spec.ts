@@ -62,12 +62,12 @@ test("installed Community entry serves Vue and records an explicit no-key failur
   const question = `M4 installed no-key boundary ${Date.now()}`;
   await page.getByLabel("Research Question").fill(question);
   await page.getByRole("button", { name: "Run Search" }).click();
-  await expect(page.getByTestId("run-status")).toHaveText("Failed", { timeout: 15_000 });
+  await expect(page.locator('.stage-card[data-state="failed"] .badge').first()).toHaveText("Failed", { timeout: 15_000 });
   const failedRunUrl = page.url();
   expect(failedRunUrl).toMatch(/\/runs\/[0-9a-f-]+$/);
 
   await page.reload();
-  await expect(page.getByTestId("run-status")).toHaveText("Failed", { timeout: 15_000 });
+  await expect(page.locator('.stage-card[data-state="failed"] .badge').first()).toHaveText("Failed", { timeout: 15_000 });
   await page.goto(`${failedRunUrl}/results`);
   await expect(page.getByRole("heading", { name: question, exact: true })).toBeVisible();
 
@@ -120,11 +120,11 @@ test("installed Community Stop reaches cancelling and cancelled through the real
   );
 
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveText("Running");
+  await expect(page.locator('.stage-card[data-state="active"] .badge').first()).toHaveText("In progress");
   const stop = page.getByRole("button", { name: "Stop" });
   await expect(stop).toBeEnabled();
   await stop.click();
-  await expect(page.getByTestId("run-status")).toHaveText("Cancelling");
+  await expect(page.locator('.stage-card[data-state="active"] .badge').first()).toHaveText("Cancelling");
   // Stop leaves the page once cancellation is in flight (§5.1), not a permanent disabled button.
   await expect(stop).toHaveCount(0);
 
@@ -144,7 +144,7 @@ test("installed Community Stop reaches cancelling and cancelled through the real
     stdio: "pipe",
   });
 
-  await expect(page.getByTestId("run-status")).toHaveText("Cancelled", { timeout: 10_000 });
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Cancelled", { timeout: 10_000 });
   await expect(page.getByTestId("stage-results")).not.toHaveAttribute("data-state", "complete");
   await expect(stop).toHaveCount(0);
 });

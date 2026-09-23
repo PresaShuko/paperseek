@@ -24,12 +24,15 @@
   --color-link-soft: #eff6ff;
   --color-danger: #b91c1c;
   --color-danger-soft: #fef2f2;
+  --color-ring: rgb(29 78 216 / 0.18);
+  --shadow-xs: 0 1px 2px rgb(10 10 10 / 0.06);
 
   /* System log console panel (§12) */
   --color-console: #0a0a0a;
   --color-console-text: #d4d4d4;
   --color-console-muted: #8d8d8d;
   --color-console-border: #262626;
+  --color-console-raised: #171717;
 
   /* Citation graph role colors (legacy semantics: result orange, seed blue,
      forward green, backward purple) */

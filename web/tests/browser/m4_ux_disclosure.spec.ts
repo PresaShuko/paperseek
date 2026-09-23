@@ -108,7 +108,7 @@ test("active stage expands with server-time elapsed; manual close survives later
 
   // Completion leaves the run on the workflow page with in-place entries.
   gate.released = events.length;
-  await expect(page.getByTestId("run-status")).toHaveText("Completed", { timeout: 15_000 });
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Complete", { timeout: 15_000 });
   await expect(page.getByTestId("stage-results")).toHaveAttribute("data-state", "complete");
   await expect(page.getByRole("link", { name: "View results" })).toHaveAttribute("href", `/runs/${runId}/results`);
   await expect(page.getByRole("link", { name: "View citation map" })).toHaveAttribute("href", `/runs/${runId}/citation-map`);
@@ -170,7 +170,7 @@ test("a cancelled run freezes stages and marks them cancelled", async ({ page })
   const gate = await mockTimeline(page, events, "cancelled");
   gate.released = events.length;
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveText("Cancelled", { timeout: 15_000 });
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Cancelled", { timeout: 15_000 });
   await expect(page.getByText("Cancelled at the last confirmed progress; late responses were discarded.").first()).toBeAttached();
   await expect(page.getByTestId("stage-results")).toHaveAttribute("data-state", "idle");
 });
@@ -180,7 +180,7 @@ test("the system log panel folds by default and manual state wins", async ({ pag
   const gate = await mockTimeline(page, events, "completed");
   gate.released = events.length;
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveText("Completed", { timeout: 15_000 });
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Complete", { timeout: 15_000 });
 
   const toggle = page.getByTestId("system-log-toggle");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -216,6 +216,6 @@ test("a real error auto-opens the log panel while the run is live", async ({ pag
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   gate.released = events.length;
-  await expect(page.getByTestId("run-status")).toHaveText("Failed", { timeout: 15_000 });
+  await expect(page.getByTestId("stage-ranking").locator(".badge").first()).toHaveText("Failed", { timeout: 15_000 });
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
 });

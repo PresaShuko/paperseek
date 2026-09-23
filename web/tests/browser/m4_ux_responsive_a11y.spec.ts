@@ -108,7 +108,7 @@ test("desktop hides the mobile stage bar", async ({ page }) => {
   await mockRunningRun(page);
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveText("Running");
+  await expect(page.locator('.stage-card[data-state="active"] .badge').first()).toHaveText("In progress");
   await expect(page.getByRole("button", { name: /Go to the current search stage/ })).toBeHidden();
 });
 

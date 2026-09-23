@@ -130,7 +130,7 @@ test("Vue preserves the four-stage bilingual search, result, graph, export and h
   await page.getByLabel("Research Question").fill(question);
   await page.getByLabel("Data Source").selectOption("openalex");
   await page.getByRole("button", { name: "Run Search" }).click();
-  await expect(page.getByTestId("run-status")).toHaveText("Completed");
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Complete");
   expect(submittedBody).toMatchObject({ question, source: "openalex", search_budget: "fast" });
   expect(idempotencyKey).not.toBe("");
 

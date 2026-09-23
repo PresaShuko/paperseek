@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
         <p v-if="deleteError" class="field-error" role="alert">{{ t(deleteError) }}</p>
         <div class="dialog-actions">
           <button ref="dialogCancel" class="button" type="button" :disabled="deleting" @click="closeDeleteDialog">{{ t("deleteRunCancel") }}</button>
-          <button class="button button--danger" type="button" :disabled="deleting" @click="confirmDelete">{{ deleting ? t("active") + "…" : t("deleteRunConfirm") }}</button>
+          <button class="button button--danger-solid" type="button" :disabled="deleting" @click="confirmDelete">{{ deleting ? t("active") + "…" : t("deleteRunConfirm") }}</button>
         </div>
       </div>
     </div>

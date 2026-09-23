@@ -60,6 +60,18 @@
   background: var(--color-danger-soft);
 }
 
+/* Destructive confirmation inside dialogs: solid red (§13.2) */
+.button--danger-solid {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-primary-foreground);
+}
+
+.button--danger-solid:hover:not(:disabled) {
+  background: var(--color-danger);
+  opacity: 0.92;
+}
+
 .button--small {
   min-height: 32px;
   padding: 0 var(--space-3);
@@ -69,6 +81,11 @@
 /* Mobile hit targets (§8) */
 @media (max-width: 900px) {
   .button {
+    min-height: var(--touch-target);
+  }
+
+  .segmented label,
+  .segmented button {
     min-height: var(--touch-target);
   }
 }
@@ -107,7 +124,14 @@
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
-  border-color: var(--color-border-strong);
+  border-color: var(--color-link);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-ring);
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: var(--color-text-subtle);
 }
 
 .field-help {
@@ -140,13 +164,14 @@
   }
 }
 
-/* Segmented control (budget, language): white track, dark selected segment */
+/* Segmented control (budget, language): shadcn tabs shape — subtle track,
+   white raised active segment */
 .segmented {
   display: inline-flex;
-  border: 1px solid var(--color-border);
+  gap: 2px;
+  padding: 3px;
   border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--color-surface);
+  background: var(--color-surface-subtle);
 }
 
 .segmented label,
@@ -156,20 +181,14 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
-  min-height: var(--control-h);
+  min-height: 32px;
   padding: 0 var(--space-3);
   border: 0;
-  border-right: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
   color: var(--color-text-muted);
   white-space: nowrap;
-}
-
-.segmented > *:last-child,
-.segmented label:last-child,
-.segmented button:last-child {
-  border-right: 0;
 }
 
 .segmented input {
@@ -180,9 +199,10 @@
 
 .segmented label:has(input:checked),
 .segmented button.active {
-  background: var(--color-primary);
-  color: var(--color-primary-foreground);
+  background: var(--color-surface);
+  color: var(--color-text);
   font-weight: 600;
+  box-shadow: var(--shadow-xs);
 }
 
 .segmented label:has(input:focus-visible) {
@@ -190,7 +210,7 @@
   outline-offset: -2px;
 }
 
-/* Status badge: text + color, never color alone (§8) */
+/* Status badge: pill shape, filled soft variants, text+color together (§13.2) */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -199,7 +219,7 @@
   border-radius: 999px;
   font-size: var(--text-meta);
   font-weight: 600;
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   color: var(--color-text-muted);
   background: var(--color-surface-subtle);
 }
@@ -207,19 +227,16 @@
 .badge--accent {
   color: var(--color-accent);
   background: var(--color-accent-soft);
-  border-color: var(--color-accent);
 }
 
 .badge--success {
   color: var(--color-success);
   background: var(--color-success-soft);
-  border-color: var(--color-success);
 }
 
 .badge--danger {
   color: var(--color-danger);
   background: var(--color-danger-soft);
-  border-color: var(--color-danger);
 }
 
 /* Alert / error block with actionable copy (§2.7) */

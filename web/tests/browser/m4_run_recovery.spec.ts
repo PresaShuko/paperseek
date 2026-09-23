@@ -121,7 +121,8 @@ test("run URL refresh replays, de-duplicates and reconnects with Last-Event-ID",
 
   await page.goto(`/runs/${runId}`);
   await expect(page).toHaveURL(new RegExp(`/runs/${runId}$`));
-  await expect(page.getByTestId("run-status")).toHaveText("Completed");
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Complete");
+  await expect(page.getByRole("link", { name: "View results" })).toBeVisible();
   // Diagnostic facts live in the log panel header, visible without expanding (§12).
   await expect(page.getByTestId("system-log-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("last-event-sequence")).toHaveText("8");
@@ -169,7 +170,8 @@ test("run URL refresh replays, de-duplicates and reconnects with Last-Event-ID",
   await expect(page.getByTestId("candidate-recovery-audit")).toContainText('"total": 1');
 
   await page.reload();
-  await expect(page.getByTestId("run-status")).toHaveText("Completed");
+  await expect(page.getByTestId("stage-results").locator(".badge").first()).toHaveText("Complete");
+  await expect(page.getByRole("link", { name: "View results" })).toBeVisible();
   await expect(page.getByTestId("event-count")).toHaveText("8");
   await page.getByTestId("stage-query-toggle").click();
   await expect(page.getByTestId("stage-query-audit")).toContainText("Recover durable research facts");
@@ -227,7 +229,7 @@ test("a failed stage automatically exposes its durable structured fact", async (
   });
 
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveText("Failed");
+  await expect(page.getByTestId("stage-ranking").locator(".badge").first()).toHaveText("Failed");
   await expect(page.getByTestId("stage-ranking-toggle")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("stage-query-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("stage-ranking-audit")).toContainText("Ranking failed.");

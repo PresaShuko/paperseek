@@ -381,12 +381,6 @@ const status = computed(() => runState.run?.status || "");
 const isActiveRun = computed(() => ["queued", "running", "cancelling"].includes(status.value));
 const isTerminal = computed(() => ["completed", "completed_with_warnings", "failed", "cancelled"].includes(status.value));
 const canStop = computed(() => ["queued", "running"].includes(status.value) || runState.cancelPending);
-const statusBadgeClass = computed(() => {
-  if (status.value === "failed" || status.value === "cancelled") return "badge--danger";
-  if (["completed", "completed_with_warnings"].includes(status.value)) return "badge--success";
-  if (isActiveRun.value) return "badge--accent";
-  return "";
-});
 
 const stageLabels: Array<[StageKey, string]> = [
   ["query", "queryStage"],
@@ -518,14 +512,8 @@ function rerun(): void {
       </div>
       <form v-else class="search-form" :class="{ 'search-form--readonly': readOnly }" autocomplete="off" novalidate @submit.prevent="submit" @keydown="onSubmitShortcut">
         <div class="form-scroll">
-        <div v-if="readOnly" class="run-panel-primary form-section" data-testid="run-primary-summary">
-          <div class="run-status-line">
-            <span class="badge" :class="statusBadgeClass"><strong data-testid="run-status">{{ t(status || "unavailable") }}</strong></span>
-          </div>
+        <div v-if="readOnly && (runState.run?.error_code || runState.run?.warnings?.length)" class="run-panel-primary form-section" data-testid="run-primary-summary">
           <p v-if="runState.run?.error_code" class="alert" role="alert">{{ runMessage(runState.run.error_code, "error") }}</p>
-          <dl class="run-panel-facts">
-            <div class="fact"><dt>{{ t("resultCount") }}</dt><dd>{{ runState.run?.result_count ?? 0 }}</dd></div>
-          </dl>
           <ul v-if="runState.run?.warnings?.length" class="run-warnings" data-testid="run-warnings">
             <li v-for="warning in runState.run.warnings" :key="warning">{{ runMessage(warning) }}</li>
           </ul>

@@ -61,6 +61,7 @@ const failedStage = computed<StageKey | null>(
   () => (Object.keys(runState.stages) as StageKey[]).find((key) => runState.stages[key] === "failed") || null,
 );
 const runCancelled = computed(() => runState.run?.status === "cancelled");
+const runCancelling = computed(() => runState.run?.status === "cancelling");
 const runTerminal = computed(
   () => ["completed", "completed_with_warnings", "failed", "cancelled"].includes(runState.run?.status || ""),
 );
@@ -102,6 +103,7 @@ function elapsed(key: StageKey): string {
 function statusText(key: StageKey): string {
   const value = runState.stages[key];
   if (runCancelled.value && (value === "active" || value === "idle")) return t("cancelled");
+  if (runCancelling.value && (value === "active" || value === "idle")) return t("cancelling");
   return t(value === "active" ? "active" : value);
 }
 

@@ -203,9 +203,9 @@ test("full run identifier is kept out of the default primary layer", async ({ pa
   await mockRun(page);
   await page.goto(`/runs/${runId}`);
 
-  await expect(page.getByTestId("run-primary-summary")).not.toContainText(runId);
+  await expect(page.locator(".search-form--readonly")).not.toContainText(runId);
   await expect(page.locator(".search-form--readonly")).toContainText("OpenAlex");
-  await expect(page.getByTestId("run-primary-summary").getByText("openalex", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".search-form--readonly").getByText("openalex", { exact: true })).toHaveCount(0);
   // The run identifier lives in the log panel header (§12); the log body stays folded.
   const toggle = page.getByTestId("system-log-toggle");
   await expect(toggle).toBeVisible();
