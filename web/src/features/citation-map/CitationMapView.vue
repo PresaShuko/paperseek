@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
     </div>
     <section v-else class="citation-layout">
       <div class="citation-map-panel">
-        <div class="citation-toolbar">
+        <div class="citation-toolbar workspace-toolbar">
           <ul class="citation-legend" :aria-label="t('citationLegend')">
             <li v-for="entry in legend" :key="entry.role">
               <svg class="legend-glyph" viewBox="-8 -8 16 16" aria-hidden="true">

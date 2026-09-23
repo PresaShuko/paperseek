@@ -1,52 +1,59 @@
-/* PaperSeek v0.3.0 design tokens — FRONTEND_INTERACTION_OPTIMIZATION.md §12.2/§12.3 */
+/* PaperSeek v0.3.0 design tokens — FRONTEND_UX_SPEC.md §13 */
 :root {
-  /* Semantic colors (§12.2) */
+  /* Semantic colors (§13.1) */
   --color-page: #f6f6f4;
   --color-surface: #ffffff;
   --color-surface-subtle: #f1f2ee;
   --color-text: #171717;
   --color-text-muted: #4b5563;
+  --color-text-subtle: #6b7280;
   --color-border: #d7d9d4;
   --color-border-strong: #b7bab2;
   --color-accent: #c2410c;
   --color-accent-soft: #fff7ed;
   --color-success: #166534;
   --color-success-soft: #f0fdf4;
+  --color-warning: #92400e;
   --color-link: #1d4ed8;
   --color-link-soft: #eff6ff;
   --color-danger: #b91c1c;
   --color-danger-soft: #fef2f2;
+  --color-primary-hover: #2e2e2c;
 
-  /* Typography (§12.3) */
+  /* Typography (§13.2): fixed steps, letter-spacing always 0 */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --text-page-title: 22px;
   --text-section-title: 17px;
+  --text-paper-title: 16px;
+  --text-stage-title: 15px;
   --text-body: 14px;
+  --text-aux: 13px;
   --text-meta: 12px;
 
-  /* Spacing rhythm: 4/8px (§12.3) */
+  /* Spacing rhythm: 4/8px (§13.2) */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
 
-  /* Shape and control sizes (§12.3) */
+  /* Shape and control sizes (§13.2) */
   --radius-sm: 6px;
   --radius-md: 8px;
   --control-h: 40px;
+  --control-h-compact: 36px;
   --control-h-primary: 48px;
   --touch-target: 44px;
 
-  /* Layout (§12.5) */
+  /* Layout (§13.3) */
   --topbar-h: 64px;
-  --pane-min: 340px;
-  --pane-max: 500px;
+  --pane-min: 360px;
 
-  /* Motion (§8): functional transitions only, 150–200ms */
+  /* Motion (§15): functional transitions only, 150–200ms */
   --duration: 160ms;
   --easing: ease-out;
 }

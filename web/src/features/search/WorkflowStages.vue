@@ -357,6 +357,8 @@ watchEffect(() => {
           </span>
           <span class="stage-meta">
             <span v-if="elapsed(key)" class="stage-elapsed" :data-testid="`stage-${key}-elapsed`">{{ elapsed(key) }}</span>
+            <svg v-if="runState.stages[key] === 'complete'" class="stage-state-icon stage-state-icon--complete" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5" /></svg>
+            <svg v-else-if="runState.stages[key] === 'failed'" class="stage-state-icon stage-state-icon--failed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 9 4 4m0-4-4 4M12 3 2 21h20L12 3z" /></svg>
             <svg class="disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
           </span>
         </summary>

@@ -13,7 +13,7 @@
   min-height: 0;
 }
 
-/* Topbar: brand + docs left, page nav center, language right (§4) */
+/* Topbar: 64px white bar with a hairline bottom border (§13.3) */
 .topbar {
   min-height: var(--topbar-h);
   display: flex;
@@ -53,7 +53,7 @@
 }
 
 .brand-title {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
@@ -81,27 +81,27 @@
   flex: none;
 }
 
-/* Desktop workbench: left search/config pane, right workflow audit (§12.5) */
+/* Desktop workbench (§13.3): centered 1440 max, 24px gutters and column gap,
+   left config pane minmax(360px, 38%), right pane takes the remainder */
 .workbench {
   flex: 1;
   display: grid;
   grid-template-columns: minmax(var(--pane-min), 38%) 1fr;
+  gap: var(--space-6);
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--space-6);
   min-height: 0;
 }
 
 .workbench-pane {
-  padding: var(--space-6);
   overflow-y: auto;
   min-width: 0;
 }
 
-.workbench-pane--config {
-  max-width: var(--pane-max);
-  border-right: 1px solid var(--color-border);
-}
-
 .workbench-pane--audit {
-  background: var(--color-page);
+  align-self: start;
 }
 
 /* Single-column tool pages (results, history, citation map) */
@@ -129,7 +129,60 @@
   overflow-wrap: anywhere;
 }
 
-/* Tablet and mobile (§12.5): single column, topbar may wrap into two rows */
+/* One shared toolbar style for results, history and the citation map (§13.3):
+   subtle gray band, compact controls, 8–12px gaps */
+.workspace-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.workspace-toolbar .field {
+  flex: 1 1 160px;
+}
+
+.workspace-toolbar .field input,
+.workspace-toolbar .field select {
+  min-height: var(--control-h-compact);
+}
+
+.workspace-toolbar .button {
+  min-height: var(--control-h-compact);
+}
+
+@media (max-width: 900px) {
+  .workspace-toolbar .button {
+    min-height: var(--touch-target);
+  }
+}
+
+/* Desktop: the workbench area is height-bounded; each pane scrolls on its own so
+   the primary action can dock at the pane's visible bottom (§13.3). */
+@media (min-width: 901px) {
+  #app {
+    height: 100dvh;
+  }
+
+  .app-main {
+    overflow: hidden;
+  }
+
+  .workbench {
+    height: 100%;
+  }
+
+  .workspace-view {
+    height: 100%;
+    overflow-y: auto;
+  }
+}
+
+/* Tablet and mobile (§13.4): single column, topbar may wrap into two rows */
 @media (max-width: 900px) {
   .topbar {
     flex-wrap: wrap;
@@ -145,17 +198,11 @@
 
   .workbench {
     grid-template-columns: 1fr;
+    padding: var(--space-4);
   }
 
   .workbench-pane {
-    padding: var(--space-4);
     overflow-y: visible;
-  }
-
-  .workbench-pane--config {
-    max-width: none;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border);
   }
 
   .workspace-view {

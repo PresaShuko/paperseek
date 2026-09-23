@@ -192,7 +192,7 @@ onBeforeUnmount(() => {
   <div class="workspace-view">
     <header class="workspace-header">
       <div><h2>{{ t("history") }}</h2></div>
-      <div class="alert-actions">
+      <div class="workspace-toolbar history-toolbar">
         <label class="field">
           <span class="sr-only">{{ t("historySearch") }}</span>
           <input v-model="searchInput" type="search" :placeholder="t('historySearch')" :aria-label="t('historySearch')" />

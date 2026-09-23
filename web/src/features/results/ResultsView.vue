@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section class="results-toolbar" :aria-label="t('resultControls')">
+      <section class="workspace-toolbar" :aria-label="t('resultControls')">
         <label class="field"><span class="field-label">{{ t("searchResults") }}</span><input v-model="query" type="search"></label>
         <label class="field"><span class="field-label">{{ t("minimumScore") }}</span>
           <select v-model="minScore">

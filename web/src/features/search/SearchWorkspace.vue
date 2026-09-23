@@ -151,6 +151,9 @@ const supportsCitationExpansion = computed(
 const showCitation = computed(
   () => (readOnly.value ? snapshotCitation.value !== undefined : supportsCitationExpansion.value),
 );
+const showFilterGroup = computed(() => (readOnly.value
+  ? showRunFieldSummary.value || showCitation.value
+  : selectedFilter.value?.mode === "native" || selectedFilter.value?.mode === "text" || showCitation.value));
 const budgetHintKey = computed(() => (({
   fast: "budgetHintFast",
   medium: "budgetHintMedium",
@@ -514,7 +517,8 @@ function rerun(): void {
         <button class="button" type="button" @click="load(runId)">{{ t("retry") }}</button>
       </div>
       <form v-else class="search-form" :class="{ 'search-form--readonly': readOnly }" autocomplete="off" novalidate @submit.prevent="submit" @keydown="onSubmitShortcut">
-        <div v-if="readOnly" class="run-panel-primary" data-testid="run-primary-summary">
+        <div class="form-scroll">
+        <div v-if="readOnly" class="run-panel-primary form-section" data-testid="run-primary-summary">
           <div class="run-status-line">
             <span class="badge" :class="statusBadgeClass"><strong data-testid="run-status">{{ t(status || "unavailable") }}</strong></span>
           </div>
@@ -526,7 +530,7 @@ function rerun(): void {
             <li v-for="warning in runState.run.warnings" :key="warning">{{ runMessage(warning) }}</li>
           </ul>
         </div>
-        <section class="form-section form-section--flat" :aria-label="t('searchControls')">
+        <section class="form-section" :aria-label="t('searchControls')">
           <div class="field">
             <label class="field-label" for="research-question">{{ t("researchQuestion") }}</label>
             <textarea
@@ -564,6 +568,9 @@ function rerun(): void {
             </div>
             <p class="budget-hint">{{ readOnly && !activeForm.searchBudget ? t("notRecorded") : t(budgetHintKey) }}</p>
           </fieldset>
+        </section>
+
+        <section v-if="showFilterGroup" class="form-section">
           <FieldSelector
             v-if="!readOnly && selectedFilter?.mode === 'native'"
             :source-id="form.source"
@@ -589,41 +596,50 @@ function rerun(): void {
             <input v-else type="checkbox" :checked="snapshotCitation === true" disabled />
             <span><strong>{{ t("expandCitations") }}</strong><small>{{ t("citationHelp") }}</small></span>
           </label>
-          <div
-            v-if="!readOnly && selectedSource?.credential"
-            class="field"
-            data-testid="source-credential"
-          >
-            <label class="field">
-              <span class="field-label">{{ sourceCredentialLabel }}</span>
-              <input v-model="form.sourceApiKey" type="password" autocomplete="off" />
-            </label>
-            <span class="credential-note">
-              <span data-testid="source-credential-requirement">{{ sourceCredentialRequirement }}</span>
-              <a
-                :href="selectedSource.credential.guidance_url"
-                target="_blank"
-                rel="noreferrer"
-              >{{ sourceCredentialGuidance }}</a>
-            </span>
-          </div>
+        </section>
+
+        <section
+          v-if="!readOnly && selectedSource?.credential"
+          class="form-section"
+          data-testid="source-credential"
+        >
+          <label class="field">
+            <span class="field-label">{{ sourceCredentialLabel }}</span>
+            <input v-model="form.sourceApiKey" type="password" autocomplete="off" />
+          </label>
+          <span class="credential-note">
+            <span data-testid="source-credential-requirement">{{ sourceCredentialRequirement }}</span>
+            <a
+              :href="selectedSource.credential.guidance_url"
+              target="_blank"
+              rel="noreferrer"
+            >{{ sourceCredentialGuidance }}</a>
+          </span>
         </section>
 
         <slot v-if="!readOnly" name="service-mode" />
         <section class="form-section" :aria-label="t('modelConfiguration')">
           <div v-show="!modelSettings" style="display: contents">
-          <div>
-            <div class="section-kicker">{{ t("configuration") }}</div>
-            <h2 class="section-title">{{ t("modelSource") }}</h2>
-          </div>
+          <div class="section-kicker">{{ t("modelSource") }}</div>
           <div class="field-grid">
-            <label class="field span-2"><span class="field-label">{{ t("provider") }}</span>
+            <label class="field"><span class="field-label">{{ t("provider") }}</span>
               <select v-model="activeForm.llmProvider" :disabled="readOnly">
                 <option v-if="missingRunProvider" :value="runForm.llmProvider">{{ runForm.llmProvider ? providerName(runForm.llmProvider) : t("notRecorded") }}</option>
                 <option v-for="provider in Object.keys(providerDefaults)" :key="provider" :value="provider">{{ providerName(provider) }}</option>
               </select>
             </label>
+            <label class="field"><span class="field-label">{{ t("apiType") }}</span>
+              <select v-model="activeForm.llmApiType" :disabled="readOnly">
+                <option v-if="readOnly && !['openai_chat', 'openai_responses', 'anthropic_messages'].includes(runForm.llmApiType)" :value="runForm.llmApiType">{{ runForm.llmApiType || t("notRecorded") }}</option>
+                <option value="openai_chat">OpenAI Chat Completions</option>
+                <option value="openai_responses">OpenAI Responses</option>
+                <option value="anthropic_messages">Anthropic Messages</option>
+              </select>
+            </label>
             <label class="field"><span class="field-label">{{ t("model") }}</span><input v-model="activeForm.llmModel" type="text" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
+            <label class="field"><span class="field-label">{{ t("baseUrl") }}</span><input v-model="activeForm.llmBaseUrl" type="url" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
+          </div>
+          <div class="field-row">
             <div class="field">
               <label class="field">
                 <span class="field-label">{{ t("apiKey") }}</span>
@@ -632,14 +648,17 @@ function rerun(): void {
               </label>
               <span class="field-help">{{ readOnly ? t("credentialSubmitted") : (credentialHelp || t("credentialHelp")) }}</span>
             </div>
+            <button v-if="!readOnly" class="button button--small" type="button" :disabled="!submissionEnabled || busy || diagnosticsBusy" @click="checkConfiguration">
+              {{ diagnosticsBusy ? t("checkingConfiguration") : t("checkConfiguration") }}
+            </button>
           </div>
+          </div>
+          <div v-if="!readOnly && modelSettings" class="alert-actions">
+            <button class="button button--small" type="button" :disabled="!submissionEnabled || busy || diagnosticsBusy" @click="checkConfiguration">
+              {{ diagnosticsBusy ? t("checkingConfiguration") : t("checkConfiguration") }}
+            </button>
           </div>
           <template v-if="!readOnly">
-            <div class="alert-actions">
-              <button class="button" type="button" :disabled="!submissionEnabled || busy || diagnosticsBusy" @click="checkConfiguration">
-                {{ diagnosticsBusy ? t("checkingConfiguration") : t("checkConfiguration") }}
-              </button>
-            </div>
             <div v-if="diagnosticResult" class="diagnostics-result" data-testid="diagnostic-result" aria-live="polite">
               <span class="badge" :class="diagnosticResult.status === 'pass' ? 'badge--success' : diagnosticResult.status === 'warning' ? 'badge--accent' : 'badge--danger'" data-testid="diagnostic-status">{{ t(diagnosticResult.status) }}</span>
               <ul class="diagnostics-list">
@@ -659,6 +678,66 @@ function rerun(): void {
             </div>
           </template>
         </section>
+
+        <details v-show="!modelSettings" class="advanced-section">
+          <summary>
+            <svg class="disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+            <span>{{ t("advanced") }}</span>
+          </summary>
+          <div class="advanced-body">
+            <div v-if="['openalex', 'crossref', 'pubmed', 'wos'].includes(activeForm.source)" class="field-grid">
+              <label v-if="activeForm.source === 'openalex'" class="field"><span class="field-label">{{ t("openAlexEmail") }}</span>
+                <input v-model="activeForm.sourceContacts.openalex_email" type="email" maxlength="320" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
+              </label>
+              <label v-if="activeForm.source === 'crossref'" class="field"><span class="field-label">{{ t("crossrefEmail") }}</span>
+                <input v-model="activeForm.sourceContacts.crossref_email" type="email" maxlength="320" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
+              </label>
+              <label v-if="activeForm.source === 'pubmed'" class="field"><span class="field-label">{{ t("pubmedEmail") }}</span>
+                <input v-model="activeForm.sourceContacts.pubmed_email" type="email" maxlength="320" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
+              </label>
+              <label v-if="activeForm.source === 'pubmed'" class="field"><span class="field-label">{{ t("pubmedTool") }}</span>
+                <input v-model="activeForm.sourceContacts.pubmed_tool" type="text" maxlength="128" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
+              </label>
+              <label v-if="activeForm.source === 'wos'" class="field"><span class="field-label">{{ t("wosDatabase") }}</span>
+                <input v-model="activeForm.wosDb" type="text" maxlength="64" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field"><span class="field-label">{{ t("embeddingProvider") }}</span>
+                <select v-model="activeForm.embeddingProvider" :disabled="readOnly">
+                  <option v-if="missingRunEmbeddingProvider" :value="runForm.embeddingProvider">{{ runForm.embeddingProvider ? providerName(runForm.embeddingProvider) : t("notRecorded") }}</option>
+                  <option v-for="provider in Object.keys(retrievalProviderDefaults)" :key="provider" :value="provider">{{ providerName(provider) }}</option>
+                </select>
+              </label>
+              <label class="field"><span class="field-label">{{ t("embeddingModel") }}</span><input v-model="activeForm.embeddingModel" type="text" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
+              <label class="field"><span class="field-label">{{ t("embeddingBaseUrl") }}</span><input v-model="activeForm.embeddingBaseUrl" type="url" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
+              <div v-if="!readOnly" class="field">
+                <label class="field">
+                  <span class="field-label">{{ t("embeddingApiKey") }}</span>
+                  <input v-model="form.embeddingApiKey" type="password" autocomplete="off" />
+                </label>
+                <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
+              </div>
+              <label class="field"><span class="field-label">{{ t("rerankerProvider") }}</span>
+                <select v-model="activeForm.rerankerProvider" :disabled="readOnly">
+                  <option v-if="missingRunRerankerProvider" :value="runForm.rerankerProvider">{{ runForm.rerankerProvider ? providerName(runForm.rerankerProvider) : t("notRecorded") }}</option>
+                  <option value="">{{ t("off") }}</option>
+                  <option v-for="provider in Object.keys(rerankerProviderDefaults).filter((value) => value)" :key="provider" :value="provider">{{ providerName(provider) }}</option>
+                </select>
+              </label>
+              <label class="field"><span class="field-label">{{ t("rerankerModel") }}</span><input v-model="activeForm.rerankerModel" type="text" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
+              <label class="field"><span class="field-label">{{ t("rerankerBaseUrl") }}</span><input v-model="activeForm.rerankerBaseUrl" type="url" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
+              <div v-if="!readOnly" class="field">
+                <label class="field">
+                  <span class="field-label">{{ t("rerankerApiKey") }}</span>
+                  <input v-model="form.rerankerApiKey" type="password" autocomplete="off" />
+                </label>
+                <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
+              </div>
+            </div>
+          </div>
+        </details>
+        </div>
 
         <div class="form-actions">
           <template v-if="!readOnly">
@@ -698,76 +777,6 @@ function rerun(): void {
             </div>
           </template>
         </div>
-
-        <details v-show="!modelSettings" class="advanced-section">
-          <summary>
-            <svg class="disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
-            <span>{{ t("advanced") }}</span>
-          </summary>
-          <div class="advanced-body">
-            <div v-if="['openalex', 'crossref', 'pubmed', 'wos'].includes(activeForm.source)" class="field-grid">
-              <label v-if="activeForm.source === 'openalex'" class="field"><span class="field-label">{{ t("openAlexEmail") }}</span>
-                <input v-model="activeForm.sourceContacts.openalex_email" type="email" maxlength="320" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
-              </label>
-              <label v-if="activeForm.source === 'crossref'" class="field"><span class="field-label">{{ t("crossrefEmail") }}</span>
-                <input v-model="activeForm.sourceContacts.crossref_email" type="email" maxlength="320" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
-              </label>
-              <label v-if="activeForm.source === 'pubmed'" class="field"><span class="field-label">{{ t("pubmedEmail") }}</span>
-                <input v-model="activeForm.sourceContacts.pubmed_email" type="email" maxlength="320" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
-              </label>
-              <label v-if="activeForm.source === 'pubmed'" class="field"><span class="field-label">{{ t("pubmedTool") }}</span>
-                <input v-model="activeForm.sourceContacts.pubmed_tool" type="text" maxlength="128" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
-              </label>
-              <label v-if="activeForm.source === 'wos'" class="field"><span class="field-label">{{ t("wosDatabase") }}</span>
-                <input v-model="activeForm.wosDb" type="text" maxlength="64" autocomplete="off" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" />
-              </label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span class="field-label">{{ t("apiType") }}</span>
-                <select v-model="activeForm.llmApiType" :disabled="readOnly">
-                  <option v-if="readOnly && !['openai_chat', 'openai_responses', 'anthropic_messages'].includes(runForm.llmApiType)" :value="runForm.llmApiType">{{ runForm.llmApiType || t("notRecorded") }}</option>
-                  <option value="openai_chat">OpenAI Chat Completions</option>
-                  <option value="openai_responses">OpenAI Responses</option>
-                  <option value="anthropic_messages">Anthropic Messages</option>
-                </select>
-              </label>
-              <label class="field"><span class="field-label">{{ t("baseUrl") }}</span><input v-model="activeForm.llmBaseUrl" type="url" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span class="field-label">{{ t("embeddingProvider") }}</span>
-                <select v-model="activeForm.embeddingProvider" :disabled="readOnly">
-                  <option v-if="missingRunEmbeddingProvider" :value="runForm.embeddingProvider">{{ runForm.embeddingProvider ? providerName(runForm.embeddingProvider) : t("notRecorded") }}</option>
-                  <option v-for="provider in Object.keys(retrievalProviderDefaults)" :key="provider" :value="provider">{{ providerName(provider) }}</option>
-                </select>
-              </label>
-              <label class="field"><span class="field-label">{{ t("embeddingModel") }}</span><input v-model="activeForm.embeddingModel" type="text" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
-              <label class="field"><span class="field-label">{{ t("embeddingBaseUrl") }}</span><input v-model="activeForm.embeddingBaseUrl" type="url" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
-              <div v-if="!readOnly" class="field">
-                <label class="field">
-                  <span class="field-label">{{ t("embeddingApiKey") }}</span>
-                  <input v-model="form.embeddingApiKey" type="password" autocomplete="off" />
-                </label>
-                <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
-              </div>
-              <label class="field"><span class="field-label">{{ t("rerankerProvider") }}</span>
-                <select v-model="activeForm.rerankerProvider" :disabled="readOnly">
-                  <option v-if="missingRunRerankerProvider" :value="runForm.rerankerProvider">{{ runForm.rerankerProvider ? providerName(runForm.rerankerProvider) : t("notRecorded") }}</option>
-                  <option value="">{{ t("off") }}</option>
-                  <option v-for="provider in Object.keys(rerankerProviderDefaults).filter((value) => value)" :key="provider" :value="provider">{{ providerName(provider) }}</option>
-                </select>
-              </label>
-              <label class="field"><span class="field-label">{{ t("rerankerModel") }}</span><input v-model="activeForm.rerankerModel" type="text" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
-              <label class="field"><span class="field-label">{{ t("rerankerBaseUrl") }}</span><input v-model="activeForm.rerankerBaseUrl" type="url" :disabled="readOnly" :placeholder="readOnly ? t('notRecorded') : undefined" /></label>
-              <div v-if="!readOnly" class="field">
-                <label class="field">
-                  <span class="field-label">{{ t("rerankerApiKey") }}</span>
-                  <input v-model="form.rerankerApiKey" type="password" autocomplete="off" />
-                </label>
-                <span class="field-help">{{ credentialHelp || t("credentialHelp") }}</span>
-              </div>
-            </div>
-          </div>
-        </details>
       </form>
     </div>
     <div class="workbench-pane workbench-pane--audit">

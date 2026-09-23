@@ -39,7 +39,15 @@
 }
 
 .button--primary:hover:not(:disabled) {
-  background: #2e2e2c;
+  background: var(--color-primary-hover);
+}
+
+/* Disabled primary keeps its shape and position: gray fill, muted text (§13.2) */
+.button--primary:disabled {
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+  opacity: 1;
 }
 
 .button--danger {
