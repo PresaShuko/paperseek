@@ -1,14 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useRoute } from "vue-router";
-
+import { computed, onBeforeUnmount, ref, watch, watchEffect } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { api, type ResultPageQuery } from "../../api/client";
 import type { PaperResult, RunDetail } from "../../api/types";
+import Icon from "../../components/Icon.vue";
+import UiMenu from "../../components/UiMenu.vue";
+import UiSelect, { type SelectOption } from "../../components/UiSelect.vue";
 import { useLocale } from "../../locales";
+import { useUi } from "../../locales/ui";
+import RunSettingsDialog from "../search/RunSettingsDialog.vue";
+import RunToolbar from "../search/RunToolbar.vue";
+import { useSearchConfiguration } from "../search/use-search-configuration";
+import { loadSettings, workspaceSettings } from "../settings/store";
+import { listPaths, setHeader } from "../workspace/state";
+import ResultCard from "./ResultCard.vue";
+import { recallResults, rememberResults } from "./view-state";
 
-const props = defineProps<{ snapshot?: { run: RunDetail; results: PaperResult[] } }>();
-const { runMessage, sourceName, t } = useLocale();
+const props = defineProps<{ snapshot?: { run: RunDetail; results: PaperResult[] }; reviewsEnabled?: boolean }>();
+const { runMessage, t } = useLocale();
+const u = useUi();
 const route = useRoute();
+const router = useRouter();
 const runId = computed(() => String(route.params.runId || ""));
 const run = ref<RunDetail | null>(null);
 const results = ref<PaperResult[]>([]);
@@ -22,114 +34,87 @@ const query = ref("");
 const appliedQuery = ref("");
 const minScore = ref("all");
 const availability = ref("all");
-const sort = ref<ResultPageQuery["sort"]>("rank");
+const sort = ref<NonNullable<ResultPageQuery["sort"]>>("rank");
 const selectedIds = ref(new Set<string>());
 const uidById = new Map<string, string>();
 const expanded = ref(new Set<string>());
-const exporting = ref<"" | "csv" | "json">("");
+const exporting = ref(false);
 const exportError = ref("");
-
-// Server-reported summary counters (§8.1); never recomputed on the client.
 const totalCount = ref<number | null>(null);
 const matchedCount = ref<number | null>(null);
 const scoredCount = ref<number | null>(null);
-const highScoreCount = ref<number | null>(null);
 const maxScore = ref<number | null>(null);
-
 let generation = 0;
+let shownRunId = "";
 let controller: AbortController | null = null;
 let queryTimer: ReturnType<typeof setTimeout> | null = null;
+const { restoreRun } = useSearchConfiguration(computed(() => workspaceSettings.descriptors));
 
-function paperId(paper: PaperResult): string {
-  return String(paper.uid || paper.doi || paper.url || paper.title || paper.rank);
-}
+watchEffect(() => setHeader(run.value?.display_title || run.value?.question || u("tabResults"), { label: u("search"), to: listPaths.search }));
 
-function rememberUids(papers: PaperResult[]): void {
+const paperId = (paper: PaperResult) => String(paper.uid || paper.doi || paper.url || paper.title || paper.rank);
+function rememberUids(papers: PaperResult[]) {
   for (const paper of papers) if (paper.uid) uidById.set(paperId(paper), paper.uid);
 }
-
-function paperScore(paper: PaperResult): number | null {
-  const score = paper.score ?? paper.relevance_score;
-  return score === null || score === undefined ? null : Number(score);
-}
-
-function authors(paper: PaperResult): string {
-  return paper.authors_text || paper.authors?.filter(Boolean).join("; ") || t("unknownAuthors");
-}
-
-function metaLine(paper: PaperResult): string {
-  const parts: string[] = [];
-  if (paper.rank) parts.push(`${t("rankLabel")} ${paper.rank}`);
-  const score = paperScore(paper);
-  if (score !== null) parts.push(`${score}/10`);
-  const year = paper.year ?? paper.publish_year;
-  if (year) parts.push(String(year));
-  const citations = Number(paper.citation_count ?? paper.citations ?? 0);
-  parts.push(`${citations} ${t("citations")}`);
-  if (paper.provider) parts.push(sourceName(paper.provider, paper.provider));
-  if (paper.venue || paper.source) parts.push(paper.venue || paper.source || "");
-  return parts.filter(Boolean).join(" · ");
-}
-
-const filtersActive = computed(
-  () => Boolean(appliedQuery.value.trim()) || minScore.value !== "all" || availability.value !== "all" || sort.value !== "rank",
-);
-
+const filtersActive = computed(() => Boolean(appliedQuery.value.trim()) || minScore.value !== "all" || availability.value !== "all");
+const total = computed(() => totalCount.value ?? run.value?.result_count ?? results.value.length);
 const summaryLine = computed(() => {
-  const total = totalCount.value ?? run.value?.result_count ?? results.value.length;
-  const parts = [t("resultsSummaryTotal").replace("{n}", String(total))];
-  if (scoredCount.value !== null) parts.push(t("resultsSummaryScored").replace("{n}", String(scoredCount.value)));
-  if (filtersActive.value && matchedCount.value !== null) {
-    parts.push(t("resultsSummaryMatched").replace("{n}", String(matchedCount.value)));
-  }
-  if ((scoredCount.value ?? 0) > 0) {
-    if (highScoreCount.value !== null) parts.push(t("resultsSummaryHighScore").replace("{n}", String(highScoreCount.value)));
-    if (maxScore.value !== null) parts.push(t("resultsSummaryMax").replace("{n}", String(maxScore.value)));
-  }
+  const parts = [u("summary", { total: total.value.toLocaleString() })];
+  if (filtersActive.value && matchedCount.value !== null) parts.push(u("summaryMatched", { n: matchedCount.value }));
+  if (scoredCount.value !== null) parts.push(u("summaryScored", { n: scoredCount.value }));
+  if ((scoredCount.value ?? 0) > 0 && maxScore.value !== null) parts.push(u("summaryMax", { n: maxScore.value }));
   return parts.join(" · ");
 });
-
-// Degraded ranking is a first-class banner; other warnings stay as a list (§8.1).
-const rankingBanner = computed(() => {
-  const warnings = run.value?.warnings || [];
-  if (warnings.includes("ranking_failed_local_order_retained")) return t("ranking_failed_local_order_retained");
-  if (warnings.includes("ranking_partial_failure_local_order_retained")) return t("ranking_partial_failure_local_order_retained");
-  return "";
-});
-const otherWarnings = computed(() =>
-  (run.value?.warnings || []).filter((warning) =>
-    warning !== "ranking_failed_local_order_retained" && warning !== "ranking_partial_failure_local_order_retained"),
-);
-
-const selectedUids = computed(() =>
-  [...selectedIds.value].map((id) => uidById.get(id)).filter((uid): uid is string => Boolean(uid)),
-);
-const outOfFilterCount = computed(() => {
+const rankingBanner = computed(() => (run.value?.warnings || []).some((warning) => warning.startsWith("ranking_") && warning.endsWith("local_order_retained")));
+const otherWarnings = computed(() => (run.value?.warnings || []).filter((warning) => !(warning.startsWith("ranking_") && warning.endsWith("local_order_retained"))));
+const selectedUids = computed(() => [...selectedIds.value].map((id) => uidById.get(id)).filter((uid): uid is string => Boolean(uid)));
+const hiddenSelected = computed(() => {
   const shown = new Set(results.value.map(paperId));
   return [...selectedIds.value].filter((id) => !shown.has(id)).length;
 });
+const loadedSelected = computed(() => results.value.filter((paper) => selectedIds.value.has(paperId(paper))).length);
+const allLoaded = computed(() => results.value.length > 0 && loadedSelected.value === results.value.length);
+const completed = computed(() => ["completed", "completed_with_warnings"].includes(run.value?.status || ""));
+const canReview = computed(() => completed.value && selectedUids.value.length >= 2 && selectedUids.value.length <= 100);
 
-function toggleSelection(paper: PaperResult): void {
+const scoreOptions = computed<SelectOption<string>[]>(() => [
+  { value: "all", label: u("scoreAll") },
+  ...["7", "8", "9"].map((value) => ({ value, label: u("scoreAtLeast", { n: value }) })),
+]);
+const metaOptions = computed<SelectOption<string>[]>(() => [
+  { value: "all", label: u("metaAll") },
+  { value: "abstract", label: u("metaAbstract") },
+  { value: "doi", label: u("metaDoi") },
+  { value: "pdf", label: u("metaPdf") },
+]);
+const sortOptions = computed<SelectOption<NonNullable<ResultPageQuery["sort"]>>[]>(() => [
+  { value: "rank", label: u("sortRank") },
+  { value: "score", label: u("sortScore") },
+  { value: "citations", label: u("sortCitations") },
+  { value: "year", label: u("sortYear") },
+]);
+
+function toggleSelection(paper: PaperResult) {
   const next = new Set(selectedIds.value);
   const id = paperId(paper);
-  if (next.has(id)) next.delete(id); else next.add(id);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
   selectedIds.value = next;
 }
-
-function selectAllShown(): void {
-  selectedIds.value = new Set([...selectedIds.value, ...results.value.map(paperId)]);
+function toggleAllLoaded() {
+  const next = new Set(selectedIds.value);
+  for (const paper of results.value) {
+    if (allLoaded.value) next.delete(paperId(paper));
+    else next.add(paperId(paper));
+  }
+  selectedIds.value = next;
 }
-
-function isExpanded(id: string): boolean {
-  return expanded.value.has(id);
-}
-
-function toggleExpanded(id: string): void {
+function toggleExpanded(id: string) {
   const next = new Set(expanded.value);
-  if (next.has(id)) next.delete(id); else next.add(id);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
   expanded.value = next;
 }
-
 function filterParams(): ResultPageQuery {
   return {
     query: appliedQuery.value.trim() || undefined,
@@ -138,20 +123,25 @@ function filterParams(): ResultPageQuery {
     sort: sort.value,
   };
 }
-
-function applySummary(page: { total_count?: number; matched_count?: number; scored_count?: number; high_score_count?: number; max_score?: number | null }): void {
+function applySummary(page: { total_count?: number; matched_count?: number; scored_count?: number; max_score?: number | null }) {
   totalCount.value = page.total_count ?? null;
   matchedCount.value = page.matched_count ?? null;
   scoredCount.value = page.scored_count ?? null;
-  highScoreCount.value = page.high_score_count ?? null;
   maxScore.value = page.max_score ?? null;
 }
-
-// Filter changes reset the cursor and reload page one; stale responses from an
-// older filter set are fenced off by the generation counter (§8.3).
-async function applyFilters(): Promise<void> {
+// Filters, search and sort live in the URL so reload, back and shared links keep them.
+function syncUrl() {
+  const next: Record<string, string> = {};
+  if (appliedQuery.value.trim()) next.q = appliedQuery.value.trim();
+  if (minScore.value !== "all") next.score = minScore.value;
+  if (availability.value !== "all") next.meta = availability.value;
+  if (sort.value !== "rank") next.sort = sort.value;
+  void router.replace({ query: next });
+}
+async function applyFilters() {
   const value = runId.value;
   if (!value || pageState.value === "loading") return;
+  syncUrl();
   const current = ++generation;
   controller?.abort();
   controller = new AbortController();
@@ -172,12 +162,7 @@ async function applyFilters(): Promise<void> {
     if (current === generation) refreshing.value = false;
   }
 }
-
-async function retryRefresh(): Promise<void> {
-  await applyFilters();
-}
-
-async function loadMore(): Promise<void> {
+async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return;
   const value = runId.value;
   const current = generation;
@@ -198,8 +183,7 @@ async function loadMore(): Promise<void> {
     if (current === generation) loadingMore.value = false;
   }
 }
-
-async function load(value: string): Promise<void> {
+async function load(value: string) {
   if (!value) return;
   const current = ++generation;
   controller?.abort();
@@ -207,14 +191,6 @@ async function load(value: string): Promise<void> {
   run.value = null;
   results.value = [];
   nextCursor.value = null;
-  selectedIds.value = new Set();
-  uidById.clear();
-  expanded.value = new Set();
-  query.value = "";
-  appliedQuery.value = "";
-  minScore.value = "all";
-  availability.value = "all";
-  sort.value = "rank";
   exportError.value = "";
   pageState.value = "loading";
   if (props.snapshot?.run.id === value) {
@@ -224,28 +200,52 @@ async function load(value: string): Promise<void> {
     pageState.value = "loaded";
     return;
   }
-  const [detail, page] = await Promise.allSettled([
-    api.run(value, controller.signal),
-    api.resultPage(value, {}, controller.signal),
-  ]);
+  const [detail, page] = await Promise.allSettled([api.run(value, controller.signal), api.resultPage(value, filterParams(), controller.signal)]);
   if (current !== generation || runId.value !== value) return;
   if (detail.status === "fulfilled") run.value = detail.value;
-  if (page.status === "fulfilled") {
-    results.value = page.value.results || [];
-    rememberUids(results.value);
-    nextCursor.value = page.value.next_cursor ?? null;
-    applySummary(page.value);
-    pageState.value = "loaded";
-  } else {
+  if (page.status !== "fulfilled") {
     pageState.value = "error";
+    return;
+  }
+  results.value = page.value.results || [];
+  rememberUids(results.value);
+  nextCursor.value = page.value.next_cursor ?? null;
+  applySummary(page.value);
+  pageState.value = "loaded";
+  const count = recallResults(value)?.loadedCount || 0;
+  while (current === generation && results.value.length < count && nextCursor.value) {
+    const cursor = nextCursor.value;
+    await loadMore();
+    if (loadMoreFailed.value || cursor === nextCursor.value) break;
   }
 }
-
-watch(runId, (value) => void load(value), { immediate: true });
-
-// Keyword search is debounced (180ms); discrete filters apply immediately (§8.3).
+function remember(id: string) {
+  if (!id || props.snapshot) return;
+  rememberResults(id, {
+    query: query.value, minScore: minScore.value, availability: availability.value, sort: sort.value,
+    selected: [...selectedIds.value], uids: [...uidById], expanded: [...expanded.value], loadedCount: results.value.length,
+  });
+}
+watch(runId, (value) => {
+  if (!value) return;
+  if (shownRunId) remember(shownRunId);
+  shownRunId = value;
+  pageState.value = "loading";
+  const saved = props.snapshot ? undefined : recallResults(value);
+  const fromUrl = route.query;
+  query.value = appliedQuery.value = typeof fromUrl.q === "string" ? fromUrl.q : saved?.query || "";
+  minScore.value = typeof fromUrl.score === "string" && ["7", "8", "9"].includes(fromUrl.score) ? fromUrl.score : saved?.minScore || "all";
+  availability.value = typeof fromUrl.meta === "string" && ["abstract", "doi", "pdf"].includes(fromUrl.meta) ? fromUrl.meta : saved?.availability || "all";
+  sort.value = (typeof fromUrl.sort === "string" && ["score", "citations", "year"].includes(fromUrl.sort) ? fromUrl.sort : saved?.sort || "rank") as typeof sort.value;
+  selectedIds.value = new Set(saved?.selected);
+  expanded.value = new Set(saved?.expanded);
+  uidById.clear();
+  for (const [id, uid] of saved?.uids || []) uidById.set(id, uid);
+  void load(value);
+}, { immediate: true });
 watch(query, (value) => {
   if (queryTimer) clearTimeout(queryTimer);
+  if (pageState.value === "loading") return;
   queryTimer = setTimeout(() => {
     appliedQuery.value = value;
     void applyFilters();
@@ -253,13 +253,12 @@ watch(query, (value) => {
 });
 watch([minScore, availability, sort], () => void applyFilters());
 
-async function exportSelected(format: "csv" | "json"): Promise<void> {
-  const uids = selectedUids.value;
-  if (!uids.length || exporting.value) return;
-  exporting.value = format;
+async function exportSelected(format: "csv" | "json") {
+  if (!selectedUids.value.length || exporting.value) return;
+  exporting.value = true;
   exportError.value = "";
   try {
-    const file = await api.exportSelected(runId.value, format, uids);
+    const file = await api.exportSelected(runId.value, format, selectedUids.value);
     const url = URL.createObjectURL(file.blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -269,20 +268,26 @@ async function exportSelected(format: "csv" | "json"): Promise<void> {
   } catch (error) {
     exportError.value = error instanceof Error ? error.message : "export_failed";
   } finally {
-    exporting.value = "";
+    exporting.value = false;
   }
 }
-
-function clearFilters(): void {
-  query.value = "";
-  appliedQuery.value = "";
+function clearFilters() {
+  query.value = appliedQuery.value = "";
   minScore.value = "all";
   availability.value = "all";
-  sort.value = "rank";
   void applyFilters();
 }
-
+function createReview() {
+  if (!canReview.value) return;
+  void router.push({ path: "/reviews/new", query: { source: runId.value, paper: selectedUids.value } });
+}
+async function rerun() {
+  await loadSettings();
+  restoreRun(run.value);
+  void router.push("/search");
+}
 onBeforeUnmount(() => {
+  remember(shownRunId);
   generation += 1;
   controller?.abort();
   if (queryTimer) clearTimeout(queryTimer);
@@ -290,144 +295,90 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workspace-view">
-    <header class="workspace-header">
-      <div>
-        <div class="section-kicker">{{ t("results") }}</div>
-        <h2>{{ run?.question || t("noRun") }}</h2>
-        <RouterLink v-if="run" class="back-link" :to="`/runs/${runId}`">{{ t("backToRun") }}</RouterLink>
-      </div>
-      <div v-if="run" class="alert-actions">
+  <main class="page">
+    <RunToolbar :run="run" tab="results" :result-count="totalCount">
+      <RunSettingsDialog :run="run" :can-rerun="!snapshot" @rerun="rerun" />
+      <RouterLink v-if="!snapshot && completed" class="btn btn-outline btn-sm" :to="{ path: '/bibliometrics', query: { source: runId } }"><Icon name="chart" />{{ u("analyze") }}</RouterLink>
+      <UiMenu :label="u('exportAll')" trigger-class="btn btn-outline btn-sm" align="end" :min-width="160">
+        <template #trigger><Icon name="download" />{{ u("exportAll") }}<Icon name="chevron-down" /></template>
         <slot name="exports" :run-id="runId" :selected-uids="selectedUids">
-          <a class="button button--primary" :href="api.exportUrl(runId, 'csv')">{{ t("exportAllCsv") }}</a>
-          <a class="button" :href="api.exportUrl(runId, 'json')">{{ t("exportAllJson") }}</a>
-          <button class="button" type="button" data-testid="export-selected-csv" :disabled="!selectedUids.length || Boolean(exporting)" @click="exportSelected('csv')">
-            {{ exporting === "csv" ? t("active") + "…" : t("exportSelectedCsv") + (selectedUids.length ? ` (${selectedUids.length})` : "") }}
-          </button>
-          <button class="button" type="button" data-testid="export-selected-json" :disabled="!selectedUids.length || Boolean(exporting)" @click="exportSelected('json')">
-            {{ exporting === "json" ? t("active") + "…" : t("exportSelectedJson") + (selectedUids.length ? ` (${selectedUids.length})` : "") }}
-          </button>
+          <a class="opt" role="menuitem" data-menu-item :href="api.exportUrl(runId, 'csv')">CSV</a>
+          <a class="opt" role="menuitem" data-menu-item :href="api.exportUrl(runId, 'json')">JSON</a>
         </slot>
-      </div>
-    </header>
+      </UiMenu>
+    </RunToolbar>
 
-    <div v-if="pageState === 'loading'" class="state-block" data-testid="results-loading">
-      <span>{{ t("active") }}…</span>
+    <div class="ig lg">
+      <Icon name="search" />
+      <input v-model="query" type="search" :placeholder="u('searchInResults')" :aria-label="u('searchInResults')" />
     </div>
-    <div v-else-if="pageState === 'error'" class="state-block state-block--error" role="alert">
-      <strong>{{ t("loadError") }}</strong>
-      <button class="button" type="button" @click="load(runId)">{{ t("retry") }}</button>
+    <div class="toolbar" :aria-label="t('resultControls')">
+      <label class="cb sm btn btn-outline btn-sm" style="font-weight: 500">
+        <input type="checkbox" :checked="allLoaded" :aria-checked="loadedSelected && !allLoaded ? 'mixed' : allLoaded" :disabled="!results.length" @change="toggleAllLoaded" />
+        <span class="box" :class="{ mixed: loadedSelected > 0 && !allLoaded }"><Icon :name="loadedSelected > 0 && !allLoaded ? 'minus' : 'check'" /></span>{{ u("selectAllLoaded") }}
+      </label>
+      <UiSelect v-model="minScore" :options="scoreOptions" :label="u('score')" :prefix="u('score')" size="sm" inline chevron="down" />
+      <UiSelect v-model="availability" :options="metaOptions" :label="u('metadata')" :prefix="u('metadata')" size="sm" inline chevron="down" />
+      <div class="row end" style="gap: 8px">
+        <span class="sm muted num" data-testid="results-summary">{{ summaryLine }}<template v-if="refreshing"> · {{ u("loading") }}</template></span>
+        <UiSelect v-model="sort" :options="sortOptions" :label="u('sortLabel')" size="sm" inline chevron="down" width="128px" />
+      </div>
     </div>
+
+    <div v-if="rankingBanner" class="alert" role="status" data-testid="ranking-banner" style="grid-template-columns: 16px 1fr"><Icon name="warn" /><p class="alert-title">{{ u("rankingDegraded") }}</p></div>
+    <div v-if="otherWarnings.length" class="alert" data-testid="results-warnings" style="grid-template-columns: 16px 1fr">
+      <Icon name="warn" /><p class="alert-title">{{ u("st_completed_with_warnings") }}</p>
+      <ul class="alert-desc stack" style="gap: 2px"><li v-for="warning in otherWarnings" :key="warning">{{ runMessage(warning) }}</li></ul>
+    </div>
+    <div v-if="exportError" class="alert" role="alert" style="grid-template-columns: 16px 1fr"><Icon name="fail" /><p class="alert-title">{{ t("exportFailed") }}</p></div>
+    <div v-if="refreshFailed" class="alert" role="alert"><Icon name="fail" /><p class="alert-title">{{ u("loadError") }}</p><div class="alert-act"><button class="btn btn-outline btn-sm" type="button" @click="applyFilters">{{ u("retry") }}</button></div></div>
+
+    <section v-if="pageState === 'loading'" class="stack" style="gap: 12px" data-testid="results-loading" aria-busy="true">
+      <div v-for="index in 3" :key="index" class="card paper"><span class="skeleton" style="width: 16px; height: 16px"></span><div class="stack" style="gap: 8px"><span class="skeleton" style="height: 18px; width: 80%"></span><span class="skeleton" style="height: 14px; width: 50%"></span></div><span></span><div class="body"><span class="skeleton" style="height: 40px"></span></div></div>
+    </section>
+    <div v-else-if="pageState === 'error'" class="alert" role="alert"><Icon name="fail" /><p class="alert-title">{{ u("loadError") }}</p><div class="alert-act"><button class="btn btn-outline btn-sm" type="button" @click="load(runId)">{{ u("retry") }}</button></div></div>
     <template v-else>
-      <p v-if="rankingBanner" class="alert alert--warning" data-testid="ranking-banner" role="status">{{ rankingBanner }}</p>
-      <ul v-if="otherWarnings.length" class="run-warnings" data-testid="results-warnings">
-        <li v-for="warning in otherWarnings" :key="warning">{{ runMessage(warning) }}</li>
-      </ul>
-      <p v-if="exportError" class="alert" role="alert">{{ t(exportError) === exportError ? t("exportFailed") : t(exportError) }}</p>
-
-      <section class="results-summary" :aria-label="t('resultsSummary')" data-testid="results-summary">
-        <span>{{ summaryLine }}</span>
-        <span v-if="refreshing" class="field-help" role="status">{{ t("refreshing") }}</span>
-      </section>
-
-      <div v-if="refreshFailed" class="alert" role="alert">
-        <strong>{{ t("loadError") }}</strong>
-        <div class="alert-actions">
-          <button class="button button--small" type="button" @click="retryRefresh">{{ t("retry") }}</button>
-        </div>
+      <div v-if="!results.length && !filtersActive" class="empty">
+        <span class="empty-media"><Icon name="text-search" size="lg" /></span>
+        <p class="empty-title">{{ u("noResults") }}</p>
+        <p class="empty-desc">{{ u("noResultsDesc") }}</p>
+        <button class="btn btn-outline btn-sm" type="button" style="margin-top: 8px" @click="rerun">{{ u("rerun") }}</button>
       </div>
-
-      <section class="workspace-toolbar" :aria-label="t('resultControls')">
-        <label class="field"><span class="field-label">{{ t("searchResults") }}</span><input v-model="query" type="search"></label>
-        <label class="field"><span class="field-label">{{ t("minimumScore") }}</span>
-          <select v-model="minScore">
-            <option value="all">{{ t("allScores") }}</option>
-            <option v-for="value in ['7', '8', '9']" :key="value" :value="value">{{ t("atLeastScore").replace("{n}", value) }}</option>
-          </select>
-        </label>
-        <label class="field"><span class="field-label">{{ t("availability") }}</span>
-          <select v-model="availability"><option value="all">{{ t("allMetadata") }}</option><option value="abstract">{{ t("hasAbstract") }}</option><option value="doi">{{ t("hasDoi") }}</option><option value="pdf">{{ t("hasPdf") }}</option></select>
-        </label>
-        <label class="field"><span class="field-label">{{ t("sortResults") }}</span>
-          <select v-model="sort"><option value="rank">{{ t("sortRank") }}</option><option value="score">{{ t("sortScore") }}</option><option value="citations">{{ t("sortCitations") }}</option><option value="year">{{ t("sortYear") }}</option></select>
-        </label>
-        <button class="button" type="button" @click="selectAllShown">{{ t("selectAllShown") }}</button>
-        <button class="button" type="button" @click="selectedIds = new Set()">{{ t("clearSelection") }}</button>
-        <span class="toolbar-counts">
-          <span data-testid="selection-count">{{ selectedIds.size }} {{ t("selected") }}</span>
-          <span v-if="outOfFilterCount" class="field-help" data-testid="selection-out-of-filter">{{ t("selectionOutOfFilter").replace("{n}", String(outOfFilterCount)) }}</span>
-        </span>
-      </section>
-
-      <div v-if="!results.length && !filtersActive" class="state-block">{{ t("noResults") }}</div>
-      <div v-else-if="!results.length" class="state-block" data-testid="no-filtered-results">
-        <span>{{ t("noFilteredResults") }}</span>
-        <button class="button button--small" type="button" @click="clearFilters">{{ t("clearFilters") }}</button>
+      <div v-else-if="!results.length" class="empty" data-testid="no-filtered-results">
+        <span class="empty-media"><Icon name="search" size="lg" /></span>
+        <p class="empty-title">{{ u("noFiltered") }}</p>
+        <button class="btn btn-outline btn-sm" type="button" style="margin-top: 8px" @click="clearFilters">{{ u("clearFilters") }}</button>
       </div>
-      <section class="results-list">
-        <article v-for="paper in results" :key="paperId(paper)" class="result-card" :class="{ 'result-card--selected': selectedIds.has(paperId(paper)) }" data-testid="result-card">
-          <div class="result-card-header">
-            <input type="checkbox" :checked="selectedIds.has(paperId(paper))" :aria-label="`${t('selected')}: ${paper.title}`" @change="toggleSelection(paper)">
-            <span class="result-score" data-testid="result-score" :class="paperScore(paper) === null ? 'result-score--none' : 'result-score--scored'">
-              <template v-if="paperScore(paper) !== null">{{ paperScore(paper) }}/10</template>
-              <template v-else>{{ t("notScored") }}</template>
-            </span>
-            <h3 class="result-title">
-              <a v-if="paper.url" :href="paper.url" target="_blank" rel="noopener">{{ paper.title }}</a>
-              <template v-else>{{ paper.title }}</template>
-            </h3>
-          </div>
-          <div class="result-copy">
-            <div class="result-clamp-block">
-              <p class="result-meta result-authors" :class="{ 'result-clamp result-clamp--2': !isExpanded(`${paperId(paper)}:authors`) }">{{ authors(paper) }}</p>
-              <button v-if="authors(paper).length > 120" class="clamp-toggle" type="button" @click="toggleExpanded(`${paperId(paper)}:authors`)">
-                {{ isExpanded(`${paperId(paper)}:authors`) ? t("collapse") : t("expandAll") }}
-              </button>
-            </div>
-            <p class="result-meta">{{ metaLine(paper) }}</p>
-            <p v-if="paper.doi" class="result-meta"><span class="detail-label">DOI</span> <code>{{ paper.doi }}</code> <a :href="`https://doi.org/${paper.doi}`" target="_blank" rel="noopener">doi.org</a></p>
-            <p v-if="paper.keywords" class="result-meta"><span class="detail-label">{{ t("keywords") }}</span> {{ Array.isArray(paper.keywords) ? paper.keywords.join('; ') : paper.keywords }}</p>
-            <div class="result-clamp-block">
-              <template v-if="paper.abstract">
-                <p class="result-abstract" :class="{ 'result-clamp result-clamp--3': !isExpanded(`${paperId(paper)}:abstract`) }"><span class="detail-label">{{ t("abstract") }}</span> {{ paper.abstract }}</p>
-                <button v-if="paper.abstract.length > 240" class="clamp-toggle" type="button" @click="toggleExpanded(`${paperId(paper)}:abstract`)">
-                  {{ isExpanded(`${paperId(paper)}:abstract`) ? t("collapse") : t("expandAll") }}
-                </button>
-              </template>
-              <p v-else-if="paper.metadata_status === 'degraded'" class="result-meta">{{ t("abstractFailed") }}</p>
-              <p v-else class="result-meta">{{ t("noAbstract") }}</p>
-            </div>
-            <div v-if="paper.reasoning || paper.relevance_reason" class="result-clamp-block">
-              <p class="result-reasoning" :class="{ 'result-clamp result-clamp--2': !isExpanded(`${paperId(paper)}:reasoning`) }"><span class="detail-label">{{ t("reasoning") }}</span> {{ paper.reasoning || paper.relevance_reason }}</p>
-              <button v-if="(paper.reasoning || paper.relevance_reason || '').length > 160" class="clamp-toggle" type="button" @click="toggleExpanded(`${paperId(paper)}:reasoning`)">
-                {{ isExpanded(`${paperId(paper)}:reasoning`) ? t("collapse") : t("expandAll") }}
-              </button>
-            </div>
-            <div class="result-links">
-              <a v-if="paper.url" :href="paper.url" target="_blank" rel="noopener">{{ t("record") }}</a>
-              <a v-if="paper.pdf_url" :href="paper.pdf_url" target="_blank" rel="noopener">PDF</a>
-              <details class="result-details">
-                <summary role="button">
-                  <svg class="disclosure-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
-                  {{ t("bibliographicDetails") }}
-                </summary>
-                <div class="result-details-body">
-                  <p v-if="paper.document_types?.length || paper.publication_type"><span class="detail-label">{{ t("publicationType") }}</span> {{ (paper.document_types?.length ? paper.document_types.join('; ') : paper.publication_type) }}</p>
-                  <p v-if="paper.venue || paper.source"><span class="detail-label">{{ t("venue") }}</span> {{ paper.venue || paper.source }}</p>
-                  <p v-if="paper.provider"><span class="detail-label">{{ t("dataSource") }}</span> {{ sourceName(paper.provider, paper.provider) }}</p>
-                </div>
-              </details>
-            </div>
-          </div>
-        </article>
+      <section v-else class="stack" style="gap: 12px" :aria-label="u('papers')">
+        <ResultCard
+          v-for="paper in results"
+          :key="paperId(paper)"
+          :paper="paper"
+          :identity="paperId(paper)"
+          :selected="selectedIds.has(paperId(paper))"
+          :expanded="expanded"
+          @select="toggleSelection(paper)"
+          @expand="toggleExpanded"
+        />
       </section>
-      <div v-if="nextCursor" class="load-more-row">
-        <button class="button" type="button" :disabled="loadingMore" @click="loadMore">{{ t("loadMore") }}</button>
-      </div>
-      <div v-if="loadMoreFailed" class="load-more-row">
-        <span class="field-help" role="alert">{{ t("loadError") }}</span>
-        <button class="button button--small" type="button" @click="loadMore">{{ t("retry") }}</button>
+      <div v-if="results.length" class="row" style="justify-content: center; gap: 12px">
+        <span class="xs muted num">{{ u("loaded", { n: results.length.toLocaleString(), total: (filtersActive && matchedCount !== null ? matchedCount : total).toLocaleString() }) }}</span>
+        <button v-if="nextCursor" class="btn btn-outline btn-sm" type="button" :disabled="loadingMore" @click="loadMore"><Icon v-if="loadingMore" name="loader" />{{ u("loadMore") }}</button>
+        <button v-if="loadMoreFailed" class="btn btn-ghost btn-sm" type="button" role="alert" @click="loadMore">{{ u("loadError") }} · {{ u("retry") }}</button>
       </div>
     </template>
-  </div>
+
+    <div v-if="selectedIds.size" class="bulk" role="region" :aria-label="u('selectedN', { n: selectedIds.size })">
+      <span class="sm medium num" data-testid="selection-count">{{ u("selectedN", { n: selectedIds.size }) }}</span>
+      <span v-if="hiddenSelected" class="xs" style="opacity: .7" data-testid="selection-out-of-filter">{{ u("hiddenSelected", { n: hiddenSelected }) }}</span>
+      <span class="div"></span>
+      <UiMenu :label="u('exportSelected')" trigger-class="btn" side="top" :min-width="140" :disabled="exporting || !selectedUids.length">
+        <template #trigger><Icon :name="exporting ? 'loader' : 'download'" />{{ u("exportSelected") }}</template>
+        <button class="opt" role="menuitem" data-menu-item type="button" data-testid="export-selected-csv" @click="exportSelected('csv')">CSV</button>
+        <button class="opt" role="menuitem" data-menu-item type="button" data-testid="export-selected-json" @click="exportSelected('json')">JSON</button>
+      </UiMenu>
+      <span v-if="reviewsEnabled" :title="canReview ? undefined : u('reviewSelectionRule')"><button class="btn light" type="button" :disabled="!canReview" @click="createReview"><Icon name="file-plus" />{{ u("createReviewFromSelection") }}</button></span>
+      <button class="btn btn-icon" type="button" :aria-label="u('clearSelectionLabel')" style="width: 32px; padding: 0" @click="selectedIds = new Set()"><Icon name="x" /></button>
+    </div>
+  </main>
 </template>

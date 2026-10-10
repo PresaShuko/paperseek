@@ -18,6 +18,21 @@ export interface LayoutPoint {
 export const GRAPH_WIDTH = 640;
 export const GRAPH_HEIGHT = 460;
 
+// Fit the viewport to node positions without changing the force layout or drags.
+export function fitCitationViewport(points: LayoutPoint[]): { zoom: number; x: number; y: number } {
+  if (!points.length) return { zoom: 1, x: 0, y: 0 };
+  const minX = Math.min(...points.map(point => point.x)) - 40;
+  const maxX = Math.max(...points.map(point => point.x)) + 40;
+  const minY = Math.min(...points.map(point => point.y)) - 40;
+  const maxY = Math.max(...points.map(point => point.y)) + 40;
+  const zoom = Math.min(1, GRAPH_WIDTH / (maxX - minX), GRAPH_HEIGHT / (maxY - minY));
+  return {
+    zoom,
+    x: (GRAPH_WIDTH - (minX + maxX) * zoom) / 2,
+    y: (GRAPH_HEIGHT - (minY + maxY) * zoom) / 2,
+  };
+}
+
 // Citation count scales the radius within a bounded band (§10.1).
 export function nodeRadius(citations: number | undefined | null): number {
   return Math.min(18, 8 + Math.sqrt(Math.max(0, Number(citations) || 0)) * 1.2);

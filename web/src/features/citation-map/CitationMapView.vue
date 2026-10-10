@@ -4,15 +4,20 @@ import { useRoute } from "vue-router";
 
 import { api } from "../../api/client";
 import type { CitationMap, CitationNode, RunDetail } from "../../api/types";
+import Icon from "../../components/Icon.vue";
+import UiSelect from "../../components/UiSelect.vue";
 import { useLocale } from "../../locales";
-import { GRAPH_HEIGHT, GRAPH_WIDTH, layoutCitationMap, nodeRadius } from "./citation-layout";
+import { useUi } from "../../locales/ui";
+import { setHeader } from "../workspace/state";
+import { GRAPH_HEIGHT, GRAPH_WIDTH, fitCitationViewport, layoutCitationMap, nodeRadius } from "./citation-layout";
 
 type NodeRole = "result" | "seed" | "forward" | "backward";
 
-const props = defineProps<{ snapshot?: { run: RunDetail; citationMap: CitationMap } }>();
+const props = defineProps<{ snapshot?: { run: RunDetail; citationMap: CitationMap }; sourceRunId?: string; embedded?: boolean; savedMap?: CitationMap; sourceTitle?: string }>();
 const { sourceName, t } = useLocale();
+const u = useUi();
 const route = useRoute();
-const runId = computed(() => String(route.params.runId || ""));
+const runId = computed(() => props.sourceRunId || String(route.params.runId || ""));
 const run = ref<RunDetail | null>(null);
 const citationMap = ref<CitationMap | null>(null);
 const pageState = ref<"loading" | "error" | "loaded">("loading");
@@ -39,6 +44,7 @@ const visibleIds = computed(() => {
   return ids;
 });
 const nodes = computed(() => (citationMap.value?.nodes || []).filter((node) => !visibleIds.value || visibleIds.value.has(node.id)));
+const fittedViewport = computed(() => fitCitationViewport(nodes.value.map(node => point(node.id))));
 const edges = computed(() => (citationMap.value?.edges || []).filter((edge) => nodes.value.some((node) => node.id === edge.source) && nodes.value.some((node) => node.id === edge.target)));
 const selected = computed(() => citationMap.value?.nodes?.find((node) => node.id === selectedId.value) || null);
 
@@ -105,15 +111,11 @@ function nodeLabel(node: CitationNode): string {
   return node.rank ? `#${node.rank}` : "";
 }
 
-function roleLabel(node: CitationNode): string {
-  return t(legend.find((entry) => entry.role === primaryRole(node))?.label || "resultNode");
-}
-
 function resetGraph(): void {
   // Reset restores the viewport only; dragged node positions are kept (§10.3).
-  zoom.value = 1;
-  pan.x = 0;
-  pan.y = 0;
+  zoom.value = fittedViewport.value.zoom;
+  pan.x = fittedViewport.value.x;
+  pan.y = fittedViewport.value.y;
 }
 
 function point(id: string): { x: number; y: number } {
@@ -121,7 +123,7 @@ function point(id: string): { x: number; y: number } {
 }
 
 function clampZoom(value: number): number {
-  return Math.min(2.5, Math.max(0.5, Number(value.toFixed(3))));
+  return Math.min(2.5, Math.max(Math.min(0.5, fittedViewport.value.zoom / 2), Number(value.toFixed(3))));
 }
 
 function onWheel(event: WheelEvent): void {
@@ -186,6 +188,7 @@ function applyMap(map: CitationMap): void {
   citationMap.value = map;
   positions.value = layoutCitationMap(map.nodes || [], map.edges || []);
   selectedId.value = seeds.value[0]?.id || map.nodes?.[0]?.id || "";
+  resetGraph();
 }
 
 async function load(value: string): Promise<void> {
@@ -199,6 +202,9 @@ async function load(value: string): Promise<void> {
   focusId.value = "";
   positions.value = {};
   pageState.value = "loading";
+  if (props.savedMap) {
+    applyMap(props.savedMap); pageState.value = "loaded"; return;
+  }
   if (props.snapshot?.run.id === value) {
     run.value = props.snapshot.run;
     applyMap(props.snapshot.citationMap);
@@ -220,6 +226,20 @@ async function load(value: string): Promise<void> {
 }
 
 watch(runId, (value) => void load(value), { immediate: true });
+watch(run, (value) => {
+  if (!props.embedded) setHeader(value?.display_title || value?.question || t("citationMap"), value ? { label: u("search"), to: `/runs/${value.id}/results` } : null);
+}, { immediate: true });
+const roleColor: Record<NodeRole, { fill: string; stroke: string }> = {
+  result: { fill: "#000", stroke: "#fff" },
+  seed: { fill: "#155dfc", stroke: "#fff" },
+  forward: { fill: "#8ec5ff", stroke: "#fff" },
+  backward: { fill: "#fff", stroke: "#737373" },
+};
+const seedOptions = computed(() => [{ value: "", label: u("allSeeds") }, ...seeds.value.map((seed) => ({ value: seed.id, label: seed.title || seed.id }))]);
+function connected(edge: { source: string; target: string }) {
+  return edge.source === selectedId.value || edge.target === selectedId.value;
+}
+watch(focusId, resetGraph);
 
 onBeforeUnmount(() => {
   generation += 1;
@@ -228,105 +248,91 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workspace-view">
-    <header class="workspace-header">
-      <div><div class="section-kicker">{{ t("citationMap") }}</div><h2>{{ run?.question || t("noRun") }}</h2></div>
-      <div v-if="citationMap" class="toolbar-counts">
-        <strong>{{ citationMap.nodes?.length || 0 }} {{ t("nodes") }}</strong>
-        <span>{{ citationMap.edges?.length || 0 }} {{ t("edges") }}</span>
-        <span v-if="metricsLine">{{ metricsLine }}</span>
-      </div>
-    </header>
-
-    <div v-if="pageState === 'loading'" class="state-block" data-testid="citation-loading">
-      <span>{{ t("active") }}…</span>
+  <component :is="embedded ? 'div' : 'main'" :class="{ page: !embedded }" class="stack" style="gap: 16px">
+    <div v-if="pageState === 'loading'" class="card flush" data-testid="citation-loading" aria-busy="true" style="height: 420px; display: grid; place-items: center"><Icon name="loader" size="lg" class="muted" /></div>
+    <div v-else-if="pageState === 'error'" class="alert" role="alert"><Icon name="fail" /><p class="alert-title">{{ u("loadError") }}</p><div class="alert-act"><button class="btn btn-outline btn-sm" type="button" @click="load(runId)">{{ u("retry") }}</button></div></div>
+    <div v-else-if="!citationMap || emptyState" class="empty" data-testid="citation-empty">
+      <span class="empty-media"><Icon name="chart" size="lg" /></span>
+      <p class="empty-title">{{ emptyState === "citationNotEnabled" ? u("mapNotEnabled") : emptyState === "citationNotSupported" ? u("mapNotSupported") : u("mapEmpty") }}</p>
+      <RouterLink class="btn btn-outline btn-sm" style="margin-top: 8px" :to="`/runs/${runId}`">{{ t("backToRun") }}</RouterLink>
     </div>
-    <div v-else-if="pageState === 'error'" class="state-block state-block--error" role="alert">
-      <strong>{{ t("loadError") }}</strong>
-      <button class="button" type="button" @click="load(runId)">{{ t("retry") }}</button>
-    </div>
-    <div v-else-if="!citationMap" class="state-block">{{ t("noRun") }}</div>
-    <div v-else-if="emptyState" class="state-block" data-testid="citation-empty">
-      <span>{{ t(emptyState) }}</span>
-      <RouterLink class="button button--small" :to="`/runs/${runId}`">{{ t("backToRun") }}</RouterLink>
-    </div>
-    <section v-else class="citation-layout">
-      <div class="citation-map-panel">
-        <div class="citation-toolbar workspace-toolbar">
-          <ul class="citation-legend" :aria-label="t('citationLegend')">
-            <li v-for="entry in legend" :key="entry.role">
-              <svg class="legend-glyph" viewBox="-8 -8 16 16" aria-hidden="true">
-                <circle v-if="entry.role === 'result'" r="6" :class="`legend-shape legend-shape--${entry.role}`" />
-                <rect v-else-if="entry.role === 'seed'" x="-6" y="-6" width="12" height="12" :class="`legend-shape legend-shape--${entry.role}`" />
-                <path v-else :d="shapePath(entry.role, 6)" :class="`legend-shape legend-shape--${entry.role}`" />
-              </svg>
-              {{ t(entry.label) }}
+    <div v-else style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+      <section class="card flush" style="flex: 999 1 560px" :aria-label="u('relations')">
+        <div class="toolbar" style="padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--border)">
+          <ul class="legend" :aria-label="u('legend')">
+            <li v-for="entry in legend" :key="entry.role" class="row" style="gap: 6px">
+              <svg width="12" height="12" viewBox="-8 -8 16 16" aria-hidden="true">
+                <circle v-if="entry.role === 'result'" r="6" :fill="roleColor.result.fill" />
+                <rect v-else-if="entry.role === 'seed'" x="-6" y="-6" width="12" height="12" rx="2" :fill="roleColor.seed.fill" />
+                <path v-else :d="shapePath(entry.role, 7)" :fill="roleColor[entry.role].fill" :stroke="entry.role === 'backward' ? roleColor.backward.stroke : undefined" stroke-width="1.5" />
+              </svg>{{ u(`node_${entry.role}`) }}
             </li>
           </ul>
-          <span class="spacer"></span>
-          <button class="button button--small" type="button" :aria-label="t('zoomOut')" @click="zoom = clampZoom(zoom / 1.12)">−</button>
-          <button class="button button--small" type="button" :aria-label="t('resetGraph')" @click="resetGraph">{{ t("resetGraph") }}</button>
-          <button class="button button--small" type="button" :aria-label="t('zoomIn')" @click="zoom = clampZoom(zoom * 1.12)">+</button>
-          <label class="field">
-            <span class="sr-only">{{ t("seedFocus") }}</span>
-            <select v-model="focusId" :aria-label="t('seedFocus')"><option value="">{{ t("allSeeds") }}</option><option v-for="seed in seeds" :key="seed.id" :value="seed.id">{{ seed.title }}</option></select>
-          </label>
+          <div class="row end" style="gap: 6px">
+            <span class="xs muted num" style="margin-right: 4px">{{ u("nodesEdges", { nodes: citationMap.nodes?.length || 0, edges: citationMap.edges?.length || 0 }) }}<template v-if="metricsLine"> · {{ metricsLine }}</template></span>
+            <UiSelect v-if="seeds.length" v-model="focusId" :options="seedOptions" :label="u('seedFocus')" size="sm" inline chevron="down" width="160px" />
+            <div class="btn-group">
+              <button class="btn btn-outline btn-icon btn-sm" type="button" :aria-label="u('zoomOut')" @click="zoom = clampZoom(zoom / 1.12)"><Icon name="minus" /></button>
+              <button class="btn btn-outline btn-sm" type="button" @click="resetGraph">{{ u("reset") }}</button>
+              <button class="btn btn-outline btn-icon btn-sm" type="button" :aria-label="u('zoomIn')" @click="zoom = clampZoom(zoom * 1.12)"><Icon name="plus" /></button>
+            </div>
+          </div>
         </div>
-        <div class="citation-graph" data-testid="citation-graph">
-          <svg :viewBox="`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`" role="img" :aria-label="t('citationMap')" @wheel.prevent="onWheel" @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp">
-            <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" /></marker></defs>
-            <g data-testid="citation-viewport" :data-zoom="zoom" :data-pan-x="pan.x" :data-pan-y="pan.y" :transform="`translate(${pan.x} ${pan.y}) scale(${zoom})`">
-              <line v-for="edge in edges" :key="`${edge.source}-${edge.target}`" class="citation-edge" :x1="point(edge.source).x" :y1="point(edge.source).y" :x2="point(edge.target).x" :y2="point(edge.target).y" marker-end="url(#arrow)" />
-              <g
-                v-for="node in nodes"
-                :key="node.id"
-                class="citation-node"
-                data-testid="graph-node"
-                :data-node-id="node.id"
-                :data-role="primaryRole(node)"
-                :data-selected="selectedId === node.id"
-                :transform="`translate(${point(node.id).x} ${point(node.id).y})`"
-                tabindex="0"
-                role="button"
-                :aria-label="`${t('selectNode')}: ${node.title}`"
-                :aria-pressed="selectedId === node.id"
-                @pointerdown.stop="onNodePointerDown($event, node.id)"
-                @pointerenter="hoveredId = node.id"
-                @pointerleave="hoveredId = ''"
-                @focus="focusedNodeId = node.id"
-                @blur="focusedNodeId = ''"
-                @keydown="onNodeKeydown($event, node.id)"
-              >
-                <circle class="citation-hit-target" :r="Math.max(radius(node) + 8, 18)" />
-                <circle v-if="primaryRole(node) === 'result'" class="citation-node-shape" :r="radius(node)" />
-                <rect v-else-if="primaryRole(node) === 'seed'" class="citation-node-shape" :x="-radius(node)" :y="-radius(node)" :width="radius(node) * 2" :height="radius(node) * 2" :rx="2" />
-                <path v-else class="citation-node-shape" :d="shapePath(primaryRole(node), radius(node))" />
-                <text v-if="nodeLabel(node)" class="citation-node-label" :class="{ 'citation-node-label--title': showLabel(node) }" x="0" :y="radius(node) + 14" text-anchor="middle">{{ nodeLabel(node) }}</text>
-              </g>
+        <svg class="graph" data-testid="citation-graph" :viewBox="`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`" role="img" :aria-label="u('relations')" @wheel.prevent="onWheel" @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp">
+          <g data-testid="citation-viewport" :data-zoom="zoom" :transform="`translate(${pan.x} ${pan.y}) scale(${zoom})`">
+            <line v-for="edge in edges" :key="`${edge.source}-${edge.target}`" :x1="point(edge.source).x" :y1="point(edge.source).y" :x2="point(edge.target).x" :y2="point(edge.target).y" :stroke="connected(edge) ? '#000' : '#e5e5e5'" :stroke-width="connected(edge) ? 1.75 : 1.25" />
+            <circle v-if="selected && nodes.some((node) => node.id === selectedId)" :cx="point(selectedId).x" :cy="point(selectedId).y" :r="radius(selected) + 6" fill="none" stroke="#000" stroke-opacity=".2" stroke-width="6" />
+            <g
+              v-for="node in nodes"
+              :key="node.id"
+              data-testid="graph-node"
+              :data-node-id="node.id"
+              :data-role="primaryRole(node)"
+              :transform="`translate(${point(node.id).x} ${point(node.id).y})`"
+              tabindex="0"
+              role="button"
+              :aria-label="`${t('selectNode')}: ${node.title}`"
+              :aria-pressed="selectedId === node.id"
+              @pointerdown.stop="onNodePointerDown($event, node.id)"
+              @pointerenter="hoveredId = node.id"
+              @pointerleave="hoveredId = ''"
+              @focus="focusedNodeId = node.id"
+              @blur="focusedNodeId = ''"
+              @keydown="onNodeKeydown($event, node.id)"
+            >
+              <circle :r="Math.max(radius(node) + 8, 18)" fill="transparent" />
+              <circle v-if="primaryRole(node) === 'result'" :r="radius(node)" :fill="roleColor.result.fill" :stroke="roleColor.result.stroke" stroke-width="2" />
+              <rect v-else-if="primaryRole(node) === 'seed'" :x="-radius(node)" :y="-radius(node)" :width="radius(node) * 2" :height="radius(node) * 2" rx="3" :fill="roleColor.seed.fill" :stroke="roleColor.seed.stroke" stroke-width="2" />
+              <path v-else :d="shapePath(primaryRole(node), radius(node))" :fill="roleColor[primaryRole(node)].fill" :stroke="roleColor[primaryRole(node)].stroke" stroke-width="1.5" />
+              <text v-if="nodeLabel(node)" x="0" :y="radius(node) + 14" text-anchor="middle" font-family="Geist Variable, sans-serif" font-size="11" fill="#525252">{{ nodeLabel(node) }}</text>
             </g>
-          </svg>
-        </div>
-      </div>
-      <aside class="citation-detail-panel">
-        <article v-if="selected" class="citation-detail-card" data-testid="citation-detail">
-          <h3>{{ selected.title }}</h3>
-          <p class="detail-meta">{{ [selected.source ? sourceName(selected.source, selected.source) : "", selected.year, `${selected.citations || 0} ${t('citations')}`].filter((value) => value !== "" && value !== null && value !== undefined).join(" · ") }}</p>
-          <p><span class="detail-label">{{ t("citationRole") }}</span> {{ roleLabel(selected) }}</p>
-          <p data-testid="citation-detail-score"><span class="detail-label">{{ t("sortScore") }}</span> {{ selected.score !== null && selected.score !== undefined ? `${selected.score}/10` : t("notScored") }}</p>
-          <p v-if="selected.reasoning">{{ selected.reasoning }}</p>
-          <a v-if="isRecordLink(selected.id)" :href="selected.id" target="_blank" rel="noopener">{{ t("record") }}</a>
-        </article>
-        <details class="citation-text-equivalent" data-testid="citation-text-list">
-          <summary>{{ t("citationTextList") }}</summary>
-          <section class="citation-text-list">
-            <h3>{{ t("seedPapers") }}</h3>
-            <button v-for="seed in seeds" :key="seed.id" class="node-button" type="button" :aria-label="seed.title" :aria-pressed="selectedId === seed.id" @click="selectNode(seed.id)">{{ seed.title }}</button>
-          </section>
-          <section class="citation-text-list">
-            <button v-for="node in nodes" :key="`text-${node.id}`" class="node-button" type="button" :aria-label="`${t('selectNode')}: ${node.title}`" :aria-pressed="selectedId === node.id" @click="selectNode(node.id)">{{ node.title }}</button>
-          </section>
+          </g>
+        </svg>
+      </section>
+      <aside class="stack" style="flex: 1 1 300px; gap: 12px; min-width: 0" :aria-label="u('selectedNode')">
+        <section v-if="selected" class="card c" data-testid="citation-detail">
+          <div class="card-header"><div>
+            <h2 class="card-title" style="font-size: 15px">{{ selected.title }}</h2>
+            <p class="card-desc">{{ [selected.source ? sourceName(selected.source, selected.source) : "", selected.year, u("citations", { n: selected.citations || 0 })].filter((value) => value !== "" && value != null).join(" · ") }}</p>
+          </div></div>
+          <div class="card-content stack" style="gap: 12px">
+            <dl class="kv">
+              <dt>{{ u("role") }}</dt><dd>{{ u(`node_${primaryRole(selected)}`) }}</dd>
+              <dt>{{ u("score") }}</dt><dd data-testid="citation-detail-score"><span v-if="selected.score != null" class="badge" :class="selected.score >= 8 ? '' : selected.score >= 5 ? 'badge-secondary' : 'badge-outline'">{{ selected.score }}/10</span><span v-else class="badge badge-outline muted">{{ u("unscored") }}</span></dd>
+            </dl>
+            <p v-if="selected.reasoning" class="sm" style="color: #404040"><span class="medium">{{ u("reasoning") }} · </span>{{ selected.reasoning }}</p>
+          </div>
+          <div v-if="isRecordLink(selected.id)" class="card-footer"><a class="btn btn-outline btn-sm" :href="selected.id" target="_blank" rel="noopener">{{ u("record") }}<Icon name="arrow-up-right" /></a></div>
+        </section>
+        <details class="card flush" data-testid="citation-text-list">
+          <summary class="row" style="cursor: pointer; padding: 12px 16px; justify-content: space-between; flex-wrap: nowrap"><span class="sm medium">{{ u("textList") }}</span><Icon name="chevron-down" class="muted" /></summary>
+          <div class="list" style="padding: 0 6px 6px; max-height: 360px; overflow-y: auto">
+            <button v-for="node in nodes" :key="`text-${node.id}`" class="list-row" :class="{ active: selectedId === node.id }" type="button" :aria-pressed="selectedId === node.id" @click="selectNode(node.id)">
+              <span class="xs muted" style="width: 56px; flex-shrink: 0">{{ u(`node_${primaryRole(node)}`) }}</span><span class="grow sm truncate">{{ node.title }}</span>
+            </button>
+          </div>
         </details>
       </aside>
-    </section>
-  </div>
+    </div>
+  </component>
 </template>

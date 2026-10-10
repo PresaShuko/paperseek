@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import type { RunAudit, RunDetail, RunEvent, SearchSubmission } from "../api/types";
 
 export type StageKey = "query" | "search" | "ranking" | "results";
@@ -36,11 +36,11 @@ let recoveryController: AbortController | null = null;
 
 class EventGapError extends Error {}
 
-function stageFor(event: RunEvent): StageKey | null {
+export function eventStage(event: { event_type: string }): StageKey | null {
   const type = event.event_type;
-  if (type === "query.started" || type === "query.planned" || type === "query.failed") return "query";
-  if (type === "query.progress" || type === "query.portfolio_recorded") return "search";
-  if (/^(retrieval|citation|ranking|enrichment)\./.test(type)) return "ranking";
+  if (type === "query.started" || type === "query.planned") return "query";
+  if (type.startsWith("query.")) return "search";
+  if (/^(retrieval|citation|selection|ranking)\./.test(type)) return "ranking";
   if (/^(final\.|workflow\.completed)/.test(type)) return "results";
   return null;
 }
@@ -67,6 +67,9 @@ function observe(runId: string, event: RunEvent): void {
   state.events.push(event);
   state.lastEventSequence = event.sequence;
   applyLiveAudit(event);
+  if (['run.claimed', 'run.started'].includes(event.event_type) && state.run?.status === 'queued') {
+    state.run = { ...state.run, status: 'running', queue: null };
+  }
   if (event.event_type === "run.cancelling" && state.run?.status !== "cancelled") {
     state.run = { ...state.run!, status: "cancelling", current_step: "cancelling" };
   }
@@ -76,7 +79,7 @@ function observe(runId: string, event: RunEvent): void {
     return;
   }
   if (state.run?.status === "cancelling" || state.run?.status === "cancelled") return;
-  const stage = stageFor(event);
+  const stage = eventStage(event);
   if (stage) {
     if (!state.stageStartedAt[stage] && event.occurred_at) state.stageStartedAt[stage] = event.occurred_at;
     const index = stageOrder.indexOf(stage);
@@ -86,7 +89,8 @@ function observe(runId: string, event: RunEvent): void {
     const failed = /failed|error/.test(`${event.event_type} ${event.stage}`);
     state.stages[stage] = failed ? "failed" : "active";
   }
-  if (event.event_type === "workflow.completed") {
+  if (event.event_type === "run.completed" || event.event_type === "run.completed_with_warnings"
+      || ["completed", "completed_with_warnings"].includes(state.run?.status || "")) {
     for (const key of Object.keys(state.stages) as StageKey[]) state.stages[key] = "complete";
   }
 }
@@ -99,7 +103,7 @@ function applyLiveAudit(event: RunEvent): void {
     candidate_lifecycle: {},
     recovery: {},
   };
-  if (event.event_type === "query.progress") {
+  if (event.event_type === "query.progress" || event.event_type === "query.refinement_stopped") {
     audit.loop_decisions = [...(audit.loop_decisions || []), { ...event.payload }];
   } else if (event.event_type === "query.portfolio_recorded") {
     audit.query_portfolio = [...(audit.query_portfolio || []), { ...event.payload }];
@@ -127,15 +131,18 @@ function applySnapshot(runId: string, generation: number, snapshot: RunDetail): 
   if (currentStatus === "cancelled" && snapshot.status !== "cancelled") return true;
   if (currentStatus === "cancelling" && !["cancelling", "cancelled"].includes(snapshot.status)) return true;
   state.run = snapshot;
+  if (["completed", "completed_with_warnings"].includes(snapshot.status)) {
+    for (const key of stageOrder) state.stages[key] = "complete";
+  }
   applyTerminalFailure();
   return true;
 }
 
 function applyTerminalFailure(): void {
   if (state.run?.status !== "failed" && state.run?.status !== "cancelled") return;
-  if ((Object.keys(state.stages) as StageKey[]).some((key) => state.stages[key] === "failed")) return;
-  const active = (Object.keys(state.stages) as StageKey[]).find((key) => state.stages[key] === "active");
-  if (active) state.stages[active] = "failed";
+  for (const key of stageOrder) {
+    if (state.stages[key] === "active") state.stages[key] = state.run.status === "cancelled" ? "idle" : "failed";
+  }
 }
 
 export async function submitSearch(payload: SearchSubmission): Promise<RunDetail> {
@@ -143,23 +150,26 @@ export async function submitSearch(payload: SearchSubmission): Promise<RunDetail
   resetRunState();
   const submitted = await api.submit(payload, globalThis.crypto.randomUUID());
   state.run = submitted;
-  state.stages.query = "active";
+  state.stages.query = submitted.status === 'queued' ? 'idle' : 'active';
   return submitted;
 }
 
 function delay(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
+    const done = () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
       resolve();
-    }, { once: true });
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
   });
 }
 
 // Offline pauses reconnect churn; `online` resumes with a fresh snapshot first (§10.6).
 function waitForOnline(signal?: AbortSignal | null): Promise<void> {
-  if (globalThis.navigator?.onLine !== false) return Promise.resolve();
+  if (signal?.aborted || globalThis.navigator?.onLine !== false) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       globalThis.removeEventListener("online", done);
@@ -184,13 +194,13 @@ export async function recoverRun(runId: string, loadAudit: typeof api.audit | nu
   } else {
     resetRunState();
   }
-  const initialSnapshot = await api.run(runId, controller.signal);
-  if (!isCurrentGeneration(generation) || initialSnapshot.id !== runId) return;
-  state.run = initialSnapshot;
-
-  while (isCurrent(runId, generation)) {
-    state.connection = state.lastEventSequence === 0 ? "connected" : "reconnecting";
+  while (isCurrentGeneration(generation) && !controller.signal.aborted) {
     try {
+      const snapshot = await api.run(runId, controller.signal);
+      if (!isCurrentGeneration(generation) || snapshot.id !== runId) return;
+      if (state.run?.id !== runId) state.run = snapshot;
+      else if (!applySnapshot(runId, generation, snapshot)) return;
+      state.connection = "connected";
       await api.events(
         runId,
         state.lastEventSequence,
@@ -199,32 +209,33 @@ export async function recoverRun(runId: string, loadAudit: typeof api.audit | nu
         },
         controller.signal,
       );
-    } catch (error) {
-      if (controller.signal.aborted || !isCurrent(runId, generation)) return;
-      if (!(error instanceof EventGapError)) {
-        if (globalThis.navigator?.onLine === false) {
-          state.connection = "offline";
-          await waitForOnline(controller.signal);
+      if (!isCurrent(runId, generation)) return;
+      const refreshedSnapshot = await api.run(runId, controller.signal);
+      if (!applySnapshot(runId, generation, refreshedSnapshot)) return;
+      if (terminalStatuses.has(state.run.status)) {
+        if (loadAudit && ["completed", "completed_with_warnings"].includes(state.run.status)) {
+          const audit = await loadAudit(runId, controller.signal);
           if (!isCurrent(runId, generation)) return;
-        } else {
-          state.connection = "reconnecting";
-          await delay(800, controller.signal);
+          state.audit = audit;
         }
+        state.connection = "offline";
+        return;
       }
+    } catch (error) {
+      if (controller.signal.aborted || !isCurrentGeneration(generation)) return;
+      if (error instanceof ApiError && error.status < 500 && ![408, 429].includes(error.status)) {
+        state.connection = "offline";
+        throw error;
+      }
+      if (error instanceof EventGapError) continue;
     }
-    if (!isCurrent(runId, generation)) return;
-    const refreshedSnapshot = await api.run(runId, controller.signal);
-    if (!applySnapshot(runId, generation, refreshedSnapshot)) return;
-    if (terminalStatuses.has(state.run.status)) {
-      if (loadAudit && ["completed", "completed_with_warnings"].includes(state.run.status)) {
-        const audit = await loadAudit(runId, controller.signal);
-        if (!isCurrent(runId, generation)) return;
-        state.audit = audit;
-      }
+    if (globalThis.navigator?.onLine === false) {
       state.connection = "offline";
-      return;
+      await waitForOnline(controller.signal);
+    } else {
+      state.connection = "reconnecting";
+      await delay(800, controller.signal);
     }
-    state.connection = "reconnecting";
   }
 }
 
@@ -247,6 +258,12 @@ export function stopRunRecovery(): void {
   recoveryController = null;
   state.connection = "offline";
   state.cancelPending = false;
+}
+
+/** Remove the previous identity's data and invalidate every in-flight response. */
+export function clearRun(): void {
+  stopRunRecovery();
+  resetRunState();
 }
 
 export const runState = state;

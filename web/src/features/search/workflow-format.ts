@@ -1,5 +1,5 @@
 import type { RunEvent } from "../../api/types";
-import type { StageKey } from "../../state/run";
+export { eventStage } from "../../state/run";
 
 export interface StructuredRow {
   sequence: number;
@@ -9,20 +9,13 @@ export interface StructuredRow {
 
 type TFunc = (key: string) => string;
 
-export function eventStage(event: { event_type: string; stage: string }): StageKey | null {
-  const type = event.event_type;
-  if (type === "query.started" || type === "query.planned" || type === "query.failed") return "query";
-  if (type === "query.progress" || type === "query.portfolio_recorded") return "search";
-  if (/^(retrieval|citation|ranking|enrichment)\./.test(type)) return "ranking";
-  if (/^(final\.|workflow\.completed)/.test(type)) return "results";
-  return null;
-}
-
 export function eventLabel(t: TFunc, eventType: string): string {
   const labels: Record<string, string> = {
     "query.started": "eventQueryStarted",
     "query.planned": "eventQueryPlanned",
     "query.progress": "eventQueryProgress",
+    "query.selected": "selectedQuery",
+    "query.refinement_stopped": "eventQueryRefinementStopped",
     "query.portfolio_recorded": "eventQueryPortfolio",
     "retrieval.started": "eventRetrievalStarted",
     "retrieval.progress": "eventRetrievalProgress",
@@ -39,11 +32,6 @@ export function eventLabel(t: TFunc, eventType: string): string {
     "ranking.completed": "eventRankingCompleted",
     "ranking.degraded": "eventRankingDegraded",
     "ranking.failed": "eventRankingFailed",
-    "enrichment.started": "eventEnrichmentStarted",
-    "enrichment.progress": "eventEnrichmentProgress",
-    "enrichment.completed": "eventEnrichmentCompleted",
-    "enrichment.skipped": "eventEnrichmentSkipped",
-    "enrichment.degraded": "eventEnrichmentDegraded",
     "workflow.completed": "eventWorkflowCompleted",
     "workflow.recovery": "eventRecoveryApplied",
   };
@@ -54,6 +42,10 @@ export function localizedDecision(t: TFunc, value: unknown): string {
   const key = `decision_${String(value || "recorded")}`;
   const localized = t(key);
   return localized === key ? t("decisionRecorded") : localized;
+}
+
+export function localizedRefinementStop(t: TFunc, code: unknown): string {
+  return t(code === "query_repeated" || code === "query_no_progress" ? code : "eventQueryRefinementStopped");
 }
 
 export function localizedFailure(t: TFunc, code: unknown): string {
@@ -71,10 +63,16 @@ export function eventDetail(t: TFunc, event: { event_type: string; payload?: Rec
     return [payload.intent, payload.current_query].filter(Boolean).map(String).join(" · ");
   }
   if (event.event_type === "query.progress") {
-    return `#${Number(payload.iteration ?? 0)} · ${localizedDecision(t, payload.decision)} · ${t("sourceHits")} ${Number(payload.hit_count ?? 0)} · ${t("candidates")} ${Number(payload.total ?? 0)}`;
+    return `#${Number(payload.iteration ?? 0)} · ${localizedDecision(t, payload.decision)} · ${t("retrievedPapers")} ${Number(payload.hit_count ?? 0)} · ${t("sourceTotal")} ${Number(payload.total ?? 0)}`;
+  }
+  if (event.event_type === "query.selected") {
+    return t("querySelectionReason").replace("{n}", String(payload.selected_iteration));
+  }
+  if (event.event_type === "query.refinement_stopped") {
+    return localizedRefinementStop(t, payload.code);
   }
   if (event.event_type === "query.portfolio_recorded") {
-    return `${String(payload.query || payload.view_id || "")} · ${t("sourceHits")} ${Number(payload.hit_count ?? 0)}`;
+    return `${String(payload.query || payload.view_id || "")} · ${t("retrievedPapers")} ${Number(payload.hit_count ?? 0)}`;
   }
   if (event.event_type.startsWith("retrieval.")) {
     if (/failed/.test(event.event_type)) return localizedFailure(t, payload.code);
@@ -99,11 +97,7 @@ export function eventDetail(t: TFunc, event: { event_type: string; payload?: Rec
     const candidates = Number(payload.candidate_count ?? 0);
     return `${t("rankingBatches")} ${current} / ${total} · ${t("sentToLlm")} ${scored || candidates}`;
   }
-  if (event.event_type.startsWith("enrichment.")) {
-    if (/skipped/.test(event.event_type)) return t("not_requested");
-    if (/degraded/.test(event.event_type)) return t("degraded");
-    return `${t("enrichedAbstracts")} ${Number(payload.enriched_count ?? payload.current ?? 0)} / ${Number(payload.total ?? payload.request_count ?? 0)}`;
-  }
+
   if (event.event_type === "workflow.completed") {
     return `${t("finalOutput")}: ${Number(payload.result_count ?? 0)} · ${t("warnings")}: ${Number(payload.warning_count ?? 0)}`;
   }
@@ -120,13 +114,8 @@ export function progressRows(t: TFunc, events: RunEvent[], prefix: string): Stru
 export function portfolioDetail(t: TFunc, item: Record<string, unknown>): string {
   const facts = [item.purpose, item.query].filter(Boolean).map(String);
   if (item.status) facts.push(t(String(item.status)));
-  if (item.hit_count !== undefined) facts.push(`${t("sourceHits")} ${Number(item.hit_count)}`);
+  if (item.hit_count !== undefined) facts.push(`${t("retrievedPapers")} ${Number(item.hit_count)}`);
   if (item.added_unique !== undefined) facts.push(`${t("uniqueCandidates")} ${Number(item.added_unique)}`);
   return facts.join(" · ");
 }
 
-export function systemLogText(events: RunEvent[]): string {
-  return events.map((event) =>
-    `${String(event.sequence).padStart(6, "0")} ${event.event_type} ${JSON.stringify(event.payload)}`,
-  ).join("\n");
-}

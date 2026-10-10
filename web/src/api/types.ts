@@ -3,7 +3,11 @@ import type {
   CitationMapOutput,
   CitationNodeOutput,
   DiagnosticCheckOutput,
+  ErrorResponse as GeneratedErrorResponse,
   DiagnosticOutput,
+  DeletionReceipt as GeneratedDeletionReceipt,
+  HistoryItem as GeneratedHistoryItem,
+  HistoryPage as GeneratedHistoryPage,
   DiagnosticSubmission as GeneratedDiagnosticSubmission,
   PersistedEvent,
   ResultOutput,
@@ -28,4 +32,8 @@ export type CitationMap = CitationMapOutput;
 export type SearchSubmission = RunSubmission;
 export type DiagnosticSubmission = GeneratedDiagnosticSubmission;
 export type DiagnosticCheck = DiagnosticCheckOutput;
+export type ErrorResponse = GeneratedErrorResponse;
 export type DiagnosticResult = DiagnosticOutput;
+export type DeletionReceipt = GeneratedDeletionReceipt;
+export type HistoryItem = GeneratedHistoryItem;
+export type HistoryPage = GeneratedHistoryPage;

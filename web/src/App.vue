@@ -1,14 +1,9 @@
 <script setup lang="ts">
-import AppHeader from "./components/AppHeader.vue";
-import { useLocale } from "./locales";
-
-const { t } = useLocale();
+import WorkspaceShell from "./features/workspace/WorkspaceShell.vue";
 </script>
 
 <template>
-  <a class="skip-link" href="#main-content">{{ t("skipToContent") }}</a>
-  <AppHeader />
-  <main id="main-content" class="app-main" tabindex="-1">
+  <WorkspaceShell>
     <RouterView />
-  </main>
+  </WorkspaceShell>
 </template>

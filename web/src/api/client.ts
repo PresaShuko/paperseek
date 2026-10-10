@@ -2,6 +2,9 @@ import type {
   CitationMap,
   DiagnosticResult,
   DiagnosticSubmission,
+  ErrorResponse,
+  DeletionReceipt,
+  HistoryPage,
   PaperResult,
   ResultPage,
   RunDetail,
@@ -20,6 +23,7 @@ export interface ResultPageQuery {
 }
 
 export interface HistoryQuery {
+  pageSize?: number;
   cursor?: string | null;
   query?: string;
 }
@@ -40,12 +44,14 @@ export function setRequestHandler(handler: typeof fetch): void {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly details: NonNullable<ErrorResponse["error"]["details"]>;
 
-  constructor(status: number, code: string) {
+  constructor(status: number, code: string, details: NonNullable<ErrorResponse["error"]["details"]> = {}) {
     super(code);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -54,7 +60,7 @@ export async function json<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const code = payload?.error?.code || `http_${response.status}`;
-    throw new ApiError(response.status, code);
+    throw new ApiError(response.status, code, payload?.error?.details);
   }
   return response.status === 204 ? null as T : response.json() as Promise<T>;
 }
@@ -84,7 +90,8 @@ export const api = {
   },
 
   run(runId: string, signal?: AbortSignal): Promise<RunDetail> {
-    return json<RunDetail>(`/api/v1/runs/${runId}`, { signal });
+    const timeout = AbortSignal.timeout(15_000);
+    return json<RunDetail>(`/api/v1/runs/${runId}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   },
 
   cancel(runId: string, signal?: AbortSignal): Promise<RunDetail> {
@@ -114,14 +121,13 @@ export const api = {
     return json<RunAudit>(`/api/v1/runs/${runId}/audit`, { signal });
   },
 
-  async history(options: HistoryQuery = {}, signal?: AbortSignal): Promise<{ items: RunDetail[]; next_cursor: string | null; matched_count: number | null }> {
+  async history(options: HistoryQuery = {}, signal?: AbortSignal): Promise<HistoryPage> {
     const params = new URLSearchParams();
+    if (options.pageSize) params.set("page_size", String(options.pageSize));
     if (options.cursor) params.set("cursor", options.cursor);
     if (options.query) params.set("query", options.query);
     const suffix = params.size ? `?${params.toString()}` : "";
-    return json<{ items: RunDetail[]; next_cursor?: string | null; matched_count?: number | null }>(`/api/v1/history${suffix}`, { signal }).then(
-      (page) => ({ items: page.items || [], next_cursor: page.next_cursor ?? null, matched_count: page.matched_count ?? null }),
-    );
+    return json<HistoryPage>(`/api/v1/history${suffix}`, { signal });
   },
 
   async exportSelected(runId: string, format: "csv" | "json", uids: string[], signal?: AbortSignal): Promise<DownloadedFile> {
@@ -140,8 +146,12 @@ export const api = {
     return { blob: await response.blob(), filename: match?.[1] || `export-selected.${format}` };
   },
 
-  deleteHistoryRun(runId: string, signal?: AbortSignal): Promise<{ run_id: string; status: string }> {
-    return json<{ run_id: string; status: string }>(`/api/v1/history/${runId}`, { method: "DELETE", signal });
+  renameHistory(runId: string, title: string): Promise<void> {
+    return json<void>(`/api/v1/history/${runId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
+  },
+
+  deleteHistoryRun(runId: string, signal?: AbortSignal): Promise<DeletionReceipt> {
+    return json<DeletionReceipt>(`/api/v1/history/${runId}`, { method: "DELETE", signal });
   },
 
   exportUrl(runId: string, format: "csv" | "json"): string {
@@ -152,42 +162,76 @@ export const api = {
     return `${apiBase}/api/v1/runs/${runId}/logs`;
   },
 
-  async events(
-    runId: string,
+  events(runId: string, afterSequence: number, onEvent: (event: RunEvent) => void, signal?: AbortSignal): Promise<void> {
+    return streamEvents(`/api/v1/runs/${runId}/events`, afterSequence, onEvent, signal);
+  },
+};
+
+export async function streamEvents(
+    path: string,
     afterSequence: number,
     onEvent: (event: RunEvent) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const response = await request(`${apiBase}/api/v1/runs/${runId}/events`, {
-      headers: {
-        Accept: "text/event-stream",
-        "Last-Event-ID": String(afterSequence),
-      },
-      signal,
-    });
-    if (!response.ok || !response.body) throw new Error(`events_http_${response.status}`);
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-      const frames = buffer.split(/\r?\n\r?\n/);
-      buffer = frames.pop() || "";
-      for (const frame of frames) {
-        const lines = frame.split(/\r?\n/);
-        const id = lines.find((line) => line.startsWith("id:"))?.slice(3).trim();
-        const data = lines
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (data) {
-          const event = JSON.parse(data) as RunEvent;
-          if (id !== undefined && Number(id) !== event.sequence) throw new Error("event_cursor_mismatch");
-          onEvent(event);
+    const idle = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = (milliseconds: number) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => idle.abort(new DOMException("Event stream timed out.", "TimeoutError")), milliseconds);
+    };
+    arm(15_000);
+    try {
+      const response = await request(`${apiBase}${path}`, {
+        headers: {
+          Accept: "text/event-stream",
+          "Last-Event-ID": String(afterSequence),
+        },
+        signal: signal ? AbortSignal.any([signal, idle.signal]) : idle.signal,
+      });
+      if (!response.ok) throw new ApiError(response.status, `events_http_${response.status}`);
+      if (!response.body) throw new Error("events_body_missing");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (true) {
+          // Both events and the server's 10-second keepalives prove this stream is alive.
+          arm(30_000);
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() || "";
+          for (const frame of frames) {
+            const lines = frame.split(/\r?\n/);
+            const id = lines.find((line) => line.startsWith("id:"))?.slice(3).trim();
+            const data = lines
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+            if (data) {
+              const event = JSON.parse(data) as RunEvent;
+              if (id !== undefined && Number(id) !== event.sequence) throw new Error("event_cursor_mismatch");
+              onEvent(event);
+            }
+          }
+          if (done) break;
         }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
-      if (done) break;
+    } finally {
+      clearTimeout(timer!);
+      idle.abort();
     }
-  },
-};
+  }
+
+export async function download(path: string, fallback: string): Promise<DownloadedFile> {
+  const response = await request(`${apiBase}${path}`);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new ApiError(response.status, payload?.error?.code || `http_${response.status}`);
+  }
+  const match = /filename="?([^";]+)"?/.exec(response.headers.get("Content-Disposition") || "");
+  return { blob: await response.blob(), filename: match?.[1] || fallback };
+}

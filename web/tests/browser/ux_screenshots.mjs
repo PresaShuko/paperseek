@@ -51,8 +51,8 @@ const failedEvents = toEvents([
 ]);
 const cancelledEvents = toEvents(rawEvents.slice(0, 4));
 const papers = [
-  { rank: 1, title: "Large language models for clinical diagnosis: a systematic review", authors: ["Jane Doe", "John Smith"], year: 2026, venue: "Nature Digital Medicine", provider: "openalex", score: 9.2, citation_count: 128, doi: "10.1234/example.1", abstract: "We review evidence for large language models in clinical workflows.", reasoning: "Direct match for diagnosis and patient management outcomes.", url: "https://example.com/paper1", pdf_url: "https://example.com/paper1.pdf", metadata_status: "complete" },
-  { rank: 2, title: "Evaluation of LLM treatment recommendations in primary care", authors: ["Alice Lee"], year: 2025, venue: "JMIR", provider: "openalex", score: 8.1, citation_count: 42, doi: "10.1234/example.2", abstract: "A prospective evaluation of treatment recommendation quality.", url: "https://example.com/paper2", metadata_status: "complete" },
+  { rank: 1, title: "Large language models for clinical diagnosis: a systematic review", authors: ["Jane Doe", "John Smith"], year: 2026, venue: "Nature Digital Medicine", provider: "openalex", score: 9.2, citation_count: 128, doi: "10.1234/example.1", abstract: "We review evidence for large language models in clinical workflows.", reasoning: "Direct match for diagnosis and patient management outcomes.", url: "https://example.com/paper1", pdf_url: "https://example.com/paper1.pdf" },
+  { rank: 2, title: "Evaluation of LLM treatment recommendations in primary care", authors: ["Alice Lee"], year: 2025, venue: "JMIR", provider: "openalex", score: 8.1, citation_count: 42, doi: "10.1234/example.2", abstract: "A prospective evaluation of treatment recommendation quality.", url: "https://example.com/paper2" },
 ];
 const citationMap = {
   nodes: [
@@ -109,8 +109,6 @@ currentRun = runningRun; currentEvents = events;
 await page.goto(`${base}/runs/${runId}`, { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(1200);
 await shot("desktop-run-reconnecting");
-await page.getByTestId("system-log-toggle").click();
-await shot("desktop-run-system-log");
 
 const viewports = [
   ["desktop", 1366, 900],

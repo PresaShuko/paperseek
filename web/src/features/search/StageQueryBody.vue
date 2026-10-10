@@ -1,98 +1,46 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-
+import { computed } from "vue";
 import type { RunEvent } from "../../api/types";
+import Disclosure from "../../components/Disclosure.vue";
 import { useLocale } from "../../locales";
 
-const props = defineProps<{
-  events: RunEvent[];
-  source: string;
-}>();
-
+const props = defineProps<{ events: RunEvent[]; source: string }>();
 const { sourceName, t } = useLocale();
-const intentOpen = ref(false);
-
-const planned = computed<Record<string, unknown> | null>(() => {
-  for (let index = props.events.length - 1; index >= 0; index -= 1) {
-    if (props.events[index].event_type === "query.planned") return props.events[index].payload || {};
-  }
-  return null;
-});
-
-const intent = computed(() => String(planned.value?.intent || ""));
-const currentQuery = computed(() => String(planned.value?.current_query || ""));
-const coreConcepts = computed(() => Array.isArray(planned.value?.core_concepts) ? planned.value.core_concepts.map(String) : []);
-const queryViews = computed<Array<Record<string, unknown>>>(() =>
-  Array.isArray(planned.value?.query_views) ? planned.value.query_views : []);
-
-interface IntentRow {
-  label: string;
-  values: string[];
-}
-
-const intentRows = computed<IntentRow[]>(() => {
+const planned = computed<Record<string, unknown> | null>(() => props.events.findLast((event) => event.event_type === "query.planned")?.payload || null);
+const list = (key: string) => (Array.isArray(planned.value?.[key]) ? (planned.value![key] as unknown[]).map(String) : []);
+const rows = computed(() => {
   const plan = planned.value;
   if (!plan) return [];
-  const rows: IntentRow[] = [];
-  const list = (key: string, label: string) => {
-    if (Array.isArray(plan[key]) && (plan[key] as unknown[]).length) rows.push({ label, values: (plan[key] as unknown[]).map(String) });
-  };
-  if (plan.question_type) rows.push({ label: t("questionType"), values: [String(plan.question_type)] });
-  list("likely_synonyms", t("likelySynonyms"));
-  list("adjacent_concepts", t("adjacentConcepts"));
-  list("boundaries", t("boundaries"));
-  list("ambiguities", t("ambiguities"));
-  if (plan.adjustment_strategy) rows.push({ label: t("adjustmentStrategy"), values: [String(plan.adjustment_strategy)] });
-  return rows;
+  const result: Array<{ label: string; values: string[] }> = [];
+  if (plan.question_type) result.push({ label: t("questionType"), values: [String(plan.question_type)] });
+  for (const [key, label] of [["likely_synonyms", "likelySynonyms"], ["adjacent_concepts", "adjacentConcepts"], ["boundaries", "boundaries"], ["ambiguities", "ambiguities"]]) {
+    if (list(key).length) result.push({ label: t(label), values: list(key) });
+  }
+  if (plan.adjustment_strategy) result.push({ label: t("adjustmentStrategy"), values: [String(plan.adjustment_strategy)] });
+  return result;
 });
-
-const hasIntentDetail = computed(() => intentRows.value.length || queryViews.value.length);
+const views = computed<Array<Record<string, unknown>>>(() => (Array.isArray(planned.value?.query_views) ? (planned.value!.query_views as Array<Record<string, unknown>>) : []));
 </script>
 
 <template>
-  <div class="stage-rich" data-testid="stage-query-audit">
-    <p v-if="!events.length" class="stage-empty">{{ t("noQueryYet") }}</p>
+  <div class="stack" style="gap: 12px" data-testid="stage-query-audit">
+    <p v-if="!events.length" class="sm muted">{{ t("noQueryYet") }}</p>
     <template v-else>
-      <div v-if="intent" class="intent-summary">
-        <span class="detail-label">{{ t("interpretedIntent") }}</span>
-        <p>{{ intent }}</p>
+      <div v-if="planned?.intent" class="stack" style="gap: 4px"><span class="xs muted medium">{{ t("interpretedIntent") }}</span><p class="sm">{{ planned.intent }}</p></div>
+      <div v-if="list('core_concepts').length" class="stack" style="gap: 6px">
+        <span class="xs muted medium">{{ t("coreConcepts") }}</span>
+        <div class="chips"><span v-for="concept in list('core_concepts')" :key="concept" class="badge badge-outline">{{ concept }}</span></div>
       </div>
-      <div v-if="coreConcepts.length" class="chip-row">
-        <span class="detail-label">{{ t("coreConcepts") }}</span>
-        <span v-for="concept in coreConcepts" :key="concept" class="chip">{{ concept }}</span>
+      <div v-if="planned?.current_query" class="stack" style="gap: 4px">
+        <span class="xs muted medium">{{ t("currentQuery") }} · {{ sourceName(source) }}</span>
+        <code class="code">{{ planned.current_query }}</code>
       </div>
-      <div v-if="currentQuery" class="query-output">
-        <span class="detail-label">{{ t("currentQuery") }}</span>
-        <small>{{ sourceName(source) }}</small>
-        <code>{{ currentQuery }}</code>
-      </div>
-      <section v-if="hasIntentDetail" class="stage-disclosure">
-        <button
-          type="button"
-          class="stage-disclosure-toggle"
-          data-testid="stage-query-intent-toggle"
-          :aria-expanded="intentOpen"
-          aria-controls="stage-query-intent"
-          @click="intentOpen = !intentOpen"
-        >
-          <span>{{ t("fullIntentAnalysis") }}</span>
-          <svg class="disclosure-icon" :class="{ 'disclosure-icon--open': intentOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
-        </button>
-        <div v-if="intentOpen" id="stage-query-intent" class="stage-disclosure-body">
-          <div v-for="row in intentRows" :key="row.label" class="intent-detail-group">
-            <strong>{{ row.label }}</strong>
-            <div v-if="row.values.length > 1" class="chip-row"><span v-for="value in row.values" :key="value" class="chip">{{ value }}</span></div>
-            <span v-else>{{ row.values[0] }}</span>
-          </div>
-          <div v-if="queryViews.length" class="intent-detail-group">
-            <strong>{{ t("queryViews") }}</strong>
-            <div v-for="(view, index) in queryViews" :key="String(view.view_id || index)" class="query-view-row">
-              <code>{{ view.view_id || `#${index + 1}` }}</code>
-              <span v-if="view.purpose">{{ view.purpose }}</span>
-            </div>
-          </div>
-        </div>
-      </section>
+      <Disclosure v-if="rows.length || views.length" :items="[{ key: 'intent', label: t('fullIntentAnalysis'), testid: 'stage-query-intent-toggle' }]">
+        <template #intent><dl class="kv" style="grid-template-columns: auto minmax(0, 1fr)">
+          <template v-for="row in rows" :key="row.label"><dt>{{ row.label }}</dt><dd style="text-align: left">{{ row.values.join("; ") }}</dd></template>
+          <template v-for="(view, index) in views" :key="String(view.view_id || index)"><dt class="mono">{{ view.view_id || `#${index + 1}` }}</dt><dd style="text-align: left">{{ view.purpose }}</dd></template>
+        </dl></template>
+      </Disclosure>
     </template>
   </div>
 </template>
