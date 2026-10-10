@@ -205,6 +205,13 @@ export interface components {
         "paper_id" : string;
         "signature" : string;
       };
+    "HistoryClearResult": {
+        "active"?: number;
+        "analyses"?: number;
+        "reviews"?: number;
+        "searches"?: number;
+        "status" : "stopping" | "cleared";
+      };
     "HistoryItem": {
         "created_at" : string;
         "display_title"?: string;
@@ -669,6 +676,10 @@ export interface components {
         "prompt_version"?: string;
         "workflow_version"?: string;
       };
+    "SecretsClearOutput": {
+        "connections" : number;
+        "source_keys" : number;
+      };
     "SectionBody": {
         "paragraphs" : Array<components["schemas"]["ReviewParagraph"]>;
       };
@@ -761,6 +772,13 @@ export interface components {
         "defaults" : components["schemas"]["DefaultsOutput"];
         "sources" : Array<components["schemas"]["SourceSettingOutput"]>;
       };
+    "WorkspaceSummary": {
+        "active" : number;
+        "analyses" : number;
+        "location"?: string;
+        "reviews" : number;
+        "searches" : number;
+      };
     "WrittenSection": {
         "author" : "model" | "user";
         "body" : components["schemas"]["SectionBody"];
@@ -806,6 +824,7 @@ export type ErrorDetails = components["schemas"]["ErrorDetails"];
 export type ErrorOutput = components["schemas"]["ErrorOutput"];
 export type ErrorResponse = components["schemas"]["ErrorResponse"];
 export type EvidenceCard = components["schemas"]["EvidenceCard"];
+export type HistoryClearResult = components["schemas"]["HistoryClearResult"];
 export type HistoryItem = components["schemas"]["HistoryItem"];
 export type HistoryPage = components["schemas"]["HistoryPage"];
 export type LLMRouteInput = components["schemas"]["LLMRouteInput"];
@@ -854,6 +873,7 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type RunStatus = components["schemas"]["RunStatus"];
 export type RunSubmission = components["schemas"]["RunSubmission"];
 export type RunVersions = components["schemas"]["RunVersions"];
+export type SecretsClearOutput = components["schemas"]["SecretsClearOutput"];
 export type SectionBody = components["schemas"]["SectionBody"];
 export type SectionSave = components["schemas"]["SectionSave"];
 export type SelectedExportInput = components["schemas"]["SelectedExportInput"];
@@ -871,4 +891,5 @@ export type SourceSettingsInput = components["schemas"]["SourceSettingsInput"];
 export type SupportFinding = components["schemas"]["SupportFinding"];
 export type TestOutput = components["schemas"]["TestOutput"];
 export type WorkspaceSettingsOutput = components["schemas"]["WorkspaceSettingsOutput"];
+export type WorkspaceSummary = components["schemas"]["WorkspaceSummary"];
 export type WrittenSection = components["schemas"]["WrittenSection"];

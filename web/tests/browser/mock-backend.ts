@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 
 // One in-memory stand-in for the Community API. Specs adjust `state` directly.
 const now = new Date().toISOString();
+const finished = new Set(["completed", "completed_with_warnings", "failed", "cancelled"]);
 
 export const ids = {
   done: "11111111-1111-4111-8111-111111111111",
@@ -195,6 +196,31 @@ export async function mockBackend(page: Page, state: MockState = createState()):
     const parts = path.split("/").filter(Boolean);
 
     if (path === "/sources") return respond(route, { sources: state.sources });
+    if (path === "/data/summary") {
+      const runs = Object.values(state.runs);
+      return respond(route, { searches: runs.filter((run) => finished.has(String(run.status))).length, analyses: state.analyses.length,
+        reviews: state.reviews.length, active: runs.filter((run) => !finished.has(String(run.status))).length, location: "~/.paperseek" });
+    }
+    if (path === "/data/history/clear") {
+      const active = Object.values(state.runs).filter((run) => !finished.has(String(run.status)));
+      if (active.length) {
+        // Cancellation is requested now and observed as finished by the next call.
+        for (const run of active) run.status = "cancelled";
+        return respond(route, { status: "stopping", active: active.length, searches: 0, analyses: 0, reviews: 0 });
+      }
+      const counts = { searches: Object.keys(state.runs).length, analyses: state.analyses.length, reviews: state.reviews.length };
+      state.runs = {};
+      state.analyses = [];
+      state.reviews = [];
+      return respond(route, { status: "cleared", active: 0, ...counts });
+    }
+    if (path === "/settings/secrets" && method === "DELETE") {
+      const cleared = { connections: state.connections.length, source_keys: state.sourceSettings.filter((item) => item.key_origin === "settings").length };
+      state.connections = [];
+      for (const item of state.sourceSettings) if (item.key_origin === "settings") Object.assign(item, { has_key: false, key_origin: "" });
+      Object.assign(state.defaults, { search_llm: "", review_llm: "", embedding: "", reranker: "", decision: "", pre_ranking: "local_fusion" });
+      return respond(route, cleared);
+    }
     if (path === "/settings" && method === "GET") return respond(route, settingsPayload(state));
     if (path === "/settings/defaults") {
       Object.assign(state.defaults, Object.fromEntries(Object.entries(body as Json).filter(([, value]) => value !== null)));

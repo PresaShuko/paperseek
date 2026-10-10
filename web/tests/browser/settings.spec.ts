@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ids, requestsTo } from "./mock-backend";
+import { createState, ids, requestsTo } from "./mock-backend";
 import { open } from "./workspace-helpers";
 
 test("model API tab lists connections with use, connectivity and actions", async ({ page }) => {
@@ -87,4 +87,40 @@ test("general tab changes the interface language", async ({ page }) => {
   await page.getByRole("combobox", { name: "界面语言" }).click();
   await page.getByRole("option", { name: "English" }).click();
   await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
+});
+
+test("user tab shows local data and clears saved keys only after the exact phrase", async ({ page }) => {
+  const state = await open(page, "/settings/user");
+  await expect(page.getByRole("tab", { name: "用户" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("~/.paperseek")).toBeVisible();
+  await expect(page.getByText("2 个模型连接、0 个数据源密钥")).toBeVisible();
+  await page.getByRole("button", { name: "清空密钥" }).click();
+  const dialog = page.getByRole("dialog", { name: "清空全部已保存的密钥？" });
+  await expect(dialog).toContainText("将永久删除你保存的 2 个模型连接和 0 个数据源密钥");
+  const confirm = dialog.getByRole("button", { name: "清空密钥" });
+  const phrase = dialog.getByLabel("输入「确认清空密钥」以确认");
+  await expect(confirm).toBeDisabled();
+  await phrase.fill("清空");
+  await expect(confirm).toBeDisabled();
+  await phrase.fill("确认清空密钥");
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+  expect(requestsTo(state, "DELETE", "/settings/secrets")).toHaveLength(1);
+  await expect(page.getByText("0 个模型连接、0 个数据源密钥")).toBeVisible();
+});
+
+test("clearing history stops running tasks first and then deletes every record", async ({ page }) => {
+  const state = createState();
+  state.runs[ids.small].status = "running";
+  await open(page, "/settings/user", state);
+  await page.getByRole("button", { name: "清空历史" }).click();
+  const dialog = page.getByRole("dialog", { name: "清空全部历史记录？" });
+  await expect(dialog).toContainText("将永久删除 2 条检索、0 个计量分析和 0 篇综述");
+  await expect(dialog).toContainText("正在运行的任务会先被停止。");
+  await dialog.getByLabel("输入「清空」以确认").fill("清空");
+  await dialog.getByRole("button", { name: "清空历史" }).click();
+  await expect(dialog).toBeHidden({ timeout: 5000 });
+  expect(requestsTo(state, "POST", "/data/history/clear")).toHaveLength(2);
+  expect(Object.keys(state.runs)).toHaveLength(0);
+  await expect(page.getByText("历史记录已清空")).toBeVisible();
 });

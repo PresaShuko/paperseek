@@ -12,6 +12,7 @@ from paperseek_community.workspace_settings import (
     DefaultsInput,
     DefaultsOutput,
     ProbeOutput,
+    SecretsClearOutput,
     SettingsError,
     SourceSettingsInput,
     WorkspaceSettingsOutput,
@@ -55,6 +56,11 @@ def register_settings_routes(
     async def delete_connection(connection_id: str, replacement: str = Query(default="", max_length=64)) -> Response:
         await call(store.delete_connection, connection_id, replacement)
         return Response(status_code=204)
+
+    @app.delete("/api/v1/settings/secrets", response_model=SecretsClearOutput)
+    async def clear_secrets() -> dict:
+        """Remove every saved model connection and data-source key; submitted runs keep their own copies."""
+        return await call(store.clear_secrets)
 
     @app.post("/api/v1/settings/connections/test", response_model=ProbeOutput)
     async def test_draft_connection(request: ConnectionTestInput) -> dict:

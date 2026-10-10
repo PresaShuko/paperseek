@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from paperseek_community.persistence.sqlite_base import SQLiteRepositoryBase
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from paperseek_app.errors import (
@@ -106,6 +106,25 @@ class SQLiteArtifactCleanupRepository(SQLiteRepositoryBase):
             status="cleanup_pending",
             deleted_at=_datetime(deleted_at),
         )
+
+    def active_run_ids(self) -> list[str]:
+        """Every unfinished task: searches and review-writing jobs alike."""
+        return self._run_ids("status NOT IN :terminal")
+
+    def history_run_ids(self) -> list[str]:
+        """Finished searches still shown in history."""
+        return self._run_ids("kind = 'research' AND status IN :terminal")
+
+    def _run_ids(self, condition: str) -> list[str]:
+        query = text(f"SELECT id FROM runs WHERE deleted_at IS NULL AND {condition} ORDER BY created_at, id")
+        try:
+            with self.engine.connect() as connection:
+                return list(connection.execute(
+                    query.bindparams(bindparam("terminal", expanding=True)),
+                    {"terminal": sorted(TERMINAL_STATUSES)},
+                ).scalars())
+        except SQLAlchemyError as exc:
+            raise RunPersistenceError("Runs could not be read.") from exc
 
     def claim_cleanup_job(
         self,

@@ -23,6 +23,7 @@ from paperseek_community.api_routes.reviews import register_review_routes
 from paperseek_community.api_routes.review_events import register_review_events
 from paperseek_community.api_routes.bibliometrics import register_bibliometric_routes, cleanup_analyses
 from paperseek_community.api_routes.settings import register_settings_routes
+from paperseek_community.api_routes.workspace_data import register_workspace_data_routes
 from paperseek_community.workspace_settings import WorkspaceSettingsStore
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.credentials import EncryptedRunCredentialStore
@@ -44,7 +45,7 @@ class SpaStaticFiles(StaticFiles):
             return True
         if parts == ["settings"] or (
             len(parts) == 2 and parts[0] == "settings"
-            and parts[1] in {"models", "sources", "general"}
+            and parts[1] in {"models", "sources", "general", "user"}
         ):
             return True
         return (
@@ -159,6 +160,7 @@ def create_app(
                            accept_jobs=execution_resolver is not None or accept_submissions_without_worker)
     register_review_events(app, database=database, credentials=credentials)
     register_bibliometric_routes(app, database=database)
+    register_workspace_data_routes(app, database=database, credentials=credentials)
 
     if static_dir is not None:
         root = Path(static_dir).expanduser().resolve()

@@ -325,6 +325,7 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
                 "/settings/models",
                 "/settings/sources",
                 "/settings/general",
+                "/settings/user",
             ):
                 deep_link = client.get(route)
                 self.assertEqual(deep_link.status_code, 200, route)

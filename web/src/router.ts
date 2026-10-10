@@ -11,7 +11,7 @@ export const router = createRouter({
   routes: [
     { path: "/", redirect: "/search" },
     { path: "/settings", redirect: "/settings/models" },
-    { path: "/settings/:section(models|sources|general)", name: "settings", component: () => import("./features/workspace/WorkspacePreferences.vue") },
+    { path: "/settings/:section(models|sources|general|user)", name: "settings", component: () => import("./features/workspace/WorkspacePreferences.vue") },
     { path: "/search", name: "search", component: SearchWorkspace, props: { mode: "edit" } },
     { path: "/runs/:runId", name: "run", component: SearchWorkspace, props: { mode: "run" } },
     { path: "/runs/:runId/results", name: "results", component: ResultsView, props: { reviewsEnabled: true } },

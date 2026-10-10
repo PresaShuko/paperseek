@@ -144,6 +144,11 @@ class WorkspaceSettingsOutput(BaseModel):
     defaults: DefaultsOutput
 
 
+class SecretsClearOutput(BaseModel):
+    connections: int
+    source_keys: int
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -325,6 +330,23 @@ class WorkspaceSettingsStore:
             connection.execute("DELETE FROM model_connections WHERE id = ?", (connection_id,))
             self._write_defaults(connection, defaults)
             connection.commit()
+
+    def clear_secrets(self) -> dict[str, int]:
+        """Delete every saved model connection and data-source key; source options stay."""
+        defaults = self._stored_defaults()
+        for name in ("search_llm", "review_llm", "embedding", "reranker", "decision"):
+            defaults.pop(name, None)
+        # Without connections, only the built-in pre-ranking remains usable.
+        defaults["pre_ranking"] = "local_fusion"
+        with closing(self._connect()) as connection:
+            connections = connection.execute("SELECT COUNT(*) FROM model_connections").fetchone()[0]
+            sources = connection.execute("SELECT COUNT(*) FROM source_settings WHERE ciphertext IS NOT NULL").fetchone()[0]
+            connection.execute("DELETE FROM model_connections")
+            connection.execute("""UPDATE source_settings SET ciphertext = NULL, nonce = NULL, test_status = 'untested',
+                test_latency_ms = NULL, test_code = '', tested_at = NULL WHERE ciphertext IS NOT NULL""")
+            self._write_defaults(connection, defaults)
+            connection.commit()
+        return {"connections": connections, "source_keys": sources}
 
     def record_connection_test(self, connection_id: str, result: dict[str, object]) -> None:
         self._record_test("model_connections", "id", connection_id, result)
