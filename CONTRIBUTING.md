@@ -42,7 +42,7 @@ Install the wheel in a fresh environment outside the repository and verify all s
 
 Python type checking currently covers the shared HTTP transport, key rotation, credential resolution, and ranking output codec. Expand this checked boundary as modules are changed. Web type checking includes unused locals and parameters.
 
-Keep permanent automated tests and fixtures in the repository. Store private migration records, live API experiments, temporary test output, and credentials outside the source tree; they must not enter distribution archives.
+Keep tests few and meaningful: assert behavior that protects users (credentials, data, cancellation, results) and core journeys, not exact copy, layout details, or every viewport. Keep permanent automated tests and fixtures in the repository. Store private migration records, live API experiments, temporary test output, and credentials outside the source tree; they must not enter distribution archives.
 
 ## Scope and safety
 
