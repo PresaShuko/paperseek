@@ -62,6 +62,7 @@ async function show(last = false) {
 function keydown(event: KeyboardEvent) {
   if (event.key === "Escape" && open.value) {
     event.preventDefault();
+    event.stopPropagation(); // an enclosing sheet or dialog stays open
     close(true);
   } else if (event.key === "Tab" && open.value) {
     close();

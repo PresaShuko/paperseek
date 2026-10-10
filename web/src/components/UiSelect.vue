@@ -88,7 +88,7 @@ function keydown(event: KeyboardEvent) {
     }
     return;
   }
-  if (event.key === "Escape") { event.preventDefault(); close(); }
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
   else if (event.key === "Tab") close(false);
   else if (event.key === "ArrowDown") { event.preventDefault(); move(1); }
   else if (event.key === "ArrowUp") { event.preventDefault(); move(-1); }
