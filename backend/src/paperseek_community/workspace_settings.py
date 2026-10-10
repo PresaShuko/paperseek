@@ -113,6 +113,8 @@ class ConnectionOutput(BaseModel):
     base_url: str
     model: str
     has_key: bool
+    # The key's last four characters, so a saved key can be recognised without revealing it.
+    key_hint: str = ""
     requires_key: bool
     test: TestOutput
     created_at: str
@@ -123,6 +125,7 @@ class SourceSettingOutput(BaseModel):
     id: str
     has_key: bool
     key_origin: Literal["", "settings", "environment"]
+    key_hint: str = ""
     usable: bool
     options: dict[str, str]
     test: TestOutput
@@ -191,6 +194,11 @@ def normalize_route(kind: str, provider: str, api_type: str, base_url: str, mode
     return route
 
 
+def key_hint(key: str) -> str:
+    """Last four characters of a key long enough not to reveal it."""
+    return key[-4:] if len(key) >= 8 else ""
+
+
 def requires_key(kind: str, provider: str) -> bool:
     return not (kind == "llm" and provider == "ollama")
 
@@ -242,6 +250,7 @@ class WorkspaceSettingsStore:
             "base_url": row["base_url"],
             "model": row["model"],
             "has_key": bool(row["ciphertext"]),
+            "key_hint": key_hint(self._decrypt(f"connection|{row['id']}", row["ciphertext"], row["nonce"])),
             "requires_key": requires_key(row["kind"], row["provider"]),
             "test": self._test(row),
             "created_at": row["created_at"],
@@ -436,6 +445,7 @@ class WorkspaceSettingsStore:
             result.append({
                 "id": definition.id,
                 "has_key": has_key,
+                "key_hint": key_hint(self._decrypt(f"source|{definition.id}", row["ciphertext"], row["nonce"])) if stored_key else "",
                 "key_origin": "settings" if stored_key else "environment" if environment_key else "",
                 "usable": definition.api_key != "required" or has_key,
                 "options": {name: str(options.get(name, "")) for name in SOURCE_OPTIONS.get(definition.id, ())},

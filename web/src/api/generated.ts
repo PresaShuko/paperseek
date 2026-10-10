@@ -84,6 +84,7 @@ export interface components {
         "created_at" : string;
         "has_key" : boolean;
         "id" : string;
+        "key_hint"?: string;
         "kind" : "llm" | "embedding" | "reranker" | "decision";
         "model" : string;
         "provider" : string;
@@ -743,6 +744,7 @@ export interface components {
     "SourceSettingOutput": {
         "has_key" : boolean;
         "id" : string;
+        "key_hint"?: string;
         "key_origin" : "" | "settings" | "environment";
         "options" : {
         [key: string]: string;
