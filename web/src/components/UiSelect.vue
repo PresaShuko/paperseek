@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
     >
       <span v-if="current" class="row" style="gap: 8px; flex-wrap: nowrap; min-width: 0">
         <span v-if="current.status" class="sdot" :class="current.status"></span>
-        <span class="truncate"><span v-if="prefix" class="muted">{{ prefix }} </span>{{ current.label }}<span v-if="current.hint" class="muted"> · {{ current.hint }}</span></span>
+        <span class="truncate"><span v-if="prefix" class="muted" style="margin-right: 0.25em">{{ prefix }}</span>{{ current.label }}<span v-if="current.hint" class="muted"> · {{ current.hint }}</span></span>
       </span>
       <span v-else class="ph">{{ placeholder }}</span>
       <Icon :name="chevron === 'down' ? 'chevron-down' : 'chevrons-up-down'" />
