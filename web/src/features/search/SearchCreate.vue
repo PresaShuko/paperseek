@@ -208,7 +208,7 @@ function errorText(code: string) {
             <UiSelect v-model="form.searchBudget" :options="budgetOptions" :label="u('searchBudget')" />
           </div>
         </div>
-        <slot name="service" />
+        <slot name="service" :source="form.source" />
         <details :open="moreOpen" style="border: 1px solid var(--border); border-radius: 10px" @toggle="moreOpen = ($event.target as HTMLDetailsElement).open">
           <summary class="row" style="cursor: pointer; padding: 10px 14px; justify-content: space-between; flex-wrap: nowrap">
             <span class="sm medium">{{ u("moreOptions") }}</span>

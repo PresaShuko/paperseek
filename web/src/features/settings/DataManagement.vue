@@ -13,17 +13,18 @@ type Summary = components["schemas"]["WorkspaceSummary"];
 type ClearResult = components["schemas"]["HistoryClearResult"];
 
 // Hosted words the key note for its own-key mode and adds that credit records are kept.
-const props = defineProps<{ keysAfter?: string; historyNote?: string; countKeys?: boolean }>();
+const props = defineProps<{ keysAfter?: string; historyNote?: string; countKeys?: boolean; keys?: { connections: number; sources: number } }>();
+const emit = defineEmits<{ cleared: [what: "keys" | "history"] }>();
 const u = useUi();
 const open = ref<"" | "keys" | "history">("");
 const busy = ref(false);
 const error = ref("");
 const status = ref("");
 const summary = ref<Summary | null>(null);
-const keyCounts = computed(() => ({
+const keyCounts = computed(() => props.keys ?? {
   connections: workspaceSettings.connections.length,
   sources: workspaceSettings.sources.filter((item) => item.key_origin === "settings").length,
-}));
+});
 const keysDescription = computed(() => u("clearKeysConfirm", keyCounts.value) + (props.keysAfter ?? u("keysAfter")) + u("irreversible"));
 const historyDescription = computed(() => {
   const value = summary.value;
@@ -55,6 +56,7 @@ async function clearKeys() {
     busy.value = false;
     close();
     toast(u("keysCleared"), { tone: "ok" });
+    emit("cleared", "keys");
   } catch {
     error.value = u("actionFailed");
   } finally {
@@ -74,6 +76,7 @@ async function clearHistory() {
         busy.value = false;
         close();
         toast(u("historyCleared"), { tone: "ok" });
+        emit("cleared", "history");
         return;
       }
       status.value = u("stoppingTasks", { n: result.active ?? 0 });
