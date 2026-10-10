@@ -68,6 +68,10 @@ watch(() => form.source, (value, previous) => {
     form.citationEnabled = true;
   }
 });
+// Saved connections can change elsewhere (another tab, a deployment's service switch); keep a valid choice.
+watch(() => workspaceSettings.connections, () => {
+  if (workspaceSettings.loaded && !connectionById(form.llmConnection)) form.llmConnection = workspaceSettings.defaults?.search_llm || "";
+});
 watch(usableSources, (value) => {
   if (value.length && !value.some((source) => source.id === form.source))
     form.source = workspaceSettings.defaults?.source || value[0].id;

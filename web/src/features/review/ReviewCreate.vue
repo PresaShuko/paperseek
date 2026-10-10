@@ -97,6 +97,9 @@ const sizeOptions = computed<SelectOption<SizeChoice>[]>(() => {
 });
 const canContinue = computed(() => selected.size >= 2 && selected.size <= 100 && !loading.value);
 const connectionOk = computed(() => Boolean(connectionById(form.connection)));
+watch(() => workspaceSettings.connections, () => {
+  if (workspaceSettings.loaded && !connectionById(form.connection)) form.connection = workspaceSettings.defaults?.review_llm || "";
+});
 function message(code: string) {
   return t(code) === code ? runMessage(code, "error") : t(code);
 }
