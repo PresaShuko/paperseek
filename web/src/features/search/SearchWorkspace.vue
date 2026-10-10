@@ -7,6 +7,10 @@ withDefaults(defineProps<{ mode: "edit" | "run"; submissionEnabled?: boolean; ex
 </script>
 
 <template>
-  <SearchCreate v-if="mode === 'edit'" :submission-enabled="submissionEnabled" />
+  <SearchCreate v-if="mode === 'edit'" :submission-enabled="submissionEnabled">
+    <template v-if="$slots.notice" #notice><slot name="notice" /></template>
+    <template v-if="$slots.service" #service><slot name="service" /></template>
+    <template v-if="$slots.cost" #cost><slot name="cost" /></template>
+  </SearchCreate>
   <RunPage v-else :external-recovery="externalRecovery" />
 </template>

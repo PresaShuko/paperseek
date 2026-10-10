@@ -13,6 +13,8 @@ import { invalidateHistory, listPaths, setHeader } from "../workspace/state";
 import { reviewApi, type JobRequest, type Review } from "./api";
 
 type Paper = PaperResult & { uid: string };
+// A deployment may block starting, e.g. when its usage allowance is exhausted.
+const props = withDefaults(defineProps<{ submissionEnabled?: boolean }>(), { submissionEnabled: true });
 const route = useRoute();
 const router = useRouter();
 const { t, runMessage, language } = useLocale();
@@ -182,7 +184,7 @@ async function next() {
   } else if (step.value === 2 && canContinue.value) step.value = 3;
 }
 async function prepare() {
-  if (busy.value || !source.value || !canContinue.value || !form.topic.trim() || !connectionOk.value) return;
+  if (!props.submissionEnabled || busy.value || !source.value || !canContinue.value || !form.topic.trim() || !connectionOk.value) return;
   busy.value = true;
   error.value = "";
   try {
@@ -325,6 +327,7 @@ if (typeof route.query.source === "string") void choose(route.query.source, init
               </div>
             </div>
           </details>
+          <slot name="service" />
         </fieldset>
         <p v-if="created && error" class="help">{{ u("draftSaved") }} <RouterLink class="link" :to="`/reviews/${created.id}`">{{ u("openReview") }}</RouterLink></p>
       </div>
@@ -337,7 +340,10 @@ if (typeof route.query.source === "string") void choose(route.query.source, init
         <div class="row" style="gap: 12px">
           <span v-if="step === 2" class="sm muted" aria-live="polite"><span class="medium" style="color: var(--foreground)">{{ u("selectedOf", { n: selected.size }) }}</span> · {{ u("atLeastTwo") }}</span>
           <button v-if="step < 3" class="btn btn-sm" type="submit" :disabled="step === 1 ? !source || loading : !canContinue"><Icon v-if="loading && step === 1" name="loader" />{{ u("next") }}</button>
-          <button v-else class="btn btn-sm" type="submit" :disabled="busy || !canContinue || !form.topic.trim() || !connectionOk" :title="connectionOk ? undefined : u('needLlmToStart')"><Icon v-if="busy" name="loader" />{{ busy ? u("starting") : u("generateOutline") }}</button>
+          <template v-else>
+            <slot name="cost" />
+            <button class="btn btn-sm" type="submit" :disabled="!submissionEnabled || busy || !canContinue || !form.topic.trim() || !connectionOk" :title="connectionOk ? undefined : u('needLlmToStart')"><Icon v-if="busy" name="loader" />{{ busy ? u("starting") : u("generateOutline") }}</button>
+          </template>
         </div>
       </div>
     </form>

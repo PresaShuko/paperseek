@@ -168,6 +168,7 @@ function errorText(code: string) {
 
 <template>
   <main class="page create">
+    <slot name="notice" />
     <section v-if="needsSetup" class="alert" style="grid-template-columns: 16px 1fr" aria-labelledby="setup-title">
       <Icon name="info" />
       <p id="setup-title" class="alert-title">{{ u("setupTitle") }}</p>
@@ -207,6 +208,7 @@ function errorText(code: string) {
             <UiSelect v-model="form.searchBudget" :options="budgetOptions" :label="u('searchBudget')" />
           </div>
         </div>
+        <slot name="service" />
         <details :open="moreOpen" style="border: 1px solid var(--border); border-radius: 10px" @toggle="moreOpen = ($event.target as HTMLDetailsElement).open">
           <summary class="row" style="cursor: pointer; padding: 10px 14px; justify-content: space-between; flex-wrap: nowrap">
             <span class="sm medium">{{ u("moreOptions") }}</span>
@@ -250,6 +252,7 @@ function errorText(code: string) {
       <div class="cf">
         <button class="btn btn-ghost btn-sm" type="button" :disabled="!changed" @click="reset">{{ u("resetDefaults") }}</button>
         <div class="row" style="gap: 10px">
+          <slot name="cost" />
           <span v-if="blocker && (needsSetup || activeRun)" class="xs muted">{{ blocker }}</span>
           <span v-else class="row" style="gap: 3px" aria-hidden="true"><span class="kbd">Ctrl</span><span class="kbd">Enter</span></span>
           <button class="btn btn-sm" type="submit" :disabled="!canSubmit" :title="blocker || undefined">

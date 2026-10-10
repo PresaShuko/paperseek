@@ -9,6 +9,8 @@ import { invalidateHistory, listPaths, setHeader } from "../workspace/state";
 import { metricsApi } from "./api";
 import { useMetricMessages } from "./messages";
 
+// A deployment may block starting, e.g. when its usage allowance is exhausted.
+const props = withDefaults(defineProps<{ submissionEnabled?: boolean }>(), { submissionEnabled: true });
 const route = useRoute();
 const router = useRouter();
 const u = useUi();
@@ -25,7 +27,7 @@ function select(id: string) {
   source.value = id;
 }
 async function create() {
-  if (!source.value || busy.value) return;
+  if (!props.submissionEnabled || !source.value || busy.value) return;
   busy.value = true;
   error.value = "";
   try {
@@ -52,11 +54,15 @@ async function create() {
           <SourceRunPicker :minimum="0" :selected="source" :label="u('sourceSearch')" @select="select" />
           <p class="help">{{ u("analysisNote") }}</p>
         </div>
+        <slot name="service" />
         <div v-if="error" class="alert" role="alert" style="grid-template-columns: 16px 1fr"><Icon name="fail" /><p class="alert-title">{{ m(error) }}</p></div>
       </div>
       <div class="cf">
         <RouterLink class="btn btn-ghost btn-sm" :to="listPaths.bibliometrics">{{ u("cancel") }}</RouterLink>
-        <button class="btn btn-sm" type="submit" :disabled="!source || busy"><Icon v-if="busy" name="loader" />{{ busy ? u("creating") : u("startAnalysis") }}</button>
+        <div class="row" style="gap: 12px">
+          <slot name="cost" />
+          <button class="btn btn-sm" type="submit" :disabled="!submissionEnabled || !source || busy"><Icon v-if="busy" name="loader" />{{ busy ? u("creating") : u("startAnalysis") }}</button>
+        </div>
       </div>
     </form>
   </main>
