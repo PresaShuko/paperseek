@@ -15,8 +15,9 @@ async def run_blocking[T](function: Callable[..., T], *args, **kwargs) -> T:
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:
-        # Threads cannot be cancelled. Wait before their store/client can be closed.
-        await task
+        # Threads cannot be cancelled. Wait before their store/client can be closed, but keep the
+        # cancellation: a failure inside the thread must not replace it and keep a loop running.
+        await asyncio.gather(task, return_exceptions=True)
         raise
 
 
