@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import uuid4
 
+from paperseek_community.persistence.sqlite_base import SQLiteRepositoryBase
+
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import SQLAlchemyError
 
 from paperseek_app.errors import (
     ActiveRunExists,
@@ -17,6 +18,7 @@ from paperseek_app.errors import (
 )
 from paperseek_app.models import LeaseToken, PendingEvent, RunDetail, RunStatus, RunVersions
 from paperseek_app.state import validate_transition
+from paperseek_community.credentials import CredentialPersistenceError
 from paperseek_community.persistence.sqlite_support import (
     MAX_ATTEMPTS,
     TERMINAL_STATUSES,
@@ -27,7 +29,7 @@ from paperseek_community.persistence.sqlite_support import (
 )
 
 
-class SQLiteRunLeaseRepository:
+class SQLiteRunLeaseRepository(SQLiteRepositoryBase):
     def create_run(
         self,
         question: str,
@@ -128,7 +130,16 @@ class SQLiteRunLeaseRepository:
                             "created_at": now,
                         },
                     )
-        except RunPersistenceError:
+                    if self.submission_credentials is not None:
+                        try:
+                            self.credential_store.save(
+                                run_id, self.submission_credentials, connection=connection,
+                            )
+                        except Exception as exc:
+                            raise CredentialPersistenceError(
+                                "Temporary credentials could not be stored safely."
+                            ) from exc
+        except RunPersistenceError as exc:
             with self.engine.connect() as connection:
                 prior = connection.execute(
                     text(
@@ -141,11 +152,11 @@ class SQLiteRunLeaseRepository:
                 ).mappings().one_or_none()
                 if prior is not None:
                     if prior["request_digest"] != request_digest:
-                        raise IdempotencyConflict("The idempotency key belongs to another request.")
+                        raise IdempotencyConflict("The idempotency key belongs to another request.") from exc
                     return self.get_run(prior["run_id"])
                 active = self._active_run_for_subject(connection, subject)
                 if active is not None:
-                    raise ActiveRunExists(active)
+                    raise ActiveRunExists(active) from exc
             raise
         return self.get_run(run_id)
 
@@ -246,6 +257,8 @@ class SQLiteRunLeaseRepository:
                 raise RunNotFound(f"Run {run_id} was not found.")
             if candidate["status"] in TERMINAL_STATUSES:
                 raise RunStateError(f"Terminal run {run_id} cannot be claimed.")
+            if candidate["status"] == RunStatus.CANCELLING.value:
+                raise RunOwnershipLost(f"Run {run_id} is awaiting cancellation.")
             reclaim = (
                 candidate["status"] == RunStatus.RUNNING.value
                 and candidate["lease_expires_at"]
@@ -287,26 +300,40 @@ class SQLiteRunLeaseRepository:
         expires_at = _timestamp(now_value + lease_for)
         row = None
         with self._transaction() as connection:
+            locked = False
             while True:
                 candidate = connection.execute(
                     text(
                         """
                         SELECT id, status, attempt, deadline_at
                         FROM runs
-                        WHERE status = :queued
+                        WHERE (:kind IS NULL OR kind = :kind) AND (status = :queued
                            OR (status = :running AND lease_expires_at <= :now)
+                           OR (status = :cancelling AND lease_expires_at <= :now))
                         ORDER BY created_at, id
                         LIMIT 1
                         """
                     ),
                     {
                         "queued": RunStatus.QUEUED.value,
+                        "kind": self.claim_kind,
                         "running": RunStatus.RUNNING.value,
+                        "cancelling": RunStatus.CANCELLING.value,
                         "now": now,
                     },
                 ).mappings().one_or_none()
                 if candidate is None:
                     break
+                if not locked:
+                    # Empty polls must not block an uncommitted submission.
+                    # Re-read under the write lock before mutating a candidate:
+                    # Python's SQLite driver does not begin on SELECT alone.
+                    connection.exec_driver_sql("BEGIN IMMEDIATE")
+                    locked = True
+                    continue
+                if candidate["status"] == RunStatus.CANCELLING.value:
+                    self._cancel_expired_run(connection, candidate["id"], now)
+                    continue
                 error_code = ""
                 if candidate["deadline_at"] <= now:
                     error_code = "run_deadline_exceeded"
@@ -339,6 +366,29 @@ class SQLiteRunLeaseRepository:
             lease_generation=int(row["lease_generation"]),
             expires_at=_datetime(row["lease_expires_at"]),
         )
+
+    def _cancel_expired_run(self, connection: Connection, run_id: str, now: str) -> None:
+        row = connection.execute(
+            text(
+                """
+                UPDATE runs
+                SET status = 'cancelled', current_step = 'cancelled',
+                    lease_owner = NULL, lease_expires_at = NULL,
+                    finished_at = :now, updated_at = :now,
+                    last_event_sequence = last_event_sequence + 1
+                WHERE id = :run_id AND status = 'cancelling'
+                  AND lease_expires_at <= :now
+                RETURNING last_event_sequence
+                """
+            ),
+            {"run_id": run_id, "now": now},
+        ).mappings().one_or_none()
+        if row is not None:
+            connection.execute(text("DELETE FROM run_credentials WHERE run_id = :run_id"), {"run_id": run_id})
+            self._insert_events(
+                connection, run_id, int(row["last_event_sequence"]),
+                [PendingEvent(event_type="run.cancelled", stage="lifecycle")], now,
+            )
 
     def _claim_candidate(
         self,
@@ -435,6 +485,7 @@ class SQLiteRunLeaseRepository:
                 "run_id": run_id,
             },
         ).mappings().one()
+        connection.execute(text("DELETE FROM run_credentials WHERE run_id = :run_id"), {"run_id": run_id})
         self._insert_events(
             connection,
             run_id,
@@ -539,6 +590,8 @@ class SQLiteRunLeaseRepository:
             ).mappings().one_or_none()
             if row is None:
                 raise RunOwnershipLost(f"Run {run_id} changed while cancellation was requested.")
+            if target is RunStatus.CANCELLED:
+                connection.execute(text("DELETE FROM run_credentials WHERE run_id = :run_id"), {"run_id": run_id})
             self._insert_events(
                 connection,
                 run_id,
@@ -587,6 +640,7 @@ class SQLiteRunLeaseRepository:
             ).mappings().one_or_none()
             if row is None:
                 self._raise_write_rejected(connection, lease, now)
+            connection.execute(text("DELETE FROM run_credentials WHERE run_id = :run_id"), {"run_id": lease.run_id})
             self._insert_events(
                 connection,
                 lease.run_id,
@@ -607,7 +661,6 @@ class SQLiteRunLeaseRepository:
         if row["status"] in TERMINAL_STATUSES:
             raise RunStateError(f"Terminal run {run_id} cannot be claimed.")
         raise RunOwnershipLost(f"Run {run_id} already has a current lease.")
-
 
 
 __all__ = ["SQLiteRunLeaseRepository"]

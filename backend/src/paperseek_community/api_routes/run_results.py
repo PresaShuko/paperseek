@@ -37,7 +37,6 @@ def register_run_result_routes(app: FastAPI, *, database: Path) -> None:
                 "results": [
                     {
                         **item.record.model_dump(mode="json"),
-                        "metadata_status": item.metadata_status,
                     }
                     for item in page.results
                 ],

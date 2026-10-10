@@ -118,8 +118,8 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
             CheckpointDraft(
                 step_key="assemble_final_result",
                 idempotency_key="final-before-complete",
-                state={"final": True, "step_workflow_version": "m2.research-workflow.v1"},
-                workflow_version="m2.research-workflow.v1",
+                state={"final": True, "step_workflow_version": "m2.research-workflow.v2"},
+                workflow_version=run.versions.workflow_version,
                 schema_version=1,
             ),
         )
@@ -197,7 +197,7 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
                     config_schema_version, artifact_schema_version, error_code,
                     created_at, deadline_at, updated_at
                 ) VALUES (?, 'Preserve this run', 'openalex', 'queued', '{}', '',
-                          0, 0, 0, 'm2.research-workflow.v1', '0.3.0',
+                          0, 0, 0, 'm2.research-workflow.v1', '1.0.0b1',
                           'm2.frozen-search.v1', 1, 1, '', ?, ?, ?)
                 """,
                 (existing_id, now, (self.clock() + timedelta(hours=1)).isoformat(timespec="microseconds"), now),

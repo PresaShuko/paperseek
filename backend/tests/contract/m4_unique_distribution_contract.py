@@ -38,7 +38,7 @@ def _active_text_files() -> list[Path]:
         COMMUNITY_ROOT / "backend",
         COMMUNITY_ROOT / "docs",
         COMMUNITY_ROOT / "integrations",
-        COMMUNITY_ROOT / "skills",
+        COMMUNITY_ROOT / "integrations" / "skills",
     )
     for root in roots:
         if not root.exists():
@@ -105,11 +105,11 @@ class M4UniqueDistributionContract(unittest.TestCase):
         self.assertEqual(violations, [], "\n".join(violations))
 
     def test_skill_contains_guidance_only(self) -> None:
-        self.assertFalse((COMMUNITY_ROOT / "skills" / "paperseek" / "scripts").exists())
-        skill = (COMMUNITY_ROOT / "skills" / "paperseek" / "SKILL.md").read_text(
+        self.assertFalse((COMMUNITY_ROOT / "integrations" / "skills" / "paperseek" / "scripts").exists())
+        skill = (COMMUNITY_ROOT / "integrations" / "skills" / "paperseek" / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Use only the installed PaperSeek product", skill)
+        self.assertIn("Use the local PaperSeek Community product", skill)
         self.assertNotIn("scripts/", skill)
 
     def test_delivery_and_mcp_target_the_backend_distribution(self) -> None:
@@ -147,11 +147,11 @@ class M4UniqueDistributionContract(unittest.TestCase):
             encoding="utf-8"
         )
         expected_urls = {
-            "Homepage": "https://www.paperseek.top/",
+            "Homepage": "https://paperseek.app/",
             "Repository": "https://github.com/MingfengHong/paperseek",
             "Issues": "https://github.com/MingfengHong/paperseek/issues",
-            "Documentation": "https://docs.paperseek.top/",
-            "Online-Demo": "https://www.paperseek.top/",
+            "Documentation": "https://docs.paperseek.app/",
+            "Online-Demo": "https://paperseek.app/",
         }
         for project_root in (
             COMMUNITY_ROOT / "backend",
@@ -189,8 +189,8 @@ class M4UniqueDistributionContract(unittest.TestCase):
             "FROM python:3.12.13-slim AS wheel-build",
             "FROM python:3.12.13-slim AS runtime",
             "COPY --from=web-build /build/web/dist ./src/paperseek_community/static",
-            "python -m pip wheel --wheel-dir /wheels --no-deps .",
-            "python -m pip install /wheels/paperseek-*.whl",
+            "uv build --wheel --out-dir /wheels",
+            "python -m pip install --no-deps /wheels/paperseek-*.whl",
             "PAPERSEEK_DATABASE=/var/lib/paperseek/paperseek.db",
             'ENTRYPOINT ["paperseek"]',
             "EXPOSE 8765",
@@ -233,8 +233,8 @@ class M4UniqueDistributionContract(unittest.TestCase):
             COMMUNITY_ROOT / "README.md",
             COMMUNITY_ROOT / "README.en.md",
             COMMUNITY_ROOT / "CONTRIBUTING.md",
-            COMMUNITY_ROOT / "skills" / "README.md",
-            COMMUNITY_ROOT / "skills" / "paperseek" / "references" / "management-layer.md",
+            COMMUNITY_ROOT / "integrations" / "skills" / "README.md",
+            COMMUNITY_ROOT / "integrations" / "skills" / "paperseek" / "references" / "management-layer.md",
         ]
         for path in public_docs:
             text = path.read_text(encoding="utf-8")

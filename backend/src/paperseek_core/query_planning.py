@@ -8,6 +8,7 @@ import re
 from paperseek_core import prompts
 from paperseek_core.errors import QueryGenerationError
 from paperseek_core.models import (
+    QueryHistoryEntry,
     QueryLoopDecision,
     QueryLoopSnapshot,
     QueryView,
@@ -15,6 +16,7 @@ from paperseek_core.models import (
     SourceQueryProposal,
 )
 from paperseek_core.ports import LLMPort
+from paperseek_core.query_history import contiguous_narrow_totals, narrowing_stalled, refinement_context
 from paperseek_core.query_compiler import (
     compile_query_view,
     source_safe_query,
@@ -182,6 +184,8 @@ class QueryPlanner:
         current_query: str = "",
         feedback: str = "",
         source_context: str = "",
+        history: list[QueryHistoryEntry] | None = None,
+        top_titles: list[str] | None = None,
     ) -> SourceQueryProposal:
         source_id = str(source or "").strip().lower()
         prompt_operation = operation if operation in {"generate", "broaden", "narrow"} else "generate"
@@ -197,6 +201,9 @@ class QueryPlanner:
             user_parts.append(f"Current query: {current_query}")
         if feedback:
             user_parts.append(feedback)
+        history_context = refinement_context(history or [], top_titles or [])
+        if history_context:
+            user_parts.append(history_context)
         user_parts.append(strict_query_output_instruction(output_label))
         messages = [
             {"role": "system", "content": system_prompt},
@@ -216,6 +223,7 @@ class QueryPlanner:
                 "content": (
                     f"Research question: {question}{source_context}\n"
                     f"{plan.audit_summary()}\n"
+                    f"{history_context}\n"
                     f"Previous valid query: {current_query or '(none)'}\n"
                     f"Rejected malformed {operation} output: {query or '(empty)'}\n"
                     f"Format problem: {validation.issue}.\n\n"
@@ -415,25 +423,6 @@ def _title_drift(snapshot: QueryLoopSnapshot) -> tuple[bool, str, str]:
     )
 
 
-def _contiguous_narrow_totals(snapshot: QueryLoopSnapshot, pool_max: int) -> list[int]:
-    totals = []
-    for row in reversed(snapshot.history):
-        action = str(row.get("action") or "").strip().lower()
-        if action in {"repair", "sanitize"}:
-            continue
-        if action != "narrow":
-            break
-        try:
-            total = int(row.get("total"))
-        except (TypeError, ValueError):
-            break
-        if total <= pool_max:
-            break
-        totals.append(total)
-    totals.reverse()
-    return totals
-
-
 class QueryLoopController:
     def decide(self, snapshot: QueryLoopSnapshot) -> QueryLoopDecision:
         total = max(0, int(snapshot.total or 0))
@@ -499,12 +488,8 @@ class QueryLoopController:
                 reason="A small non-empty candidate pool can still be ranked after the adaptive budget is exhausted.",
             )
         if total > pool_max:
-            previous = _contiguous_narrow_totals(snapshot, pool_max)
-            sequence = [*previous[-2:], total]
-            stalled = len(sequence) >= 3 and all(
-                (before - after) / max(1, before) < 0.10
-                for before, after in zip(sequence, sequence[1:])
-            )
+            previous = contiguous_narrow_totals(snapshot.history, pool_max)
+            stalled = narrowing_stalled([*previous, total])
             if iteration < adaptive and not (iteration >= configured and stalled):
                 trend = (
                     f" The preceding broad query returned {previous[-1]} records; use the title feedback "
@@ -536,6 +521,7 @@ class QueryLoopController:
             return QueryLoopDecision(
                 action="accept_high",
                 terminal=True,
+                stop_reason="query_no_progress" if stalled else "",
                 message=(
                     f"Accepted a broad source result set of {total} records after {stop_reason}; bounded "
                     f"retrieval lanes will cap the materialized candidate pool at {pool_max} before LLM ranking."

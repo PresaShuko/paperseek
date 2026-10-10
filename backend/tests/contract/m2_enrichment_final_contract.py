@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import asyncio
-import httpx
 import json
 from pathlib import Path
 import unittest
 
-from paperseek_core.enrichment import AbstractEnrichmentPipeline
 from paperseek_core.final_result import FinalResultAssembler
 from paperseek_core.models import (
-    AbstractEnrichmentRequest,
-    AbstractFetchRequest,
-    AbstractFetchResult,
     PaperCitation,
     PaperIdentifiers,
     PaperKeywords,
@@ -24,25 +18,23 @@ from paperseek_core.models import (
     ResearchAssemblyRequest,
     ResearchResult,
     ResearchWorkflowRequest,
+    RetrievalEmbeddingResult,
     RetrievalRerankItem,
     RetrievalRerankResult,
     SearchPlan,
 )
-from paperseek_core.ports import AbstractPort
 from paperseek_core.sources.contracts import (
     SourceCapabilities,
     SourceSearchMetadata,
     SourceSearchResult,
 )
 from paperseek_core.sources.openalex import OpenAlexSource
-from paperseek_core.sources.crossref import CrossrefSource
 from paperseek_core.sources.http import AsyncHttpTransport
 from paperseek_core.workflow import ResearchWorkflow
 
 
 ROOT = Path(__file__).resolve().parents[3]
 M0 = ROOT / "tests" / "fixtures" / "golden_search"
-FIXTURE = Path(__file__).parent / "fixtures" / "m2_enrichment_characterization.json"
 
 
 class RecordingObserver:
@@ -57,21 +49,6 @@ class RecordingObserver:
         self.checkpoints.append(checkpoint)
 
 
-class FixtureAbstractPort:
-    def __init__(self) -> None:
-        self.calls: list[AbstractFetchRequest] = []
-
-    async def fetch_abstract(self, request: AbstractFetchRequest) -> AbstractFetchResult:
-        self.calls.append(request)
-        if request.doi.endswith("success"):
-            return AbstractFetchResult(
-                doi=request.doi,
-                abstract="Updated & verified abstract with sufficient detail.",
-                found=True,
-            )
-        if request.doi.endswith("failure"):
-            raise RuntimeError("private upstream failure body")
-        return AbstractFetchResult(doi=request.doi)
 
 
 def record(uid: str, doi: str, abstract: str) -> PaperRecord:
@@ -84,118 +61,6 @@ def record(uid: str, doi: str, abstract: str) -> PaperRecord:
     )
 
 
-class M2AbstractEnrichmentContractTest(unittest.IsolatedAsyncioTestCase):
-    async def test_characterized_success_failure_skip_warning_and_batch_checkpoint(self) -> None:
-        characterized = json.loads(FIXTURE.read_text(encoding="utf-8"))
-        source = FixtureAbstractPort()
-        observer = RecordingObserver()
-        items = [
-            RankedPaper(document=record("success", "10.5555/success", "provider success"), score=9),
-            RankedPaper(document=record("failure", "10.5555/failure", "provider failure"), score=8),
-            RankedPaper(document=record("missing", "", "provider missing"), score=7),
-        ]
-
-        result = await AbstractEnrichmentPipeline(source, observer).run(
-            AbstractEnrichmentRequest(items=items, batch_size=2, concurrency=2)
-        )
-
-        self.assertIsInstance(source, AbstractPort)
-        self.assertEqual(
-            [call.doi for call in source.calls],
-            ["10.5555/success", "10.5555/failure"],
-        )
-        self.assertEqual(
-            [item.document.abstract for item in result.items],
-            [
-                characterized["cleaning"]["output"],
-                "provider failure",
-                "provider missing",
-            ],
-        )
-        self.assertEqual(result.warnings, ["abstract_enrichment_failed:10.5555/failure"])
-        self.assertEqual(len(observer.checkpoints), 1)
-        self.assertEqual(observer.checkpoints[0].step_key, "enrich_results.batch")
-        self.assertEqual(observer.checkpoints[0].state["completed_ids"], ["success", "failure"])
-        degraded = [event for event in observer.events if event.event_type == "enrichment.degraded"]
-        self.assertEqual(degraded[0].payload["code"], "abstract_enrichment_failed")
-        self.assertNotIn("private upstream failure body", json.dumps(degraded[0].payload))
-        started = next(event.payload for event in observer.events if event.event_type == "enrichment.started")
-        self.assertEqual(started["request_count"], 2)
-        self.assertEqual(started["concurrency"], 2)
-        progress = next(event.payload for event in observer.events if event.event_type == "enrichment.progress")
-        self.assertEqual(progress["current"], 2)
-        self.assertEqual(progress["total"], 2)
-        self.assertEqual(progress["concurrency"], 2)
-        completed = next(event.payload for event in observer.events if event.event_type == "enrichment.completed")
-        self.assertEqual(completed["request_count"], 2)
-        self.assertEqual(completed["enriched_count"], 1)
-
-    async def test_resume_skips_committed_dois_and_retains_enriched_values(self) -> None:
-        source = FixtureAbstractPort()
-        first_observer = RecordingObserver()
-        original = [
-            RankedPaper(document=record("success", "10.5555/success", "provider success"), score=9),
-            RankedPaper(document=record("failure", "10.5555/failure", "provider failure"), score=8),
-        ]
-        first = await AbstractEnrichmentPipeline(source, first_observer).run(
-            AbstractEnrichmentRequest(items=original, batch_size=1, concurrency=1)
-        )
-        resume = first.resume
-        resumed_source = FixtureAbstractPort()
-        resumed = await AbstractEnrichmentPipeline(resumed_source, RecordingObserver()).run(
-            AbstractEnrichmentRequest(items=original, batch_size=1, concurrency=1, resume=resume)
-        )
-
-        self.assertEqual(resumed_source.calls, [])
-        self.assertEqual(
-            [item.document.abstract for item in resumed.items],
-            ["Updated & verified abstract with sufficient detail.", "provider failure"],
-        )
-        self.assertEqual(resumed.warnings, first.warnings)
-
-    async def test_crossref_port_keeps_exact_request_cleaning_length_and_cache_contract(self) -> None:
-        class Client:
-            def __init__(self) -> None:
-                self.calls = []
-
-            async def request(self, method, url, *, params=None, json=None, headers=None, timeout=None):
-                del params, json
-                self.calls.append({"method": method, "url": url, "headers": headers, "timeout": timeout})
-                request = httpx.Request(method, url, headers=headers)
-                if url.endswith("/10.5555/success"):
-                    return httpx.Response(
-                        200,
-                        json={"message": {"abstract": "<jats:p>Updated &amp; verified abstract with sufficient detail.</jats:p>"}},
-                        request=request,
-                    )
-                if url.endswith("/10.5555/short"):
-                    return httpx.Response(200, json={"message": {"abstract": "Too short."}}, request=request)
-                return httpx.Response(503, json={"message": "private upstream failure"}, request=request)
-
-        client = Client()
-        source = CrossrefSource(transport=AsyncHttpTransport(client=client, sleep=lambda _: asyncio.sleep(0)))
-        success = await source.fetch_abstract(AbstractFetchRequest(doi="10.5555/success"))
-        cached_success = await source.fetch_abstract(AbstractFetchRequest(doi="10.5555/success"))
-        short = await source.fetch_abstract(AbstractFetchRequest(doi="10.5555/short"))
-        cached_short = await source.fetch_abstract(AbstractFetchRequest(doi="10.5555/short"))
-        with self.assertRaisesRegex(Exception, "HTTP 503"):
-            await source.fetch_abstract(AbstractFetchRequest(doi="10.5555/failure"))
-        with self.assertRaisesRegex(Exception, "cached Crossref"):
-            await source.fetch_abstract(AbstractFetchRequest(doi="10.5555/failure"))
-
-        self.assertEqual(success, cached_success)
-        self.assertEqual(success.abstract, "Updated & verified abstract with sufficient detail.")
-        self.assertTrue(success.found)
-        self.assertEqual(short, cached_short)
-        self.assertFalse(short.found)
-        self.assertEqual(
-            [(call["url"], call["timeout"]) for call in client.calls],
-            [
-                ("https://api.crossref.org/works/10.5555/success", 10),
-                ("https://api.crossref.org/works/10.5555/short", 10),
-                ("https://api.crossref.org/works/10.5555/failure", 10),
-            ],
-        )
 
 
 def _paper_from_expected(item: dict) -> RankedPaper:
@@ -229,6 +94,25 @@ def _paper_from_expected(item: dict) -> RankedPaper:
 
 
 class M2FinalAssemblyContractTest(unittest.TestCase):
+    def test_final_graph_marks_results_and_preserves_null_scores_and_edges(self) -> None:
+        graph = {"status": "complete", "nodes": [{"id": "scored", "roles": ["seed"]}],
+                 "edges": [{"source": "scored", "target": "unscored", "type": "references"}]}
+        request = ResearchAssemblyRequest(
+            question="graph", source="openalex", search_plan=SearchPlan(intent="graph"), final_query="graph",
+            citation_map=graph,
+            items=[RankedPaper(document=record("scored", "", ""), score=0, reasoning="valid zero"),
+                   RankedPaper(document=record("unscored", "", ""), score=None)],
+        )
+        result = FinalResultAssembler().assemble(request)
+        first, second = result.citation_map["nodes"]
+        self.assertEqual(first["roles"], ["seed", "result"])
+        self.assertEqual((first["rank"], first["score"], first["reasoning"]), (1, 0, "valid zero"))
+        self.assertEqual((second["rank"], second["score"]), (2, None))
+        self.assertEqual(result.citation_map["edges"], graph["edges"])
+        self.assertEqual(graph["nodes"][0]["roles"], ["seed"])
+        artifact = next(item for item in result.artifacts if item.kind == "citation_map")
+        self.assertEqual(json.loads(artifact.content), result.citation_map)
+
     def test_imported_history_preserves_explicit_search_field_in_both_json_artifacts(self) -> None:
         result = ResearchResult(question="Historical question", search_intent="", search_plan={},
             source="wos", final_query="TS=(synthetic)", db="WOS", field="TS")
@@ -300,19 +184,16 @@ class FixtureWorkflowSource:
         )
 
 
-class ExistingAbstractPort:
-    async def fetch_abstract(self, request: AbstractFetchRequest) -> AbstractFetchResult:
-        return AbstractFetchResult(doi=request.doi, abstract=f"Enriched abstract for {request.doi}.", found=True)
 
 
 class RecordingEmbedding:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def embedding_scores(self, question: str, documents: list[PaperRecord]) -> list[float]:
+    async def embedding_scores(self, question: str, documents: list[PaperRecord], *, model=None) -> RetrievalEmbeddingResult:
         del question
         self.calls += 1
-        return [0.5 for _ in documents]
+        return RetrievalEmbeddingResult(scores=[0.5 for _ in documents], model="fixture", provider="fixture")
 
 
 class RecordingReranker:
@@ -328,7 +209,7 @@ class RecordingReranker:
 
 
 class M2ResearchWorkflowContractTest(unittest.IsolatedAsyncioTestCase):
-    async def test_single_workflow_passes_external_retrieval_ports_to_retrieval_stage(self) -> None:
+    async def test_single_workflow_uses_external_embedding_and_reranking_once(self) -> None:
         source_payload = json.loads((M0 / "source_responses.json").read_text(encoding="utf-8"))
         mapper = OpenAlexSource(transport=AsyncHttpTransport())
         records = [mapper._to_record(item) for item in source_payload["relevance"]]
@@ -362,7 +243,6 @@ class M2ResearchWorkflowContractTest(unittest.IsolatedAsyncioTestCase):
                     query_portfolio_enabled=False,
                 ),
                 citation_enabled=False,
-                fetch_abstracts=False,
             )
         )
 
@@ -386,7 +266,6 @@ class M2ResearchWorkflowContractTest(unittest.IsolatedAsyncioTestCase):
             llm=llm,
             source=FixtureWorkflowSource(records),
             observer=observer,
-            abstracts=ExistingAbstractPort(),
         )
 
         result = await workflow.run(
@@ -405,15 +284,15 @@ class M2ResearchWorkflowContractTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual([item.uid for item in result.ranked], [record.uid for record in records])
-        self.assertTrue(all(item.abstract.startswith("Enriched abstract for ") for item in result.ranked))
+        self.assertEqual([item.abstract for item in result.ranked], [record.abstract for record in records])
         self.assertEqual(result.warnings, [])
         stages = [event.stage for event in observer.events]
-        for stage in ("workflow", "query", "retrieval", "citation", "ranking", "enrichment"):
+        for stage in ("workflow", "query", "retrieval", "citation", "ranking"):
             self.assertIn(stage, stages)
         self.assertEqual(observer.checkpoints[-1].step_key, "assemble_final_result")
         self.assertEqual(
             {item["filename"] for item in observer.checkpoints[-1].state["artifacts"]},
-            {"final_result.json", "export.json", "export.csv", "candidate_pool.jsonl", "citation_map.json"},
+            {"final_result.json", "export.json", "export.csv", "candidate_pool.jsonl", "citation_map.json", "bibliometric_corpus.json"},
         )
         self.assertEqual(observer.events[-1].event_type, "workflow.completed")
 

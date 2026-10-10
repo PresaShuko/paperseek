@@ -1,23 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
+from paperseek_community.persistence.sqlite_base import SQLiteRepositoryBase
+
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
-from paperseek_app.errors import RunError, RunNotFound, RunPersistenceError, RunStateError
-from paperseek_app.models import (
-    ArtifactRole,
-    LeaseToken,
-    PendingEvent,
-    PersistedResult,
-    RunDetail,
-    RunStatus,
-    RunVersions,
-    StoredArtifact,
-)
+from paperseek_app.errors import RunNotFound, RunOwnershipLost, RunPersistenceError
+from paperseek_app.models import ArtifactRole, LeaseToken, PendingEvent, PersistedResult, ResultPage, HistoryItem, HistoryPage, RunDetail, RunStatus, StoredArtifact
 from paperseek_app.state import validate_transition
 from paperseek_community.persistence.sqlite_support import (
-    TERMINAL_STATUSES,
     json_dump as _json_dump,
     json_load as _json_load,
     parse_datetime as _datetime,
@@ -26,7 +20,7 @@ from paperseek_community.persistence.sqlite_support import (
 from paperseek_core.models import FinalPaperResult, ResearchResult
 
 
-class SQLiteResultHistoryRepository:
+class SQLiteResultHistoryRepository(SQLiteRepositoryBase):
     def complete_run(
         self,
         lease: LeaseToken,
@@ -176,38 +170,6 @@ class SQLiteResultHistoryRepository:
                 raise RunOwnershipLost("The run lease was lost before failure was committed.")
         return self.get_run(lease.run_id)
 
-    def get_run(self, run_id: str) -> RunDetail:
-        try:
-            with self.engine.connect() as connection:
-                row = connection.execute(
-                    text(
-                        """
-                        SELECT r.*,
-                               (SELECT COUNT(*) FROM run_results rr WHERE rr.run_id = r.id) AS result_count
-                        FROM runs r
-                        WHERE r.id = :run_id AND r.deleted_at IS NULL
-                        """
-                    ),
-                    {"run_id": run_id},
-                ).mappings().one_or_none()
-        except SQLAlchemyError as exc:
-            raise RunPersistenceError("The run could not be read.") from exc
-        if row is None:
-            raise RunNotFound(f"Run {run_id} was not found.")
-        return self._run_detail(row)
-
-    def _get_run_in_transaction(self, connection: Connection, run_id: str) -> RunDetail:
-        row = connection.execute(
-            text(
-                """
-                SELECT r.*,
-                       (SELECT COUNT(*) FROM run_results rr WHERE rr.run_id = r.id) AS result_count
-                FROM runs r WHERE r.id = :run_id
-                """
-            ),
-            {"run_id": run_id},
-        ).mappings().one()
-        return self._run_detail(row)
 
     def get_results(
         self,
@@ -215,6 +177,7 @@ class SQLiteResultHistoryRepository:
         *,
         after_rank: int = 0,
         limit: int | None = None,
+        uids: list[str] | None = None,
     ) -> list[PersistedResult]:
         if after_rank < 0 or (limit is not None and limit <= 0):
             raise ValueError("Result page bounds are invalid.")
@@ -225,9 +188,12 @@ class SQLiteResultHistoryRepository:
             WHERE rr.run_id = :run_id
               AND rr.rank > :after_rank
               AND r.deleted_at IS NULL
-            ORDER BY rr.rank
         """
         parameters: dict[str, Any] = {"run_id": run_id, "after_rank": after_rank}
+        if uids is not None:
+            statement += " AND json_extract(rr.record_json, '$.uid') IN (SELECT value FROM json_each(:uids))"
+            parameters["uids"] = _json_dump(uids)
+        statement += " ORDER BY rr.rank"
         if limit is not None:
             statement += " LIMIT :limit"
             parameters["limit"] = limit
@@ -248,6 +214,96 @@ class SQLiteResultHistoryRepository:
             )
             for row in rows
         ]
+
+    def query_results(
+        self, run_id: str, *, offset: int, limit: int, query: str | None,
+        min_score: float | None, metadata: str | None, sort: str,
+    ) -> ResultPage:
+        fields = ("title", "authors_text", "abstract", "doi", "venue", "source", "keywords_text")
+        search_text = " || ' ' || ".join(f"COALESCE(json_extract(record_json, '$.{field}'), '')" for field in fields)
+        base = """
+            WITH records AS (
+                SELECT rr.*, json_extract(record_json, '$.score') AS score
+                FROM run_results rr JOIN runs r ON r.id = rr.run_id
+                WHERE rr.run_id = :run_id AND r.deleted_at IS NULL
+            )
+        """
+        conditions = []
+        parameters = {"run_id": run_id, "offset": offset, "limit": limit}
+        if query and query.strip():
+            conditions.append(f"instr(paperseek_casefold({search_text}), :query) > 0")
+            parameters["query"] = query.strip().casefold()
+        if min_score is not None:
+            conditions.append("score >= :min_score")
+            parameters["min_score"] = min_score
+        if metadata:
+            field = {"abstract": "abstract", "doi": "doi", "pdf": "pdf_url"}[metadata]
+            conditions.append(f"paperseek_strip(COALESCE(json_extract(record_json, '$.{field}'), '')) != ''")
+        where = " AND ".join(conditions) or "1"
+        ordering = {
+            "rank": "rank",
+            "score": "score IS NULL, score DESC, rank",
+            "citations": "COALESCE(json_extract(record_json, '$.citation_count'), 0) DESC, rank",
+            "year": "COALESCE(NULLIF(json_extract(record_json, '$.publish_year'), 0), json_extract(record_json, '$.year'), 0) DESC, rank",
+        }[sort]
+        try:
+            with self.engine.connect() as connection:
+                summary = connection.execute(text(base + f"""
+                    SELECT COUNT(*) AS total_count, COUNT(score) AS scored_count,
+                           COALESCE(SUM(score >= 5), 0) AS high_score_count,
+                           MAX(score) AS max_score,
+                           COALESCE(SUM(CASE WHEN {where} THEN 1 ELSE 0 END), 0) AS matched_count
+                    FROM records
+                """), parameters).mappings().one()
+                rows = connection.execute(text(base + f"""
+                    SELECT * FROM records WHERE {where}
+                    ORDER BY {ordering} LIMIT :limit OFFSET :offset
+                """), parameters).mappings().all()
+        except SQLAlchemyError as exc:
+            raise RunPersistenceError("Run results could not be queried.") from exc
+        return ResultPage(
+            **summary,
+            results=[PersistedResult(
+                run_id=row["run_id"], rank=row["rank"],
+                record=FinalPaperResult.model_validate(_json_load(row["record_json"])),
+                record_artifact_id=row["record_artifact_id"] or "",
+            ) for row in rows],
+        )
+
+    def search_history(self, *, query: str, offset: int, limit: int) -> HistoryPage:
+        where = """
+            deleted_at IS NULL AND kind = 'research'
+            AND status IN ('completed', 'completed_with_warnings', 'failed', 'cancelled')
+            AND instr(paperseek_casefold(display_title || ' ' || question || ' ' || source || ' ' || status || ' ' || error_code), :query) > 0
+        """
+        parameters = {"query": query.strip().casefold(), "offset": offset, "limit": limit}
+        try:
+            with self.engine.connect() as connection:
+                count = connection.execute(text(f"SELECT COUNT(*) FROM runs WHERE {where}"), parameters).scalar_one()
+                rows = connection.execute(text(f"""
+                    SELECT r.id, r.display_title, r.question, r.source, r.status, r.error_code, r.warning_codes_json,
+                           r.created_at, r.finished_at,
+                           (SELECT COUNT(*) FROM run_results rr WHERE rr.run_id = r.id) AS result_count
+                    FROM runs r WHERE {where}
+                    ORDER BY r.created_at DESC, r.id DESC LIMIT :limit OFFSET :offset
+                """), parameters).mappings().all()
+        except SQLAlchemyError as exc:
+            raise RunPersistenceError("Run history could not be searched.") from exc
+        return HistoryPage(matched_count=count, items=[HistoryItem(
+            display_title=row["display_title"],
+            id=row["id"], question=row["question"], source=row["source"], status=row["status"],
+            error_code=row["error_code"], result_count=row["result_count"],
+            warnings=_json_load(row["warning_codes_json"]),
+            created_at=_datetime(row["created_at"]), finished_at=_datetime(row["finished_at"]),
+        ) for row in rows])
+
+    def rename_history(self, run_id: str, title: str) -> None:
+        with self._transaction() as connection:
+            row = connection.execute(text("""UPDATE runs SET display_title=:title
+                WHERE id=:id AND deleted_at IS NULL AND kind='research' RETURNING id"""),
+                {"id": run_id, "title": title.strip()}).one_or_none()
+            if row is None:
+                raise RunNotFound(run_id)
 
     def list_history(
         self,
@@ -281,7 +337,7 @@ class SQLiteResultHistoryRepository:
                         SELECT r.*,
                                (SELECT COUNT(*) FROM run_results rr WHERE rr.run_id = r.id) AS result_count
                         FROM runs r
-                        WHERE r.deleted_at IS NULL
+                        WHERE r.deleted_at IS NULL AND r.kind = 'research'
                           AND r.status IN ('completed', 'completed_with_warnings', 'failed', 'cancelled')
                           {cursor_clause}
                         ORDER BY r.created_at DESC, r.id DESC
@@ -293,39 +349,6 @@ class SQLiteResultHistoryRepository:
         except SQLAlchemyError as exc:
             raise RunPersistenceError("Run history could not be read.") from exc
         return [self._run_detail(row) for row in rows]
-
-    @staticmethod
-    def _run_detail(row) -> RunDetail:
-        return RunDetail(
-            id=row["id"],
-            question=row["question"],
-            source=row["source"],
-            status=RunStatus(row["status"]),
-            config_snapshot=_json_load(row["config_json"]),
-            current_step=row["current_step"],
-            attempt=int(row["attempt"]),
-            lease_generation=int(row["lease_generation"]),
-            lease_owner=row["lease_owner"] or "",
-            lease_expires_at=_datetime(row["lease_expires_at"]),
-            last_event_sequence=int(row["last_event_sequence"]),
-            error_code=row["error_code"],
-            warnings=list(_json_load(row["warning_codes_json"])),
-            created_at=_datetime(row["created_at"]),
-            deadline_at=_datetime(row["deadline_at"]),
-            started_at=_datetime(row["started_at"]),
-            cancel_requested_at=_datetime(row["cancel_requested_at"]),
-            finished_at=_datetime(row["finished_at"]),
-            updated_at=_datetime(row["updated_at"]),
-            result_count=int(row["result_count"]),
-            versions=RunVersions(
-                workflow_version=row["workflow_version"],
-                engine_version=row["engine_version"],
-                prompt_version=row["prompt_version"],
-                config_schema_version=int(row["config_schema_version"]),
-                artifact_schema_version=int(row["artifact_schema_version"]),
-            ),
-        )
-
 
 
 __all__ = ["SQLiteResultHistoryRepository"]

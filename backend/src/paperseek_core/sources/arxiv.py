@@ -16,7 +16,7 @@ from paperseek_core.sources.normalization import normalize_doi
 
 class ArxivSource:
     name = "arxiv"
-    BASE_URL = "http://export.arxiv.org/api/query"
+    BASE_URL = "https://export.arxiv.org/api/query"
     ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
     _lock = asyncio.Lock()
     _last_request_at = 0.0
@@ -64,7 +64,7 @@ class ArxivSource:
             query=query,
         )
         if response.status_code >= 400:
-            raise SourceError(self.name, f"arXiv returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+            raise SourceError(self.name, f"arXiv returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
         try:
             root = ET.fromstring(response.text)
         except ET.ParseError as exc:

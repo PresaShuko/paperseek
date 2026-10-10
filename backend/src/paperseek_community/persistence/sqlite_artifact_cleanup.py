@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from paperseek_community.persistence.sqlite_base import SQLiteRepositoryBase
+
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
 from paperseek_app.errors import (
@@ -23,7 +24,7 @@ from paperseek_community.persistence.sqlite_support import (
 )
 
 
-class SQLiteArtifactCleanupRepository:
+class SQLiteArtifactCleanupRepository(SQLiteRepositoryBase):
     def get_artifact(self, artifact_id: str) -> StoredArtifact:
         try:
             with self.engine.connect() as connection:
@@ -67,10 +68,10 @@ class SQLiteArtifactCleanupRepository:
         now = _timestamp(self.clock())
         with self._transaction() as connection:
             row = connection.execute(
-                text("SELECT status, deleted_at FROM runs WHERE id = :run_id"),
+                text("SELECT status, deleted_at, kind FROM runs WHERE id = :run_id"),
                 {"run_id": run_id},
             ).mappings().one_or_none()
-            if row is None:
+            if row is None or row["kind"] != "research":
                 raise RunNotFound(f"Run {run_id} was not found.")
             if row["deleted_at"] is None and row["status"] not in TERMINAL_STATUSES:
                 raise RunStateError("An active run cannot be deleted.")
@@ -281,44 +282,6 @@ class SQLiteArtifactCleanupRepository:
             if updated.rowcount != 1:
                 raise RunOwnershipLost("The cleanup lease was lost before failure was recorded.")
 
-    @staticmethod
-    def _insert_artifacts(
-        connection: Connection,
-        run_id: str,
-        artifacts: list[StoredArtifact],
-    ) -> None:
-        for artifact in artifacts:
-            if artifact.run_id != run_id:
-                raise RunPersistenceError("An artifact belongs to a different run.")
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO run_artifacts (
-                        id, run_id, kind, role, visibility, filename,
-                        media_type, storage_key, sha256, size,
-                        schema_version, created_at
-                    ) VALUES (
-                        :id, :run_id, :kind, :role, :visibility, :filename,
-                        :media_type, :storage_key, :sha256, :size,
-                        :schema_version, :created_at
-                    )
-                    """
-                ),
-                {
-                    "id": artifact.id,
-                    "run_id": artifact.run_id,
-                    "kind": artifact.kind,
-                    "role": artifact.role.value,
-                    "visibility": artifact.visibility.value,
-                    "filename": artifact.filename,
-                    "media_type": artifact.media_type,
-                    "storage_key": artifact.storage_key,
-                    "sha256": artifact.sha256,
-                    "size": artifact.size,
-                    "schema_version": artifact.schema_version,
-                    "created_at": _timestamp(artifact.created_at),
-                },
-            )
 
     @staticmethod
     def _artifact(row) -> StoredArtifact:

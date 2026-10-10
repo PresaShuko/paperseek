@@ -10,10 +10,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 
 from paperseek_core.execution import RequestContext
+from paperseek_core.http_retry import TRANSIENT_STATUSES, cancellable_request, failure_details, request_with_retries, wait_for_retry
 from paperseek_core.sources.contracts import SourceError, SourceFailureKind
-
-
-TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
 def split_api_keys(value: str) -> tuple[str, ...]:
@@ -52,7 +50,8 @@ class AsyncHttpTransport:
             self._client = None
 
     async def wait(self, seconds: float) -> None:
-        await self._sleep(seconds)
+        await wait_for_retry(seconds, self._context.cancellation,
+                             lambda delay: self._wait_with_context(delay, self._context, "source", "", 0))
 
     async def request(
         self,
@@ -62,24 +61,25 @@ class AsyncHttpTransport:
         *,
         params: Mapping[str, Any] | None = None,
         json: Any = None,
-        headers: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | Callable[[int], Mapping[str, str]] | None = None,
         timeout: float | httpx.Timeout = 45,
         query: str = "",
         attempts: int = 3,
         retry_statuses: frozenset[int] = TRANSIENT_STATUSES,
         retry_transport: bool = True,
+        retry_auth: Callable[[], bool] | None = None,
         context: RequestContext | None = None,
     ) -> tuple[httpx.Response, dict[str, Any]]:
         request_context = context or self._context
         started = time.perf_counter()
-        last_error: httpx.RequestError | None = None
-        last_failure_kind = SourceFailureKind.TRANSPORT_ERROR
         if self._client is None:
             self._client = httpx.AsyncClient()
         client = self._client
         attempted = 0
-        for attempt in range(1, max(1, attempts) + 1):
-            request_context.cancellation.raise_if_cancelled()
+        response_headers_received = False
+
+        async def send(attempt: int) -> httpx.Response:
+            nonlocal attempted, response_headers_received
             attempted = attempt
             response_headers_received = False
 
@@ -91,7 +91,7 @@ class AsyncHttpTransport:
             kwargs = {
                 "params": dict(params) if params is not None else None,
                 "json": json,
-                "headers": dict(headers or {}),
+                "headers": dict((headers(attempt) if callable(headers) else headers) or {}),
                 "timeout": timeout,
             }
             if isinstance(client, httpx.AsyncClient):
@@ -104,74 +104,31 @@ class AsyncHttpTransport:
                     else nullcontext()
                 )
                 async with deadline_scope:
-                    response = await self._send_with_cancellation(
-                        client,
-                        method,
-                        url,
-                        kwargs,
-                        request_context,
+                    response = await cancellable_request(
+                        lambda: client.request(method, url, **kwargs), request_context.cancellation,
                     )
             except TimeoutError as exc:
                 raise self._deadline_error(source, query, attempted) from exc
-            except httpx.RequestError as exc:
-                last_error = exc
-                last_failure_kind = self._failure_kind(exc, response_headers_received)
-                if not retry_transport or attempt >= attempts:
-                    break
-                await self._wait_with_context(0.7 * attempt, request_context, source, query, attempted)
-                continue
+            return response
 
-            request_context.cancellation.raise_if_cancelled()
-            info = {
-                "method": method.upper(),
-                "url": _redacted_url(str(response.request.url) if response.request else url),
-                "status": response.status_code,
-                "elapsed_ms": int((time.perf_counter() - started) * 1000),
-                "attempts": attempt,
-            }
-            if response.status_code not in retry_statuses or attempt >= attempts:
-                return response, info
-            await self._wait_with_context(
-                self._retry_delay(response, attempt, source),
-                request_context,
-                source,
-                query,
-                attempted,
-            )
-
-        raise SourceError(
-            source,
-            f"Source request failed after {attempted} attempt(s).",
-            query=query,
-            failure_kind=last_failure_kind,
-        ) from last_error
-
-    @staticmethod
-    async def _send_with_cancellation(
-        client: Any,
-        method: str,
-        url: str,
-        kwargs: dict[str, Any],
-        context: RequestContext,
-    ) -> httpx.Response:
-        request_task = asyncio.create_task(client.request(method, url, **kwargs))
-        cancellation_task = asyncio.create_task(context.cancellation.wait())
         try:
-            done, _ = await asyncio.wait(
-                {request_task, cancellation_task},
-                return_when=asyncio.FIRST_COMPLETED,
+            response, attempted = await request_with_retries(
+                send, cancellation=request_context.cancellation, attempts=attempts,
+                retry_statuses=retry_statuses, retry_transport=retry_transport,
+                retry_auth=retry_auth,
+                sleep=lambda delay: self._wait_with_context(delay, request_context, source, query, attempted),
+                base_delay=2.0 if source == "wos" else 1.0,
             )
-            if cancellation_task in done:
-                request_task.cancel()
-                await asyncio.gather(request_task, return_exceptions=True)
-                context.cancellation.raise_if_cancelled()
-                raise asyncio.CancelledError
-            return await request_task
-        finally:
-            for task in (request_task, cancellation_task):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(request_task, cancellation_task, return_exceptions=True)
+        except httpx.RequestError as exc:
+            raise SourceError(
+                source, f"Source request failed after {attempted} attempt(s).", query=query,
+                failure_kind=self._failure_kind(exc, response_headers_received), retry_details=failure_details(exc),
+            ) from exc
+        return response, {
+            "method": method.upper(), "url": _redacted_url(str(response.request.url) if response.request else url),
+            "status": response.status_code, "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            "attempts": attempted,
+        }
 
     @staticmethod
     def _remaining(context: RequestContext) -> float | None:
@@ -227,14 +184,3 @@ class AsyncHttpTransport:
         if isinstance(exc, httpx.ConnectError):
             return SourceFailureKind.CONNECT_ERROR
         return SourceFailureKind.TRANSPORT_ERROR
-
-    @staticmethod
-    def _retry_delay(response: httpx.Response, attempt: int, source: str) -> float:
-        retry_after = response.headers.get("Retry-After", "").strip()
-        try:
-            if retry_after:
-                return max(0.0, min(float(retry_after), 30.0))
-        except ValueError:
-            pass
-        base = 2.0 if source == "wos" else 0.7
-        return base * attempt

@@ -107,7 +107,7 @@ class WosSource:
             max_page_size=50,
             max_lane_limit=100,
             single_page_lanes=("relevance", "impact", "recent"),
-            backoff_policy="one retry only for HTTP 429",
+            backoff_policy="3 attempts for transport, rate limiting, and transient HTTP failures",
         )
         self.last_response_info: dict[str, Any] = {}
 
@@ -126,18 +126,15 @@ class WosSource:
             headers={"Accept": "application/json", "User-Agent": "paperseek-wos-client/0.3", "X-ApiKey": self.api_key},
             timeout=45.0,
             query=query,
-            attempts=2,
-            retry_statuses=frozenset({429}),
-            retry_transport=False,
         )
         if response.status_code < 200 or response.status_code >= 300:
-            raise SourceError(self.name, f"WoS returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+            raise SourceError(self.name, f"WoS returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
         try:
             payload = response.json()
         except ValueError as exc:
-            raise SourceError(self.name, "WoS returned a non-JSON response.", status=response.status_code, body=response.text[:1000], query=query) from exc
+            raise SourceError(self.name, "WoS returned a non-JSON response.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query) from exc
         if not isinstance(payload, dict):
-            raise SourceError(self.name, "WoS returned an unexpected JSON structure.", status=response.status_code, body=response.text[:1000], query=query)
+            raise SourceError(self.name, "WoS returned an unexpected JSON structure.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
         return result_from_json(payload, limit)
 
     async def get_document(self, uid: str, *, detail: str | None = None) -> PaperRecord:
@@ -156,18 +153,15 @@ class WosSource:
             headers={"Accept": "application/json", "User-Agent": "paperseek-wos-client/0.3", "X-ApiKey": self.api_key},
             timeout=45.0,
             query=normalized_uid,
-            attempts=2,
-            retry_statuses=frozenset({429}),
-            retry_transport=False,
         )
         if response.status_code < 200 or response.status_code >= 300:
-            raise SourceError(self.name, f"WoS returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=normalized_uid)
+            raise SourceError(self.name, f"WoS returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=normalized_uid)
         try:
             payload = response.json()
         except ValueError as exc:
-            raise SourceError(self.name, "WoS returned a non-JSON response.", status=response.status_code, body=response.text[:1000], query=normalized_uid) from exc
+            raise SourceError(self.name, "WoS returned a non-JSON response.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=normalized_uid) from exc
         if not isinstance(payload, dict):
-            raise SourceError(self.name, "WoS returned an unexpected JSON structure.", status=response.status_code, body=response.text[:1000], query=normalized_uid)
+            raise SourceError(self.name, "WoS returned an unexpected JSON structure.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=normalized_uid)
         return record_from_json(payload)
 
     @staticmethod

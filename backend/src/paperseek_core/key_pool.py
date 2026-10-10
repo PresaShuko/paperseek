@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 from threading import Lock
 
 
@@ -12,10 +13,6 @@ def split_api_keys(value: str) -> tuple[str, ...]:
             if item.strip()
         )
     )
-
-
-def retryable_key_status(status_code: int) -> bool:
-    return status_code in {401, 429} or status_code >= 500
 
 
 class ApiKeyPool:
@@ -38,4 +35,21 @@ class ApiKeyPool:
         return tuple(self.keys[(start + offset) % len(self.keys)] for offset in range(count))
 
 
-__all__ = ["ApiKeyPool", "retryable_key_status", "split_api_keys"]
+class RequestKeys:
+    """Per-request rotation; transient failures never reject a credential."""
+
+    def __init__(self, keys: tuple[str, ...]) -> None:
+        self._keys = deque(keys)
+        self.current = ""
+
+    def next_key(self) -> str:
+        self.current = self._keys[0]
+        self._keys.rotate(-1)
+        return self.current
+
+    def reject_current(self) -> bool:
+        self._keys.remove(self.current)
+        return bool(self._keys)
+
+
+__all__ = ["ApiKeyPool", "RequestKeys", "split_api_keys"]

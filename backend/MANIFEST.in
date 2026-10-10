@@ -1,0 +1,9 @@
+prune .cutover-*
+prune .venv
+prune .uv-cache
+prune .pytest_cache
+prune .mypy_cache
+prune .ruff_cache
+prune build
+prune dist
+global-exclude .env .env.* *.db *.sqlite *.sqlite3 *.log *.pyc *.pyo

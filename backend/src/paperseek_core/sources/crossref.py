@@ -4,10 +4,6 @@ import re
 from typing import Any
 
 from paperseek_core.models import (
-    AbstractFetchRequest,
-    AbstractFetchResult,
-    CandidateMetadataEnrichmentRequest,
-    CandidateMetadataEnrichmentResult,
     PaperAuthor,
     PaperCitation,
     PaperIdentifiers,
@@ -42,8 +38,6 @@ class CrossrefSource:
             backoff_policy="3 attempts for transport, 429, and transient 5xx responses",
         )
         self.last_response_info: dict[str, Any] = {}
-        self._abstract_cache: dict[str, AbstractFetchResult] = {}
-        self._abstract_failures: set[str] = set()
 
     async def search(self, request: SourceSearchRequest) -> SourceSearchResult:
         query = request.query.strip()
@@ -66,7 +60,7 @@ class CrossrefSource:
         headers = {"Accept": "application/json", "User-Agent": self._user_agent()}
         response, self.last_response_info = await self.transport.request(self.name, "GET", self.BASE_URL, params=params, headers=headers, timeout=45, query=query)
         if response.status_code >= 400:
-            raise SourceError(self.name, f"Crossref returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+            raise SourceError(self.name, f"Crossref returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
         try:
             payload = response.json()
         except ValueError as exc:
@@ -78,142 +72,9 @@ class CrossrefSource:
             hits=hits,
         )
 
-    async def fetch_abstract(self, request: AbstractFetchRequest) -> AbstractFetchResult:
-        doi = normalize_doi(request.doi)
-        cached = self._abstract_cache.get(doi)
-        if cached is not None:
-            return cached
-        if doi in self._abstract_failures:
-            raise SourceError(self.name, "The cached Crossref abstract request failed.", query=doi)
-        headers = {"Accept": "application/json", "User-Agent": self._user_agent()}
-        try:
-            response, self.last_response_info = await self.transport.request(
-                self.name,
-                "GET",
-                f"{self.BASE_URL}/{doi}",
-                headers=headers,
-                timeout=10,
-                query=doi,
-                attempts=1,
-            )
-        except Exception:
-            self._abstract_failures.add(doi)
-            raise
-        if response.status_code >= 400:
-            self._abstract_failures.add(doi)
-            raise SourceError(
-                self.name,
-                f"Crossref returned HTTP {response.status_code}.",
-                status=response.status_code,
-                body=response.text[:1000],
-                query=doi,
-            )
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            self._abstract_failures.add(doi)
-            raise SourceError(
-                self.name,
-                "Crossref returned a non-JSON response.",
-                body=response.text[:1000],
-                query=doi,
-            ) from exc
-        abstract = self._clean_abstract((payload.get("message") or {}).get("abstract") or "")
-        result = AbstractFetchResult(
-            doi=doi,
-            abstract=abstract if len(abstract) > 20 else "",
-            found=len(abstract) > 20,
-        )
-        self._abstract_cache[doi] = result
-        return result
-
-    async def enrich_candidate_metadata(
-        self,
-        request: CandidateMetadataEnrichmentRequest,
-    ) -> CandidateMetadataEnrichmentResult:
-        documents = list(request.documents)
-        attempted = 0
-        enriched = 0
-        failed = 0
-        headers = {"Accept": "application/json", "User-Agent": self._user_agent()}
-        for index, document in enumerate(documents[: request.limit]):
-            doi = normalize_doi(document.identifiers.doi if document.identifiers else "")
-            if not doi:
-                continue
-            attempted += 1
-            try:
-                response, self.last_response_info = await self.transport.request(
-                    self.name,
-                    "GET",
-                    f"{self.BASE_URL}/{doi}",
-                    headers=headers,
-                    timeout=20,
-                    query=doi,
-                    attempts=1,
-                )
-                if response.status_code >= 400:
-                    raise SourceError(
-                        self.name,
-                        f"Crossref returned HTTP {response.status_code}.",
-                        status=response.status_code,
-                        body=response.text[:1000],
-                        query=doi,
-                    )
-                try:
-                    message = (response.json().get("message") or {})
-                except ValueError as exc:
-                    raise SourceError(
-                        self.name,
-                        "Crossref returned a non-JSON response.",
-                        body=response.text[:1000],
-                        query=doi,
-                    ) from exc
-                documents[index] = self._apply_candidate_metadata(document, message)
-                enriched += 1
-            except Exception:
-                failed += 1
-        return CandidateMetadataEnrichmentResult(
-            documents=documents,
-            attempted_count=attempted,
-            enriched_count=enriched,
-            failed_count=failed,
-            warnings=["retrieval_crossref_metadata_partial"] if failed else [],
-        )
 
     def _user_agent(self) -> str:
         return f"paperseek/1.0 (mailto:{self.email})" if self.email else "paperseek/1.0"
-
-    @classmethod
-    def _apply_candidate_metadata(
-        cls,
-        document: PaperRecord,
-        message: dict[str, Any],
-    ) -> PaperRecord:
-        updated = document
-        cited = int(message.get("is-referenced-by-count") or 0)
-        if cited and not document.citations:
-            updated = updated.model_copy(
-                update={"citations": [PaperCitation(db="Crossref", count=cited)]}
-            )
-        source = updated.source
-        if source is not None and not source.publish_year:
-            year = cls._crossref_year(message)
-            if year:
-                updated = updated.model_copy(
-                    update={"source": source.model_copy(update={"publish_year": year})}
-                )
-        return updated
-
-    @staticmethod
-    def _crossref_year(message: dict[str, Any]) -> int | None:
-        for key in ("published-print", "published-online", "published", "issued"):
-            parts = ((message.get(key) or {}).get("date-parts") or [])
-            if parts and parts[0]:
-                try:
-                    return int(parts[0][0])
-                except (TypeError, ValueError):
-                    continue
-        return None
 
     @staticmethod
     def _first(value: Any) -> str:

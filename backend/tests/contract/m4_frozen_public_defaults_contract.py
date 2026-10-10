@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+import time
 import unittest
 from types import SimpleNamespace
+from pydantic import ValidationError
 
 from paperseek_community.cli import _parser
 from paperseek_community.composition import CommunityExecutionResolver
@@ -32,6 +35,14 @@ def settings() -> CommunityDeploymentSettings:
 
 
 class M4FrozenPublicDefaultsContract(unittest.TestCase):
+    def test_deployment_settings_reject_invalid_routes_without_exposing_keys(self) -> None:
+        values = {**settings().model_dump(), "llm_api_key": "private-fixture-key"}
+        for field, value in (("llm_api_type", "unsupported"), ("llm_base_url", "missing-host"), ("llm_model", "")):
+            with self.subTest(field=field), self.assertRaises(ValidationError) as caught:
+                CommunityDeploymentSettings(**{**values, field: value})
+            self.assertNotIn("private-fixture-key", str(caught.exception))
+        self.assertNotIn("private-fixture-key", repr(CommunityDeploymentSettings(**values)))
+
     def test_each_budget_reaches_the_workflow_with_frozen_limits(self) -> None:
         # Frozen SearchBudgetPreset values, checked at the product composition boundary.
         fields = ("max_iterations", "query_portfolio_max", "query_portfolio_limit",
@@ -50,10 +61,13 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
                 with self.subTest(budget=name):
                     prepared = prepare_run_submission(RunSubmission(question="limits", search_budget=name), settings())
                     run = SimpleNamespace(id="controlled", source=prepared.source, question=prepared.question,
-                                          config_snapshot=prepared.config_snapshot)
+                                          config_snapshot=prepared.config_snapshot,
+                                          deadline_at=datetime.now(timezone.utc) + timedelta(minutes=10))
                     execution = resolver(run, NEVER_CANCELLED)
                     try:
                         request, query = execution.request, execution.request.query_budget
+                        self.assertGreater(execution.deadline_at, time.monotonic())
+                        self.assertLessEqual(execution.deadline_at - time.monotonic(), 600)
                         for field, expected in zip(fields, values):
                             self.assertEqual(getattr(request if field.startswith("citation_") else query, field), expected)
                         self.assertEqual((query.target_min, query.target_max, query.retrieval_pool_min), (5, 50, 5))
@@ -74,7 +88,6 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
         self.assertEqual(prepared.config_snapshot["question"], "evidence synthesis")
         self.assertEqual(prepared.config_snapshot["search_budget"], "fast")
         self.assertTrue(prepared.config_snapshot["citation_enabled"])
-        self.assertFalse(prepared.config_snapshot["fetch_abstracts"])
         self.assertEqual(
             prepared.config_snapshot["llm"],
             {
@@ -112,18 +125,6 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "unsupported_source_capability")
 
-    def test_abstract_enrichment_is_explicit_and_part_of_run_identity(self) -> None:
-        omitted = prepare_run_submission(RunSubmission(question="evidence synthesis"), settings())
-        disabled = prepare_run_submission(
-            RunSubmission(question="evidence synthesis", fetch_abstracts=False), settings()
-        )
-        enabled = prepare_run_submission(
-            RunSubmission(question="evidence synthesis", fetch_abstracts=True), settings()
-        )
-        self.assertEqual(omitted.config_snapshot, disabled.config_snapshot)
-        self.assertEqual(omitted.request_digest, disabled.request_digest)
-        self.assertTrue(enabled.config_snapshot["fetch_abstracts"])
-        self.assertNotEqual(enabled.request_digest, disabled.request_digest)
 
     def test_public_values_are_normalized_and_blank_question_is_rejected(self) -> None:
         prepared = prepare_run_submission(
@@ -144,7 +145,7 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
                 "provider": "anthropic",
                 "api_type": "anthropic_messages",
                 "base_url": "https://api.anthropic.com",
-                "model": "claude-sonnet-4-6",
+                "model": "claude-haiku-4-5",
             },
         )
         with self.assertRaises(SubmissionValidationError) as raised:
@@ -168,9 +169,7 @@ class M4FrozenPublicDefaultsContract(unittest.TestCase):
         self.assertEqual(args.source, "openalex")
         self.assertEqual(args.search_budget, "fast")
         self.assertIsNone(args.citation_enabled)
-        self.assertFalse(args.fetch_abstracts)
-        enabled = _parser().parse_args(["search", "evidence synthesis", "--fetch-abstracts"])
-        self.assertTrue(enabled.fetch_abstracts)
+        self.assertNotIn("fetch_abstracts", vars(args))
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ class SemanticScholarSource:
             raise SourceError(
                 self.name,
                 f"Semantic Scholar returned HTTP {response.status_code}.",
-                status=response.status_code,
+                status=response.status_code, retry_details=response.extensions.get("paperseek_retry"),
                 body=response.text[:1000],
                 query=query,
             )

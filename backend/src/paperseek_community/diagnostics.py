@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from paperseek_app.pre_ranking import resolve_retrieval_route
+
 from collections.abc import Mapping
 import os
 from pathlib import Path
@@ -7,18 +9,16 @@ import sqlite3
 import sys
 from urllib.parse import urlsplit
 
-from paperseek_app.configuration import LLM_PROVIDERS, normalize_wos_db, resolve_llm_route
+from paperseek_app.configuration import LLM_PROVIDERS, EMBEDDING_ROUTE_DEFAULTS, RERANKER_ROUTE_DEFAULTS, normalize_wos_db, resolve_llm_route
 from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_community.credential_resolution import resolve_model_credentials
 from paperseek_app.source_catalog import SOURCE_BY_ID
 from paperseek_community.legacy_settings import classify_legacy_environment
 
 
 LLM_API_TYPES = {"openai_chat", "openai_responses", "anthropic_messages"}
-EMBEDDING_PROVIDERS = {
-    "local", "cstcloud", "openai", "dashscope", "siliconflow", "openrouter",
-    "nvidia", "zhipu", "volcengine", "modelscope", "custom",
-}
-RERANKER_PROVIDERS = {"", "cstcloud", "openrouter", "nvidia", "siliconflow", "custom"}
+EMBEDDING_PROVIDERS = frozenset(EMBEDDING_ROUTE_DEFAULTS)
+RERANKER_PROVIDERS = frozenset(RERANKER_ROUTE_DEFAULTS)
 
 
 def community_doctor_report(
@@ -124,12 +124,13 @@ def run_configuration_diagnostics(
     checks: list[dict[str, object]] = []
     source = str(configuration.get("source") or "openalex").strip().lower()
     llm = _mapping(configuration.get("llm"))
-    retrieval = _mapping(configuration.get("retrieval"))
+    try:
+        retrieval = resolve_retrieval_route(_mapping(configuration.get("retrieval")))
+    except ValueError:
+        retrieval = {}
+        checks.append(_check("retrieval.mode", "fail", "error", "The preliminary ranking configuration is invalid."))
     credentials = _mapping(configuration.get("credentials"))
-    llm_credentials = _mapping(credentials.get("llm"))
     source_credentials = _mapping(credentials.get("source"))
-    embedding_credentials = _mapping(credentials.get("embedding"))
-    reranker_credentials = _mapping(credentials.get("reranker"))
 
     source_definition = SOURCE_BY_ID.get(source)
     if source_definition is None:
@@ -176,6 +177,7 @@ def run_configuration_diagnostics(
             ))
 
     route = resolve_llm_route(settings, dict(llm))
+    model_keys = resolve_model_credentials(settings, route, retrieval, credentials)
     provider = route["provider"].strip().lower()
     api_type = route["api_type"].strip().lower()
     if provider in LLM_PROVIDERS:
@@ -192,7 +194,7 @@ def run_configuration_diagnostics(
             "llm.api_type", "fail", "error", "The selected LLM API type is not supported.",
             ["Choose OpenAI Chat, OpenAI Responses, or Anthropic Messages."],
         ))
-    llm_key = str(llm_credentials.get("api_key") or settings.llm_api_key).strip()
+    llm_key = model_keys["llm"]
     if provider != "ollama" and not llm_key:
         checks.append(_check(
             "llm.api_key", "fail", "error", "An LLM credential is required unless provider is Ollama.",
@@ -204,9 +206,7 @@ def run_configuration_diagnostics(
 
     embedding = _mapping(retrieval.get("embedding"))
     embedding_provider = str(embedding.get("provider") or "local").strip().lower()
-    embedding_key = str(
-        embedding_credentials.get("api_key") or llm_credentials.get("api_key") or settings.llm_api_key
-    ).strip()
+    embedding_key = model_keys["embedding"]
     checks.append(_retrieval_check(
         "retrieval.embedding",
         embedding_provider,
@@ -220,9 +220,7 @@ def run_configuration_diagnostics(
 
     reranker = _mapping(retrieval.get("reranker"))
     reranker_provider = str(reranker.get("provider") or "").strip().lower()
-    reranker_key = str(
-        reranker_credentials.get("api_key") or llm_credentials.get("api_key") or settings.llm_api_key
-    ).strip()
+    reranker_key = model_keys["reranker"]
     checks.append(_retrieval_check(
         "retrieval.reranker",
         reranker_provider,
@@ -234,6 +232,14 @@ def run_configuration_diagnostics(
         disabled_summary="External reranking is off; the existing local order is retained.",
     ))
 
+    if retrieval.get("mode") == "decision":
+        decision = retrieval["decision"]
+        checks.append(_retrieval_check(
+            "retrieval.decision", decision["provider"], decision["model"], decision["base_url"],
+            model_keys["decision"],
+            allowed={"siliconflow", "typesafe"}, disabled=set(), disabled_summary="",
+        ))
+
     summary = {status: sum(check["status"] == status for check in checks) for status in ("pass", "warning", "fail")}
     status = "fail" if summary["fail"] else "warning" if summary["warning"] else "pass"
     return {"ok": status != "fail", "status": status, "checks": checks, "summary": summary}
@@ -244,13 +250,9 @@ def _mapping(value: object) -> Mapping[str, object]:
 
 
 def _source_key(source: str, settings: CommunityDeploymentSettings) -> str:
-    return {
-        "openalex": settings.openalex_api_key,
-        "semanticscholar": settings.semantic_scholar_api_key,
-        "pubmed": settings.pubmed_api_key,
-        "wos": settings.wos_api_key,
-        "googlescholar": settings.google_scholar_api_key,
-    }.get(source, "")
+    from paperseek_community.composition import deployment_source_key
+
+    return deployment_source_key(source, settings)
 
 
 def _check(

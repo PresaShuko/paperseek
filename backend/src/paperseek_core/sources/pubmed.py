@@ -84,7 +84,7 @@ class PubMedSource:
             query=query,
         )
         if response.status_code >= 400:
-            raise SourceError(self.name, f"PubMed returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+            raise SourceError(self.name, f"PubMed returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
         try:
             return response.json()
         except ValueError as exc:

@@ -82,6 +82,8 @@ class OpenAlexSource:
             supports_hard_field_filter=True,
             api_key="recommended",
             max_page_size=100,
+            page_size_by_lane={"semantic": 50},
+            single_page_lanes=("semantic",) if self.api_key else (),
             lane_concurrency=2,
             backoff_policy="3 attempts for transport, 429, and transient 5xx responses",
         )
@@ -93,7 +95,7 @@ class OpenAlexSource:
             raise SourceError(self.name, "OpenAlex search query is empty.")
         if request.lane == "semantic" and not self.api_key:
             raise SourceError(self.name, "OpenAlex semantic search requires an API key.", query=query)
-        page_limit = 50 if request.lane == "semantic" else 100
+        page_limit = self.capabilities.page_size(request.lane)
         page_size = max(1, min(int(request.limit or 10), page_limit))
         params: dict[str, Any] = {
             "per-page": page_size,
@@ -102,7 +104,7 @@ class OpenAlexSource:
             "search.semantic" if request.lane == "semantic" else "search": query,
         }
         field_ids = self._normalize_field_ids(request.field_ids)
-        if field_ids:
+        if field_ids and request.lane != "semantic":
             params["filter"] = f"primary_topic.field.id:{'|'.join(field_ids)}"
         if request.lane == "impact":
             params["sort"] = "cited_by_count:desc"
@@ -128,7 +130,7 @@ class OpenAlexSource:
             raise SourceError(
                 self.name,
                 f"OpenAlex returned HTTP {response.status_code}.",
-                status=response.status_code,
+                status=response.status_code, retry_details=response.extensions.get("paperseek_retry"),
                 body=response.text[:1000],
                 query=query,
             )
@@ -143,11 +145,17 @@ class OpenAlexSource:
             ) from exc
         meta = payload.get("meta") or {}
         hits = [self._to_record(work) for work in payload.get("results") or [] if isinstance(work, dict)]
+        raw_count = len(hits) if request.lane == "semantic" else None
+        if request.lane == "semantic" and field_ids:
+            # The semantic endpoint rejects field filters. Apply the same hard
+            # restriction locally to its bounded, single-page result set.
+            hits = [record for record in hits if self._record_matches_field_ids(record, field_ids)]
         return SourceSearchResult(
             metadata=SourceSearchMetadata(
                 total=int(meta.get("count") or 0),
                 page=int(meta.get("page") or request.page),
                 limit=int(meta.get("per_page") or page_size),
+                raw_count=raw_count,
             ),
             hits=hits,
         )
@@ -158,10 +166,6 @@ class OpenAlexSource:
         max_records = max(1, min(int(request.max_records or 40), 500))
         depth = max(1, min(int(request.depth or 1), 3))
         field_ids = self._normalize_field_ids(request.field_ids)
-        output: list[PaperRecord] = []
-        nodes: dict[str, dict[str, Any]] = {}
-        edges: list[CitationEdge] = []
-        seen: set[str] = set()
         expanded: set[tuple[str, str, int]] = set()
         direction_budget = max(1, int(math.ceil(max_records * 0.7)))
         request_budget = max(1, max_records)
@@ -177,6 +181,7 @@ class OpenAlexSource:
             for direction in ("backward", "forward")
         }
         depth_stats: dict[str, dict[str, int]] = {}
+        graph = _CitationGraph(self, field_ids, depth, direction_stats, depth_stats)
         processed_plans = 0
         consecutive_empty_plans = 0
         stop_reason = ""
@@ -184,82 +189,11 @@ class OpenAlexSource:
         def request_count() -> int:
             return sum(stats["requests"] for stats in direction_stats.values())
 
-        def depth_state(layer: int) -> dict[str, int]:
-            return depth_stats.setdefault(
-                str(layer),
-                {"expanded_items": 0, "fetched": 0, "added": 0, "duplicates": 0, "filtered": 0},
-            )
-
-        def add_node(record: PaperRecord, role: str, seed_uid: str = "") -> None:
-            node_id = self._record_id(record)
-            if not node_id:
-                return
-            existing = nodes.get(node_id)
-            if existing:
-                if role not in existing["roles"]:
-                    existing["roles"].append(role)
-                if seed_uid and seed_uid not in existing["seed_uids"]:
-                    existing["seed_uids"].append(seed_uid)
-                return
-            source = record.source
-            nodes[node_id] = {
-                "id": node_id,
-                "title": record.title or "(no title)",
-                "year": source.publish_year if source else None,
-                "source": source.source_title if source else "",
-                "citations": sum(int(citation.count or 0) for citation in record.citations),
-                "roles": [role],
-                "seed_uids": [seed_uid] if seed_uid else [],
-            }
-
-        def append_neighbor(
-            *,
-            seed_uid: str,
-            parent_uid: str,
-            record: PaperRecord,
-            direction: str,
-            layer: int,
-            next_frontier: list[PaperRecord],
-            frontier_seen: set[str],
-        ) -> bool:
-            state = depth_state(layer)
-            if not self._record_matches_field_ids(record, field_ids):
-                direction_stats[direction]["filtered"] += 1
-                state["filtered"] += 1
-                return False
-            record_uid = self._record_id(record)
-            if not record_uid:
-                return False
-            add_node(record, direction, seed_uid)
-            edges.append(
-                CitationEdge(
-                    seed_id=seed_uid,
-                    parent_id=parent_uid,
-                    record_id=record_uid,
-                    direction=direction,
-                    depth=layer,
-                )
-            )
-            dedupe_key = record_uid.casefold()
-            added = dedupe_key not in seen
-            if added:
-                seen.add(dedupe_key)
-                output.append(record)
-                direction_stats[direction]["added"] += 1
-                state["added"] += 1
-            else:
-                direction_stats[direction]["duplicates"] += 1
-                state["duplicates"] += 1
-            if layer < depth and record_uid not in frontier_seen:
-                frontier_seen.add(record_uid)
-                next_frontier.append(record)
-            return added
-
         plans = list(request.seed_plans)
         role_count = len({role for plan in plans for role in plan.role.split("+")})
         minimum_plans_before_yield_stop = min(len(plans), max(6, role_count * 2))
         for plan_index, plan in enumerate(plans, 1):
-            if len(output) >= max_records:
+            if len(graph.records) >= max_records:
                 stop_reason = "max_records"
                 break
             if request_count() >= request_budget:
@@ -269,22 +203,22 @@ class OpenAlexSource:
             seed_id = self._work_id(seed)
             if not seed_id:
                 continue
-            plan_output_before = len(output)
+            plan_output_before = len(graph.records)
             remaining_plans = max(1, len(plans) - plan_index + 1)
-            plan_record_budget = max(1, int(math.ceil((max_records - len(output)) / remaining_plans)))
+            plan_record_budget = max(1, int(math.ceil((max_records - len(graph.records)) / remaining_plans)))
             seed_uid = self._record_id(seed) or seed_id
-            add_node(seed, "seed")
-            add_node(seed, f"seed_{plan.role}", seed_uid)
+            graph.add_node(seed, "seed")
+            graph.add_node(seed, f"seed_{plan.role}", seed_uid)
             frontier = [seed]
             frontier_seen = {seed_uid}
             for layer in range(1, min(plan.depth, depth) + 1):
                 next_frontier: list[PaperRecord] = []
-                layer_output_before = len(output)
-                state = depth_state(layer)
+                layer_output_before = len(graph.records)
+                state = graph.depth_state(layer)
                 for current in frontier:
                     if (
-                        len(output) >= max_records
-                        or len(output) - plan_output_before >= plan_record_budget
+                        len(graph.records) >= max_records
+                        or len(graph.records) - plan_output_before >= plan_record_budget
                         or request_count() >= request_budget
                     ):
                         break
@@ -346,12 +280,12 @@ class OpenAlexSource:
                         state["fetched"] += len(records)
                         for neighbor in records:
                             if (
-                                len(output) >= max_records
-                                or len(output) - plan_output_before >= plan_record_budget
+                                len(graph.records) >= max_records
+                                or len(graph.records) - plan_output_before >= plan_record_budget
                                 or direction_stats[direction]["added"] >= direction_budget
                             ):
                                 break
-                            append_neighbor(
+                            graph.append_neighbor(
                                 seed_uid=seed_uid,
                                 parent_uid=current_uid,
                                 record=neighbor,
@@ -360,17 +294,17 @@ class OpenAlexSource:
                                 next_frontier=next_frontier,
                                 frontier_seen=frontier_seen,
                             )
-                    if len(output) >= max_records or len(output) - plan_output_before >= plan_record_budget:
+                    if len(graph.records) >= max_records or len(graph.records) - plan_output_before >= plan_record_budget:
                         break
                 frontier = next_frontier
-                if len(output) == layer_output_before and layer < min(plan.depth, depth):
+                if len(graph.records) == layer_output_before and layer < min(plan.depth, depth):
                     break
-                if not frontier or len(output) >= max_records or len(output) - plan_output_before >= plan_record_budget:
+                if not frontier or len(graph.records) >= max_records or len(graph.records) - plan_output_before >= plan_record_budget:
                     break
             processed_plans += 1
-            plan_added = len(output) - plan_output_before
+            plan_added = len(graph.records) - plan_output_before
             consecutive_empty_plans = consecutive_empty_plans + 1 if plan_added == 0 else 0
-            if len(output) >= max_records:
+            if len(graph.records) >= max_records:
                 stop_reason = "max_records"
                 break
             if request_count() >= request_budget:
@@ -395,9 +329,9 @@ class OpenAlexSource:
             "depth_stats": depth_stats,
         }
         return CitationSourceResult(
-            records=output,
-            nodes=list(nodes.values()),
-            edges=edges,
+            records=graph.records,
+            nodes=list(graph.nodes.values()),
+            edges=graph.edges,
             frontier=frontier_state,
         )
 
@@ -470,7 +404,7 @@ class OpenAlexSource:
             raise SourceError(
                 self.name,
                 f"OpenAlex returned HTTP {response.status_code} during citation traversal.",
-                status=response.status_code,
+                status=response.status_code, retry_details=response.extensions.get("paperseek_retry"),
                 body=response.text[:1000],
                 query=query,
             )
@@ -592,3 +526,91 @@ class OpenAlexSource:
                 if value and value not in terms:
                     terms.append(value)
         return terms[:10]
+
+
+class _CitationGraph:
+    """Collect nodes, provenance edges and duplicate statistics without I/O."""
+
+    def __init__(self, source: OpenAlexSource, field_ids: tuple[str, ...], depth: int,
+                 direction_stats: dict[str, dict[str, int]], depth_stats: dict[str, dict[str, int]]) -> None:
+        self.source = source
+        self.field_ids, self.depth = field_ids, depth
+        self.direction_stats, self.depth_stats = direction_stats, depth_stats
+        self.records: list[PaperRecord] = []
+        self.nodes: dict[str, dict[str, Any]] = {}
+        self.edges: list[CitationEdge] = []
+        self.seen: set[str] = set()
+
+    def depth_state(self, layer: int) -> dict[str, int]:
+        return self.depth_stats.setdefault(
+            str(layer),
+            {"expanded_items": 0, "fetched": 0, "added": 0, "duplicates": 0, "filtered": 0},
+        )
+
+
+    def add_node(self, record: PaperRecord, role: str, seed_uid: str = "") -> None:
+        node_id = self.source._record_id(record)
+        if not node_id:
+            return
+        existing = self.nodes.get(node_id)
+        if existing:
+            if role not in existing["roles"]:
+                existing["roles"].append(role)
+            if seed_uid and seed_uid not in existing["seed_uids"]:
+                existing["seed_uids"].append(seed_uid)
+            return
+        source = record.source
+        self.nodes[node_id] = {
+            "id": node_id,
+            "title": record.title or "(no title)",
+            "year": source.publish_year if source else None,
+            "source": source.source_title if source else "",
+            "citations": sum(int(citation.count or 0) for citation in record.citations),
+            "roles": [role],
+            "seed_uids": [seed_uid] if seed_uid else [],
+        }
+
+
+    def append_neighbor(
+        self,
+        *,
+        seed_uid: str,
+        parent_uid: str,
+        record: PaperRecord,
+        direction: str,
+        layer: int,
+        next_frontier: list[PaperRecord],
+        frontier_seen: set[str],
+    ) -> bool:
+        state = self.depth_state(layer)
+        if not self.source._record_matches_field_ids(record, self.field_ids):
+            self.direction_stats[direction]["filtered"] += 1
+            state["filtered"] += 1
+            return False
+        record_uid = self.source._record_id(record)
+        if not record_uid:
+            return False
+        self.add_node(record, direction, seed_uid)
+        self.edges.append(
+            CitationEdge(
+                seed_id=seed_uid,
+                parent_id=parent_uid,
+                record_id=record_uid,
+                direction=direction,
+                depth=layer,
+            )
+        )
+        dedupe_key = record_uid.casefold()
+        added = dedupe_key not in self.seen
+        if added:
+            self.seen.add(dedupe_key)
+            self.records.append(record)
+            self.direction_stats[direction]["added"] += 1
+            state["added"] += 1
+        else:
+            self.direction_stats[direction]["duplicates"] += 1
+            state["duplicates"] += 1
+        if layer < self.depth and record_uid not in frontier_seen:
+            frontier_seen.add(record_uid)
+            next_frontier.append(record)
+        return added

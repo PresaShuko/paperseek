@@ -4,6 +4,8 @@ import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing_extensions import TypedDict
+from paperseek_core.bibliometrics.models import MetricCorpus
 
 
 class CoreModel(BaseModel):
@@ -108,10 +110,18 @@ class RankingResult(CoreModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class SourceSearchMetadata(CoreModel):
+    total: int = 0
+    page: int = Field(default=1, ge=1)
+    limit: int = Field(default=10, ge=1)
+    raw_count: int | None = Field(default=None, ge=0)
+
+
 class RetrievalRequest(CoreModel):
     question: str
     query: str
     primary_hits: list[PaperRecord] = Field(default_factory=list)
+    primary_page: SourceSearchMetadata | None = None
     supplemental_lanes: dict[str, list[PaperRecord]] = Field(default_factory=dict)
     lane_limit: int = Field(default=500, ge=1)
     ranking_candidate_limit: int = Field(default=256, ge=1)
@@ -121,7 +131,6 @@ class RetrievalRequest(CoreModel):
     resume_lane_results: dict[str, list[PaperRecord]] = Field(default_factory=dict)
     completed_lanes: list[str] = Field(default_factory=list)
     checkpoint_resume_stage: str = "retrieve"
-    crossref_metadata_enrichment: bool = False
 
 
 class RetrievalRerankItem(CoreModel):
@@ -131,28 +140,62 @@ class RetrievalRerankItem(CoreModel):
 
 class RetrievalRerankResult(CoreModel):
     items: list[RetrievalRerankItem] = Field(default_factory=list)
+    provider: str = ""
+    model: str = ""
 
 
-class CandidateMetadataEnrichmentRequest(CoreModel):
-    documents: list[PaperRecord] = Field(default_factory=list)
-    limit: int = Field(default=100, ge=1, le=100)
+class RetrievalEmbeddingResult(CoreModel):
+    scores: list[float]
+    provider: str
+    model: str
 
 
-class CandidateMetadataEnrichmentResult(CoreModel):
-    documents: list[PaperRecord] = Field(default_factory=list)
-    attempted_count: int = 0
-    enriched_count: int = 0
-    failed_count: int = 0
+class RetrievalEmbeddingState(CoreModel):
+    question: str
+    provider: str
+    model: str
+    scores_by_identity: dict[str, float]
+    text_hashes: dict[str, str]
+
+
+class DecisionScore(CoreModel):
+    score: float = Field(ge=0, le=3, allow_inf_nan=False, strict=True)
+    confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, strict=True)
+
+
+class DecisionBatchResult(CoreModel):
+    scores: dict[str, DecisionScore]
+    model: str
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+
+
+class DecisionBatchCheckpoint(CoreModel):
+    input_fingerprint: str
+    batch_id: str
+    result: DecisionBatchResult
+
+
+class CandidateSelectionResult(CoreModel):
+    documents: list[PaperRecord]
+    provenance_by_identity: dict[str, dict[str, Any]]
+    selected_count: int = Field(ge=0)
+    input_fingerprint: str
     warnings: list[str] = Field(default_factory=list)
+    requested_mode: str = "local_fusion"
+    actual_mode: str = "local_fusion"
+    component_statuses: dict[Literal["embedding", "reranker", "decision"], Literal["disabled", "skipped", "succeeded", "failed"]] = Field(default_factory=dict)
 
 
 class RetrievalResult(CoreModel):
+    bibliometric_corpus: MetricCorpus | None = None
     documents: list[PaperRecord] = Field(default_factory=list)
     provenance_by_identity: dict[str, dict[str, Any]] = Field(default_factory=dict)
     lane_counts: dict[str, int] = Field(default_factory=dict)
     total_candidates: int = 0
     completed_lanes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    embedding_state: RetrievalEmbeddingState | None = None
 
 
 class CitationSeedPlan(CoreModel):
@@ -483,6 +526,7 @@ class QueryLoopDecision(CoreModel):
     adjustment: str = ""
     terminal: bool = False
     reason: str = ""
+    stop_reason: str = ""
 
 
 class QueryLoopSnapshot(CoreModel):
@@ -596,9 +640,11 @@ class QueryLoopResumeState(CoreModel):
     history: list[QueryHistoryEntry] = Field(default_factory=list)
     query_iteration_memory: list[QueryIterationMemory] = Field(default_factory=list)
     primary_hits: list[PaperRecord] = Field(default_factory=list)
+    primary_page: SourceSearchMetadata | None = None
     fallback_query: str = ""
     fallback_total: int = 0
     fallback_hits: list[PaperRecord] = Field(default_factory=list)
+    fallback_page: SourceSearchMetadata | None = None
     query_view_selection: list[QueryViewSelection] = Field(default_factory=list)
     query_portfolio: list[QueryPortfolioExecution] = Field(default_factory=list)
     portfolio_lane_results: dict[str, list[PaperRecord]] = Field(default_factory=dict)
@@ -631,35 +677,14 @@ class QueryLoopResult(CoreModel):
     retrieval_request: RetrievalRequest
 
 
-class AbstractFetchRequest(CoreModel):
-    doi: str = Field(min_length=1)
 
 
-class AbstractFetchResult(CoreModel):
-    doi: str = Field(min_length=1)
-    abstract: str = ""
-    found: bool = False
 
 
-class AbstractEnrichmentResumeState(CoreModel):
-    completed_ids: list[str] = Field(default_factory=list)
-    abstract_by_uid: dict[str, str] = Field(default_factory=dict)
-    warnings: list[str] = Field(default_factory=list)
 
 
-class AbstractEnrichmentRequest(CoreModel):
-    items: list[RankedPaper] = Field(default_factory=list)
-    enabled: bool = True
-    batch_size: int = Field(default=16, ge=1)
-    concurrency: int = Field(default=8, ge=1)
-    resume: AbstractEnrichmentResumeState | None = None
 
 
-class AbstractEnrichmentResult(CoreModel):
-    items: list[RankedPaper] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-    completed_ids: list[str] = Field(default_factory=list)
-    resume: AbstractEnrichmentResumeState
 
 
 class ArtifactDraft(CoreModel):
@@ -703,6 +728,7 @@ class FinalPaperResult(CoreModel):
 
 
 class ResearchAssemblyRequest(CoreModel):
+    bibliometric_corpus: MetricCorpus | None = None
     question: str = Field(min_length=1)
     source: str = Field(min_length=1)
     search_plan: SearchPlan
@@ -721,6 +747,7 @@ class ResearchAssemblyRequest(CoreModel):
 
 
 class ResearchResult(CoreModel):
+    bibliometric_corpus: MetricCorpus | None = None
     question: str
     search_intent: str
     search_plan: dict[str, Any]
@@ -769,9 +796,16 @@ class ResearchWorkflowResumeState(CoreModel):
     retrieval_lane_results: dict[str, list[PaperRecord]] = Field(default_factory=dict)
     retrieval_completed_lanes: list[str] = Field(default_factory=list)
     citation: CitationExpansionResult | None = None
+    selection: CandidateSelectionResult | None = None
+    decision_batches: list[DecisionBatchCheckpoint] = Field(default_factory=list)
     ranking_scores: list[Any] = Field(default_factory=list)
     ranking_completed_batch_ids: list[str] = Field(default_factory=list)
-    enrichment: AbstractEnrichmentResumeState | None = None
+
+    @model_validator(mode="after")
+    def ranking_requires_selected_candidates(self) -> ResearchWorkflowResumeState:
+        if (self.ranking_scores or self.ranking_completed_batch_ids) and self.selection is None:
+            raise ValueError("Ranking recovery requires a completed candidate selection checkpoint.")
+        return self
 
 
 class ResearchWorkflowRequest(CoreModel):
@@ -783,19 +817,35 @@ class ResearchWorkflowRequest(CoreModel):
     citation_per_seed: int = 4
     citation_max_records: int = 160
     citation_depth: int = 2
-    fetch_abstracts: bool = True
-    enrichment_batch_size: int = 16
-    enrichment_concurrency: int = 8
     ranking_batch_size: int = 256
     ranking_concurrency: int = 16
-    crossref_metadata_enrichment: bool = False
     resume: ResearchWorkflowResumeState | None = None
+
+
+class ProgressPayload(TypedDict, total=False):
+    """Shared event metrics; stage-specific audit data remains extensible."""
+
+    __pydantic_config__ = ConfigDict(extra="allow", strict=True)
+    code: str
+    source: str
+    http_status: int
+    failure_kind: str
+    candidate_count: int
+    result_count: int
+    warning_count: int
+    scored_count: int
+    total_candidates: int
+    completed_lanes: int
+    total_lanes: int
+    completed_batches: int
+    batch_count: int
+    lane_counts: dict[str, int]
 
 
 class CoreProgressEvent(CoreModel):
     event_type: str
     stage: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: ProgressPayload = Field(default_factory=dict)
     schema_version: int = 1
 
 

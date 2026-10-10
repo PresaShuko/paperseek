@@ -5,11 +5,13 @@ from contextlib import closing
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -24,8 +26,6 @@ from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_databas
 from paperseek_app.worker import RunExecutor
 from paperseek_core.execution import RequestContext
 from paperseek_core.models import (
-    AbstractFetchRequest,
-    AbstractFetchResult,
     CitationSourceRequest,
     CitationSourceResult,
     QueryLoopBudget,
@@ -172,15 +172,6 @@ class _StageSource:
     async def search(self, request: SourceSearchRequest) -> SourceSearchResult:
         if self.stage != "retrieval":
             result = await self.delegate.search(request)
-            if self.stage == "enrichment":
-                record = result.hits[0].model_copy(
-                    update={
-                        "identifiers": result.hits[0].identifiers.model_copy(
-                            update={"doi": "10.0000/slow-enrichment"}
-                        )
-                    }
-                )
-                return result.model_copy(update={"hits": [record]})
             return result
 
         if request.query != self.fixture.question:
@@ -197,7 +188,7 @@ class _StageSource:
                 for index in range(1, 101)
             ]
             return SourceSearchResult(
-                metadata=SourceSearchMetadata(total=100, page=1, limit=100),
+                metadata=SourceSearchMetadata(total=101, page=1, limit=100),
                 hits=records,
             )
         await self.request.hit()
@@ -213,17 +204,11 @@ class _StageSource:
         await self.request.hit()
         return CitationSourceResult(frontier={"stop_reason": "fixture"})
 
-    async def fetch_abstract(self, request: AbstractFetchRequest) -> AbstractFetchResult:
-        await self.request.hit()
-        return AbstractFetchResult(
-            doi=request.doi,
-            abstract="A controlled local HTTP response that arrived after cancellation.",
-            found=True,
-        )
 
 
 class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        self.enterContext(patch.dict(os.environ, {"NO_PROXY": "localhost,127.0.0.1,::1"}))
         self.temp = tempfile.TemporaryDirectory()
         self.data_dir = Path(self.temp.name)
         self.database = self.data_dir / "paperseek.db"
@@ -404,7 +389,7 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
             await boundary.aclose()
 
     async def test_real_slow_http_stop_covers_all_four_async_stages_without_late_writes(self) -> None:
-        for stage in ("retrieval", "ranking", "citation", "enrichment"):
+        for stage in ("retrieval", "ranking", "citation"):
             with self.subTest(stage=stage):
                 stage_dir = self.data_dir / stage
                 stage_dir.mkdir()
@@ -437,12 +422,10 @@ class M3CancellationRequestLifecycleContractTest(unittest.IsolatedAsyncioTestCas
                     return WorkflowExecution(
                         llm=llm,
                         source=source,
-                        abstracts=source,
                         request=ResearchWorkflowRequest(
                             question=source.fixture.question,
                             query_budget=budget,
                             citation_enabled=stage == "citation",
-                            fetch_abstracts=stage == "enrichment",
                         ),
                     )
 

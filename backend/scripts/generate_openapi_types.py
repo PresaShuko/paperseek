@@ -8,10 +8,12 @@ import tempfile
 from typing import Any
 
 from paperseek_community.api import create_app
+from paperseek_app.configuration import LLM_ROUTE_DEFAULTS, EMBEDDING_ROUTE_DEFAULTS, RERANKER_ROUTE_DEFAULTS, DECISION_ROUTE_DEFAULTS, DECISION_MODEL_OPTIONS
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 OUTPUT = REPOSITORY / "web" / "src" / "api" / "generated.ts"
+PRESETS_OUTPUT = REPOSITORY / "web" / "src" / "features" / "search" / "provider-presets.ts"
 
 
 def _reference(value: str) -> str:
@@ -80,18 +82,34 @@ def render(schema: dict[str, Any] | None = None) -> str:
     return "\n".join(line.rstrip() for line in content.splitlines()) + "\n"
 
 
+def render_presets() -> str:
+    tables = {
+        "providerDefaults": {key: (model, api_type, base) for key, (api_type, base, model) in LLM_ROUTE_DEFAULTS.items()},
+        "retrievalProviderDefaults": EMBEDDING_ROUTE_DEFAULTS,
+        "rerankerProviderDefaults": RERANKER_ROUTE_DEFAULTS,
+        "decisionProviderDefaults": DECISION_ROUTE_DEFAULTS,
+        "decisionModelOptions": DECISION_MODEL_OPTIONS,
+    }
+    lines = ["// Generated from paperseek_app.configuration. Do not edit.", ""]
+    for name, values in tables.items():
+        lines.append(f"export const {name} = {{")
+        lines.extend(f"  {json.dumps(key)}: {json.dumps(value, ensure_ascii=False)}," for key, value in values.items())
+        lines.extend(["} as const;", ""])
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    expected = render()
-    if args.check:
-        actual = OUTPUT.read_text(encoding="utf-8") if OUTPUT.is_file() else ""
-        if actual != expected:
-            print(f"OpenAPI TypeScript drift: run {Path(__file__).name} without --check", file=sys.stderr)
-            return 1
-        return 0
-    OUTPUT.write_text(expected, encoding="utf-8", newline="\n")
+    for output, expected in ((OUTPUT, render()), (PRESETS_OUTPUT, render_presets())):
+        if args.check:
+            actual = output.read_text(encoding="utf-8") if output.is_file() else ""
+            if actual != expected:
+                print(f"Generated Web drift in {output.name}: run {Path(__file__).name} without --check", file=sys.stderr)
+                return 1
+        else:
+            output.write_text(expected, encoding="utf-8", newline="\n")
     return 0
 
 

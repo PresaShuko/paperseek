@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import closing
+from contextlib import closing, ExitStack
 from datetime import datetime, timedelta, timezone
 from importlib.resources import files
 import json
@@ -39,6 +39,7 @@ from paperseek_community.persistence.migrate import database_url
 from paperseek_app.worker import RunExecutor
 from paperseek_core.models import CheckpointDraft, QueryLoopBudget, ResearchWorkflowRequest
 from paperseek_core.errors import LLMRequestError
+from paperseek_core.sources.contracts import SourceError
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "m1_fixed_source.json"
@@ -66,6 +67,66 @@ def _upgrade_to(database: Path, revision: str) -> None:
 
 
 class M3DurableArtifactExecutorContractTest(unittest.TestCase):
+    def test_progress_only_execution_skips_snapshots_and_preserves_final_results(self):
+        self._create_run()
+        baseline = asyncio.run(self._executor().run_once())
+        expected = [item.record for item in self.uow.get_results(baseline.id)]
+        expected_files = {item.kind: self.query_service.read_user_artifact(baseline.id, item.id).content
+                          for item in self.query_service.list_user_artifacts(baseline.id)}
+        run = self._create_run()
+        service = RunExecutionService(self.uow, self.store, recover_search=False, store_derived_exports=False)
+        with ExitStack() as patches:
+            for module in ('query_loop', 'retrieval', 'citation', 'candidate_selection',
+                           'decision_selection', 'ranking', 'workflow.research'):
+                patches.enter_context(patch(f'paperseek_core.{module}.CheckpointDraft',
+                    side_effect=AssertionError('Disabled snapshots must not be constructed')))
+            patches.enter_context(patch.object(self.uow, 'list_checkpoints',
+                side_effect=AssertionError('Progress-only execution must not load recovery state')))
+            detail = asyncio.run(self._executor(service).run_once())
+        self.assertEqual(detail.status, baseline.status)
+        self.assertEqual([item.record for item in self.uow.get_results(run.id)], expected)
+        self.assertEqual(self.uow.list_checkpoints(run.id), [])
+        self.assertTrue(self.uow.list_artifacts(run.id))
+        self.assertEqual({item.kind for item in self.uow.list_artifacts(run.id)}, {'bibliometric_corpus', 'final_result'})
+        self.assertTrue(all(item.role == ArtifactRole.COMPLETION_REQUIRED for item in self.uow.list_artifacts(run.id)))
+        downloads = self.query_service.list_user_artifacts(run.id)
+        self.assertEqual({item.kind for item in downloads}, set(expected_files))
+        for item in downloads:
+            self.assertEqual(self.query_service.read_user_artifact(run.id, item.id).content, expected_files[item.kind], item.kind)
+        self.assertEqual(self.query_service.get_export(run.id, 'json').content, expected_files['export_json'])
+        self.assertEqual(self.query_service.get_export(run.id, 'csv').content, expected_files['export_csv'])
+        self.assertEqual(self.query_service.get_citation_map(run.id).content, expected_files['citation_map'])
+        self.assertEqual(self.uow.list_events(run.id)[-1].event_type, 'run.completed')
+
+    def test_cancel_during_artifact_write_finishes_without_waiting_for_lease_expiry(self):
+        run = self._create_run()
+        put = self.store.put
+
+        def cancel_on_artifact(draft):
+            artifact = put(draft)
+            if draft.kind == "final_result":
+                self.submission_service.request_cancel(run.id)
+            return artifact
+
+        with patch.object(self.store, "put", side_effect=cancel_on_artifact):
+            detail = asyncio.run(self._executor().run_once())
+        self.assertEqual(detail.status, RunStatus.CANCELLED)
+        self.assertEqual(self.uow.get_results(run.id), [])
+
+    def test_terminal_race_during_completion_does_not_crash_worker(self):
+        run = self._create_run()
+        complete = self.uow.complete_run
+
+        def cancel_before_commit(lease, *args):
+            self.submission_service.request_cancel(run.id)
+            self.uow.complete_cancel(lease)
+            return complete(lease, *args)
+
+        with patch.object(self.uow, "complete_run", side_effect=cancel_before_commit):
+            detail = asyncio.run(self._executor().run_once())
+        self.assertEqual(detail.status, RunStatus.CANCELLED)
+        self.assertEqual(self.uow.get_results(run.id), [])
+
     def test_model_failure_code_is_persisted_without_private_details_or_results(self):
         run = self._create_run()
         failure = LLMRequestError("private upstream detail", code="provider_quota_exhausted")
@@ -81,6 +142,22 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         self.assertNotIn("private upstream", str(events))
         self.assertEqual(self.query_service.get_results(run.id), [])
         self.assertEqual(self.query_service.list_artifacts(run.id), [])
+
+    def test_source_rate_limit_is_persisted_without_private_upstream_data(self):
+        run = self._create_run()
+        execution = self._execution(None, None)
+        execution.source.search = AsyncMock(side_effect=SourceError("openalex", "private upstream detail", status=429, body="api_key=secret"))
+        executor = RunExecutor(self.execution_service, lambda *_: execution, owner_id="test-worker")
+        detail = asyncio.run(executor.run_once())
+        self.assertEqual(detail.status, RunStatus.FAILED)
+        self.assertEqual(detail.error_code, "source_rate_limited")
+        events = self.uow.list_events(run.id)
+        source_failure = next(event for event in events if event.event_type == "query.failed")
+        self.assertEqual(source_failure.payload["http_status"], 429)
+        self.assertEqual(events[-1].payload["code"], "source_rate_limited")
+        self.assertNotIn("private upstream", str(events))
+        self.assertNotIn("secret", str(events))
+        self.assertEqual(self.query_service.get_results(run.id), [])
 
     def test_execution_can_use_an_ephemeral_observer_without_persistence(self):
         class Observer:
@@ -128,7 +205,6 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         return WorkflowExecution(
             llm=FixedLLMAdapter(source.fixture.llm_responses),
             source=source,
-            abstracts=source,
             request=ResearchWorkflowRequest(
                 question=source.fixture.question,
                 query_budget=QueryLoopBudget(
@@ -192,7 +268,7 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
         self.assertEqual(upgraded_run.question, "persisted before M3")
         self.assertGreater(upgraded_run.deadline_at, upgraded_run.created_at)
         with closing(sqlite3.connect(database)) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -231,6 +307,25 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
             self.assertEqual(connection.execute(text("PRAGMA foreign_keys")).scalar_one(), 1)
             self.assertEqual(connection.execute(text("PRAGMA journal_mode")).scalar_one(), "wal")
             self.assertEqual(connection.execute(text("PRAGMA busy_timeout")).scalar_one(), 10000)
+
+    def test_file_store_supports_long_checkpoint_paths(self) -> None:
+        store = FileArtifactStore(self.data_dir / ("deep-" + "a" * 40) / ("nested-" + "b" * 40))
+        draft = ArtifactWrite(
+            run_id=str(uuid4()), kind="checkpoint", role=ArtifactRole.RECOVERY,
+            visibility=ArtifactVisibility.INTERNAL, filename="state-" + "c" * 64 + ".json",
+            media_type="application/json", schema_version=1, content=b'{"checkpoint": true}',
+        )
+        self.assertGreater(len(str(store._target(draft))), 260)
+        stored = store.put(draft)
+        self.assertEqual(store.put(draft), stored)
+        self.assertEqual(store.read(stored), draft.content)
+        self.assertFalse(Path(stored.storage_key).is_absolute())
+        with self.assertRaises(ArtifactConflict):
+            store.put(draft.model_copy(update={"content": b"conflict"}))
+        store.delete(stored)
+        store.delete(stored)
+        with self.assertRaises(ArtifactPersistenceError):
+            store.read(stored)
 
     def test_file_store_is_atomic_immutable_and_integrity_checked(self) -> None:
         run_id = str(uuid4())
@@ -374,6 +469,7 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
                 "export.csv",
                 "candidate_pool.jsonl",
                 "citation_map.json",
+                "bibliometric_corpus.json",
             },
         )
         final_artifact = next(item for item in required if item.filename == "final_result.json")

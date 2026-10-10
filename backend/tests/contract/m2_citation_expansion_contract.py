@@ -5,13 +5,16 @@ import json
 import math
 from pathlib import Path
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from paperseek_core.citation import CitationPipeline, build_seed_plans
+from paperseek_core.citation import CitationPipeline, build_seed_plans, select_seed_candidates
 from paperseek_core.models import (
+    CandidateSelectionResult,
     CitationEdge,
     CitationExpansionRequest,
+    CitationExpansionResult,
     CitationSeedPlan,
     CitationSourceRequest,
     CitationSourceResult,
@@ -19,7 +22,17 @@ from paperseek_core.models import (
     PaperIdentifiers,
     PaperRecord,
     PaperSource,
+    QueryLoopBudget,
+    QueryLoopResult,
+    ResearchWorkflowRequest,
+    ResearchWorkflowResumeState,
+    RetrievalRequest,
+    RetrievalResult,
+    SearchPlan,
 )
+from paperseek_core.document_identity import document_key
+from paperseek_core.retrieval_fusion import fuse_candidates_rrf, fuse_citation_candidates
+from paperseek_core.workflow import ResearchWorkflow
 from paperseek_core.ports import CitationPort
 from paperseek_core.sources.contracts import SourceCapabilities, SourceError
 from paperseek_core.sources.http import AsyncHttpTransport
@@ -102,6 +115,91 @@ def fixture_source_result() -> CitationSourceResult:
 
 
 class M2CitationExpansionContractTest(unittest.IsolatedAsyncioTestCase):
+    def test_seed_pool_preserves_successor_view_quota_and_fused_records(self) -> None:
+        candidates = [record(f"W{i}") for i in range(20)]
+        selected = select_seed_candidates(
+            candidates,
+            {"direct": candidates[8:16], "successor": [record("outside"), *candidates[16:]]},
+            {"successor": "successor_paradigm", "direct": "direct_mechanism"},
+            limit=8,
+        )
+        self.assertEqual([item.uid for item in selected], ["W16", "W17", "W18", "W19", "W8", "W9", "W0", "W1"])
+        self.assertIs(selected[0], candidates[16])
+
+    async def test_expanded_paper_reaches_full_ranking_pool_and_survives_resume(self) -> None:
+        question = "durable research recovery"
+        base = [record(f"W{index}", title=f"Unrelated candidate {index}") for index in range(256)]
+        neighbor = record("Wnew", title=question)
+        initial = fuse_candidates_rrf(question, {"relevance": base})
+        retrieval = RetrievalResult(
+            documents=initial.documents,
+            provenance_by_identity={
+                key: {**metadata, "origins": ["retrieval"], "rerank_score": 0.75}
+                for key, metadata in initial.metadata_by_key.items()
+            },
+        )
+        query = QueryLoopResult(
+            question=question, source="openalex", search_plan=SearchPlan(intent=question),
+            final_query=question, total=256,
+            retrieval_request=RetrievalRequest(question=question, query=question),
+        )
+        source = FixtureCitationSource([CitationSourceResult(
+            records=[neighbor],
+            edges=[CitationEdge(seed_id="W0", parent_id="W0", record_id="Wnew", direction="backward", depth=1)],
+        )])
+        observer = RecordingObserver()
+        llm = AsyncMock()
+        llm.chat_json.return_value = json.dumps({
+            "scores": [[index, 10 - index / 256] for index in range(1, 257)],
+            "reasons": [[index, "Fixture relevance"] for index in range(1, 257)],
+        })
+        request = ResearchWorkflowRequest(
+            question=question,
+            query_budget=QueryLoopBudget(retrieval_pool_max=256, ranking_candidate_limit=256),
+        )
+        with (
+            patch("paperseek_core.workflow.research.QueryLoopPipeline.run", AsyncMock(return_value=query)),
+            patch("paperseek_core.workflow.research.RetrievalPipeline.run", AsyncMock(return_value=retrieval)) as retrieve,
+        ):
+            result = await ResearchWorkflow(llm=llm, source=source, observer=observer).run(request)
+            self.assertEqual(len(result.ranked), 256)
+            self.assertIn(neighbor.uid, [item.uid for item in result.ranked])
+            self.assertEqual(result.citation_map["added_candidates"], 1)
+            expanded = result.provenance_by_identity[neighbor.uid]
+            self.assertEqual(expanded["origins"], ["citation_expansion"])
+            self.assertEqual(expanded["retrieval_source_ranks"]["citation_expansion"], 1)
+            self.assertEqual(expanded["citation_paths"][0]["parent_id"], "W0")
+            original = next(item for item in result.ranked if item.uid != neighbor.uid)
+            self.assertEqual(result.provenance_by_identity[original.uid]["rerank_score"], 0.75)
+
+            state = next(cp.state for cp in observer.checkpoints if cp.step_key == "expand_citations")
+            citation = CitationExpansionResult.model_validate({
+                key: state[key] for key in ("candidates", "citation_map", "provenance_by_identity", "warnings")
+            })
+            ranking = [cp.state for cp in observer.checkpoints if cp.step_key == "rank_results.batch"][-1]
+            selection = dict(next(cp.state for cp in observer.checkpoints if cp.step_key == "select_candidates"))
+            selection.pop("resume_from_stage")
+            calls_before_resume = llm.chat_json.await_count
+            resumed = await ResearchWorkflow(llm=llm, source=source, observer=RecordingObserver()).run(
+                request.model_copy(update={"resume": ResearchWorkflowResumeState(
+                    retrieval=retrieval, citation=citation,
+                    selection=CandidateSelectionResult.model_validate(selection),
+                    ranking_scores=ranking["ranking_scores"],
+                    ranking_completed_batch_ids=ranking["completed_batch_ids"],
+                )})
+            )
+            self.assertEqual([item.uid for item in resumed.ranked], [item.uid for item in result.ranked])
+            self.assertEqual(len(source.calls), 1)
+            self.assertEqual(retrieve.await_count, 1)
+            self.assertEqual(llm.chat_json.await_count, calls_before_resume)
+
+    def test_no_citation_candidates_preserves_external_reranker_order(self) -> None:
+        documents = [record("W2"), record("W1")]
+        provenance = {document_key(item): {"origins": ["retrieval"], "rerank_score": 0.5} for item in documents}
+        result = fuse_citation_candidates("query", documents, provenance, pool_max=256)
+        self.assertEqual(result.documents, documents)
+        self.assertEqual(result.metadata_by_key, provenance)
+
     def test_citation_edge_preserves_seed_parent_direction_depth_and_map_shape(self) -> None:
         backward = CitationEdge(
             seed_id="Wseed",

@@ -125,6 +125,9 @@ class TestJsonFinalContentExtraction(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("enable_thinking", bodies[4])
         self.assertNotIn("reasoning_effort", bodies[4])
 
+        await call("https://integrate.api.nvidia.com/v1", "nvidia/nemotron-3-super-120b-a12b")
+        self.assertEqual(bodies[5].get("chat_template_kwargs"), {"enable_thinking": False})
+
     async def test_rejected_thinking_control_is_dropped_on_retry(self) -> None:
         bodies: list[dict] = []
 

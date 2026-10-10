@@ -19,7 +19,6 @@ class _ControlledExecutionResolver:
         return WorkflowExecution(
             llm=FixedLLMAdapter(source.fixture.llm_responses),
             source=source,
-            abstracts=source,
             request=ResearchWorkflowRequest(
                 question=run.question,
                 query_budget=QueryLoopBudget(

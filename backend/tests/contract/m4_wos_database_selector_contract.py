@@ -148,7 +148,7 @@ class M4WosDatabaseResolverContract(unittest.IsolatedAsyncioTestCase):
             resolver = CommunityExecutionResolver(_settings(), credentials)
             try:
                 with patch(
-                    "paperseek_community.composition.httpx.AsyncClient",
+                    "paperseek_community.model_transport.httpx.AsyncClient",
                     ControlledAsyncClient,
                 ):
                     execution = resolver(run, NEVER_CANCELLED)

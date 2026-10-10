@@ -4,94 +4,35 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from hashlib import blake2b
 import hashlib
 import json
 import math
-import re
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
-from paperseek_core.document_identity import document_alias_keys, document_key
+from paperseek_core.document_identity import document_key
+from paperseek_core.bibliometrics.corpus import build_corpus
+from paperseek_core.candidate_selection import CandidateSelectionPipeline, embedding_provenance
 from paperseek_core.errors import RetrievalSourceError
-from paperseek_core.execution import NEVER_CANCELLED
+from paperseek_core.execution import NEVER_CANCELLED, record_checkpoint
+from paperseek_core.http_retry import failure_details
 from paperseek_core.models import (
-    CandidateMetadataEnrichmentRequest,
     CheckpointDraft,
     CoreProgressEvent,
     PaperRecord,
     RetrievalRequest,
     RetrievalResult,
+    SourceSearchMetadata,
 )
 from paperseek_core.ports import (
-    CandidateMetadataPort,
     CancellationToken,
     EmbeddingPort,
-    RerankPort,
     SourcePort,
     WorkflowObserver,
 )
 from paperseek_core.sources.contracts import SourceSearchRequest
-
-
-class RetrievalLane:
-    RELEVANCE = "relevance"
-    SEMANTIC = "semantic"
-    IMPACT = "impact"
-    RECENT = "recent"
-    LOCAL_QUALITY = "local_quality"
-    CITATION = "citation_expansion"
-
-
-LANE_WEIGHTS = {
-    RetrievalLane.RELEVANCE: 1.0,
-    RetrievalLane.SEMANTIC: 1.0,
-    RetrievalLane.IMPACT: 0.9,
-    RetrievalLane.RECENT: 0.8,
-    RetrievalLane.LOCAL_QUALITY: 0.9,
-    RetrievalLane.CITATION: 1.0,
-}
-
-RRF_COMPONENT_WEIGHT = 0.50
-PRIMARY_LANE_PRIOR_WEIGHT = 0.15
-EMBEDDING_COMPONENT_WEIGHT = 0.1225
-BM25_COMPONENT_WEIGHT = 0.14
-TERM_COVERAGE_WEIGHT = 0.0875
-
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_+\-.]{1,}", re.I)
-_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "in",
-    "into",
-    "is",
-    "of",
-    "on",
-    "or",
-    "paper",
-    "papers",
-    "research",
-    "study",
-    "studies",
-    "the",
-    "to",
-    "with",
-}
-
-
-@dataclass
-class FusedRetrievalResult:
-    documents: list[PaperRecord]
-    metadata_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
-    lane_counts: dict[str, int] = field(default_factory=dict)
-    total_candidates: int = 0
+from paperseek_core.retrieval_fusion import (
+    FusedRetrievalResult, RetrievalLane, dedupe_documents, fuse_candidates_rrf,
+)
 
 
 @dataclass
@@ -109,210 +50,56 @@ class _LaneCollectionResult:
     warnings: list[str]
 
 
-def document_text(document: PaperRecord) -> str:
-    parts = [value for value in (document.title, document.abstract) if value]
-    if document.source:
-        parts.extend(
-            str(value)
-            for value in (document.source.source_title, document.source.publish_year)
-            if value
-        )
-    if document.keywords:
-        parts.extend(value for value in document.keywords.author_keywords if value)
-    if document.names:
-        for author in document.names.authors:
-            name = author.display_name or author.wos_standard
-            if name:
-                parts.append(name)
-    parts.extend(value for value in document.types if value)
-    return " ".join(str(value) for value in parts)
-
-
-def dedupe_documents(documents: Sequence[PaperRecord]) -> list[PaperRecord]:
-    output = []
-    aliases_seen: set[str] = set()
-    for document in documents:
-        aliases = set(document_alias_keys(document))
-        if not aliases or aliases & aliases_seen:
-            continue
-        aliases_seen.update(aliases)
-        output.append(document)
-    return output
-
-
-def fuse_candidates_rrf(
-    query: str,
-    lane_results: Mapping[str, Sequence[PaperRecord]],
-    *,
-    pool_max: int = 3000,
-    rrf_k: int = 60,
-    embedding_scores_by_key: Mapping[str, float] | None = None,
-) -> FusedRetrievalResult:
-    pool_max = max(1, int(pool_max or 3000))
-    rrf_k = max(1, int(rrf_k or 60))
-    key_to_doc: dict[str, PaperRecord] = {}
-    alias_to_key: dict[str, str] = {}
-    lane_ranks: dict[str, dict[str, int]] = {}
-
-    for lane, documents in lane_results.items():
-        seen_in_lane = set()
-        ranks: dict[str, int] = {}
-        for document in documents or []:
-            aliases = document_alias_keys(document)
-            key = next((alias_to_key[alias] for alias in aliases if alias in alias_to_key), "")
-            if not key:
-                key = document_key(document)
-            if not key:
-                continue
-            for alias in aliases:
-                alias_to_key.setdefault(alias, key)
-            if key in seen_in_lane:
-                continue
-            seen_in_lane.add(key)
-            key_to_doc.setdefault(key, document)
-            ranks[key] = len(ranks) + 1
-        lane_ranks[lane] = ranks
-
-    if not key_to_doc:
-        return FusedRetrievalResult(
-            documents=[],
-            lane_counts={lane: 0 for lane in lane_results},
-        )
-
-    keys = list(key_to_doc)
-    documents = [key_to_doc[key] for key in keys]
-    texts = [document_text(document) for document in documents]
-    bm25 = _bm25_scores(query, texts)
-    query_vector = _hashed_vector(query)
-    if embedding_scores_by_key:
-        cosine = [
-            max(0.0, min(1.0, float(embedding_scores_by_key.get(key, 0.0) or 0.0)))
-            for key in keys
-        ]
-    else:
-        cosine = [_cosine(query_vector, _hashed_vector(text)) for text in texts]
-    coverage = [_term_coverage(query, text) for text in texts]
-    bm25_norm = _normalize_scores(bm25)
-
-    raw_rrf_scores = []
-    source_ranks = []
-    retrieval_lanes = []
-    for key in keys:
-        rrf_score = 0.0
-        lanes = []
-        source_rank = None
-        for lane, ranks in lane_ranks.items():
-            rank = ranks.get(key)
-            if rank is None:
-                continue
-            lanes.append(lane)
-            source_rank = rank if source_rank is None else min(source_rank, rank)
-            rrf_score += LANE_WEIGHTS.get(lane, 0.8) / (rrf_k + rank)
-        raw_rrf_scores.append(rrf_score)
-        source_ranks.append(source_rank)
-        retrieval_lanes.append(lanes)
-
-    normalized_rrf_scores = _normalize_scores(raw_rrf_scores)
-    scored = []
-    metadata_by_key: dict[str, dict[str, Any]] = {}
-    for index, key in enumerate(keys):
-        relevance_rank = lane_ranks.get(RetrievalLane.RELEVANCE, {}).get(key)
-        primary_prior = 1.0 / math.log2(relevance_rank + 1.0) if relevance_rank else 0.0
-        final_score = (
-            RRF_COMPONENT_WEIGHT * normalized_rrf_scores[index]
-            + PRIMARY_LANE_PRIOR_WEIGHT * primary_prior
-            + EMBEDDING_COMPONENT_WEIGHT * cosine[index]
-            + BM25_COMPONENT_WEIGHT * bm25_norm[index]
-            + TERM_COVERAGE_WEIGHT * coverage[index]
-        )
-        metadata_by_key[key] = {
-            "source_rank": source_ranks[index] or index + 1,
-            "retrieval_source_ranks": {
-                lane: ranks[key]
-                for lane, ranks in lane_ranks.items()
-                if key in ranks
-            },
-            "retrieval_score": round(final_score, 6),
-            "retrieval_lanes": retrieval_lanes[index],
-            "retrieval_rrf_score": round(raw_rrf_scores[index], 6),
-            "retrieval_rrf_normalized": round(normalized_rrf_scores[index], 6),
-            "retrieval_primary_prior": round(primary_prior, 6),
-            "retrieval_embedding_score": round(cosine[index], 6),
-            "retrieval_bm25_score": round(bm25_norm[index], 6),
-            "retrieval_term_coverage": round(coverage[index], 6),
-        }
-        scored.append((final_score, -(source_ranks[index] or index + 1), key))
-
-    scored.sort(reverse=True)
-    selected_keys = [key for _, _, key in scored[:pool_max]]
-    return FusedRetrievalResult(
-        documents=[key_to_doc[key] for key in selected_keys],
-        metadata_by_key={key: metadata_by_key[key] for key in selected_keys},
-        lane_counts={lane: len(ranks) for lane, ranks in lane_ranks.items()},
-        total_candidates=len(key_to_doc),
-    )
-
-
 class RetrievalPipeline:
     def __init__(
         self,
         source: SourcePort,
         observer: WorkflowObserver,
         *,
-        candidate_metadata: CandidateMetadataPort | None = None,
         embedding: EmbeddingPort | None = None,
-        reranker: RerankPort | None = None,
         cancellation: CancellationToken = NEVER_CANCELLED,
     ) -> None:
         self.source = source
         self.observer = observer
-        self.candidate_metadata = candidate_metadata
         self.embedding = embedding
-        self.reranker = reranker
         self.cancellation = cancellation
 
     async def run(self, request: RetrievalRequest) -> RetrievalResult:
         self.cancellation.raise_if_cancelled()
         collected = await self._collect_lanes(request)
         ordered_lane_results = self._prepare_ordered_lane_results(request, collected)
-        embedding_scores_by_key = await self._embedding_scores(
-            request,
-            ordered_lane_results,
-            collected.warnings,
-        )
-        fused = fuse_candidates_rrf(
+        embedding_state = await CandidateSelectionPipeline(
+            self.observer, embedding=self.embedding, cancellation=self.cancellation,
+        ).embed(request.question, [doc for lane in ordered_lane_results.values() for doc in lane], collected.warnings)
+        fused = await asyncio.to_thread(fuse_candidates_rrf,
             request.question,
             ordered_lane_results,
             pool_max=request.pool_max,
             rrf_k=request.rrf_k,
-            embedding_scores_by_key=embedding_scores_by_key,
+            embedding_scores_by_key=embedding_state.scores_by_identity if embedding_state else None,
         )
         documents = list(fused.documents)
         provenance = self._build_provenance(fused)
-        documents = await self._enrich_metadata(
-            request,
-            documents,
-            collected.warnings,
-        )
-        documents = await self._rerank(
-            request,
-            documents,
-            provenance,
-            collected.warnings,
-        )
+        for document in documents:
+            provenance[document_key(document)].update(embedding_provenance(document, embedding_state))
 
         completed_lanes = [
             lane for lane in collected.capability_lanes if lane in collected.completed
         ]
         result = RetrievalResult(
+            bibliometric_corpus=await asyncio.to_thread(
+                build_corpus, (doc for lane in [*collected.lane_results.values(), *request.supplemental_lanes.values()] for doc in lane),
+                retrieval_pool_limit=request.pool_max, scoring_limit=request.ranking_candidate_limit,
+            ),
             documents=documents,
             provenance_by_identity=provenance,
             lane_counts=fused.lane_counts,
             total_candidates=fused.total_candidates,
             completed_lanes=completed_lanes,
             warnings=collected.warnings,
+            embedding_state=embedding_state,
         )
-        self._fusion_checkpoint(request, result)
+        await self._fusion_checkpoint(request, result)
         self._event(
             "retrieval.completed",
             {
@@ -323,7 +110,6 @@ class RetrievalPipeline:
                 "total_lanes": len(collected.capability_lanes),
                 "lane_concurrency": collected.lane_concurrency,
                 "fusion": "rrf",
-                "llm_gate_candidate_count": len(documents),
                 "lane_counts": fused.lane_counts,
                 "warning_count": len(collected.warnings),
             },
@@ -380,14 +166,14 @@ class RetrievalPipeline:
                     {
                         "code": "retrieval_lane_failed",
                         "lane": lane,
-                        "error_type": type(exc).__name__,
+                        "error_type": type(exc).__name__, **failure_details(exc),
                     },
                 )
                 return
             lane_results[lane] = outcome.documents
             warnings_by_lane[lane] = outcome.warnings
             completed.add(lane)
-            self._lane_checkpoint(request, lane, lane_results, completed, warnings_by_lane)
+            await self._lane_checkpoint(request, lane, lane_results, completed, warnings_by_lane)
             self._event(
                 "retrieval.progress",
                 {
@@ -415,7 +201,7 @@ class RetrievalPipeline:
                     "code": "retrieval_primary_lane_failed",
                     "source": self.source.name,
                     "lane": RetrievalLane.RELEVANCE,
-                    "error_type": type(primary_error).__name__,
+                    "error_type": type(primary_error).__name__, **failure_details(primary_error),
                 },
             )
             raise RetrievalSourceError("The primary retrieval lane failed without recoverable candidates.") from primary_error
@@ -428,13 +214,13 @@ class RetrievalPipeline:
             warnings=self._ordered_lane_warnings(capability_lanes, warnings_by_lane),
         )
 
-    @staticmethod
     def _prepare_ordered_lane_results(
+        self,
         request: RetrievalRequest,
         collected: _LaneCollectionResult,
     ) -> dict[str, list[PaperRecord]]:
         ordered_lane_results = {
-            lane: collected.lane_results[lane]
+            lane: collected.lane_results[lane][:self._effective_lane_limit(request, lane)]
             for lane in collected.capability_lanes
             if lane in collected.lane_results
         }
@@ -444,47 +230,6 @@ class RetrievalPipeline:
         if not ordered_lane_results and request.primary_hits:
             ordered_lane_results[RetrievalLane.RELEVANCE] = list(request.primary_hits)
         return ordered_lane_results
-
-    async def _embedding_scores(
-        self,
-        request: RetrievalRequest,
-        ordered_lane_results: Mapping[str, Sequence[PaperRecord]],
-        warnings: list[str],
-    ) -> dict[str, float]:
-        unique_documents = dedupe_documents(
-            [
-                document
-                for documents in ordered_lane_results.values()
-                for document in documents
-            ]
-        )
-        embedding_scores_by_key: dict[str, float] = {}
-        if self.embedding and unique_documents:
-            try:
-                self.cancellation.raise_if_cancelled()
-                embedding_scores = await self.embedding.embedding_scores(
-                    request.question,
-                    unique_documents,
-                )
-                self.cancellation.raise_if_cancelled()
-                if len(embedding_scores) != len(unique_documents):
-                    raise ValueError("Embedding score count does not match candidate count.")
-                embedding_scores_by_key = {
-                    document_key(document): float(score)
-                    for document, score in zip(unique_documents, embedding_scores)
-                    if document_key(document)
-                }
-            except Exception as exc:
-                warnings.append("retrieval_embedding_failed_local_similarity_retained")
-                self._event(
-                    "retrieval.degraded",
-                    {
-                        "code": "retrieval_embedding_failed_local_similarity_retained",
-                        "error_type": type(exc).__name__,
-                        "candidate_count": len(unique_documents),
-                    },
-                )
-        return embedding_scores_by_key
 
     @staticmethod
     def _build_provenance(
@@ -498,71 +243,6 @@ class RetrievalPipeline:
             metadata["sources"] = [document.provider] if document.provider else []
             provenance[key] = metadata
         return provenance
-
-    async def _enrich_metadata(
-        self,
-        request: RetrievalRequest,
-        documents: list[PaperRecord],
-        warnings: list[str],
-    ) -> list[PaperRecord]:
-        if request.crossref_metadata_enrichment and documents:
-            if self.candidate_metadata is None:
-                warnings.append("retrieval_crossref_metadata_unsupported")
-                self._event(
-                    "retrieval.metadata_enrichment_degraded",
-                    {
-                        "code": "retrieval_crossref_metadata_unsupported",
-                        "candidate_count": len(documents),
-                    },
-                )
-            else:
-                self.cancellation.raise_if_cancelled()
-                metadata_result = await self.candidate_metadata.enrich_candidate_metadata(
-                    CandidateMetadataEnrichmentRequest(documents=documents)
-                )
-                self.cancellation.raise_if_cancelled()
-                documents = list(metadata_result.documents)
-                warnings.extend(metadata_result.warnings)
-                event_type = (
-                    "retrieval.metadata_enrichment_degraded"
-                    if metadata_result.warnings
-                    else "retrieval.metadata_enrichment_completed"
-                )
-                self._event(
-                    event_type,
-                    {
-                        "attempted_count": metadata_result.attempted_count,
-                        "enriched_count": metadata_result.enriched_count,
-                        "failed_count": metadata_result.failed_count,
-                        "candidate_count": len(documents),
-                    },
-                )
-        return documents
-
-    async def _rerank(
-        self,
-        request: RetrievalRequest,
-        documents: list[PaperRecord],
-        provenance: dict[str, dict[str, Any]],
-        warnings: list[str],
-    ) -> list[PaperRecord]:
-        if self.reranker and documents:
-            try:
-                self.cancellation.raise_if_cancelled()
-                reranked = await self.reranker.rerank(request.question, documents)
-                self.cancellation.raise_if_cancelled()
-                documents = self._apply_rerank(documents, reranked.items, provenance)
-            except Exception as exc:
-                warnings.append("retrieval_rerank_failed_rrf_order_retained")
-                self._event(
-                    "retrieval.degraded",
-                    {
-                        "code": "retrieval_rerank_failed_rrf_order_retained",
-                        "error_type": type(exc).__name__,
-                        "candidate_count": len(documents),
-                    },
-                )
-        return documents
 
     def _effective_lane_limit(self, request: RetrievalRequest, lane: str) -> int:
         ranking_limit = min(request.ranking_candidate_limit, request.pool_max)
@@ -586,89 +266,72 @@ class RetrievalPipeline:
         limit: int,
     ) -> _LaneOutcome:
         initial = request.primary_hits if lane == RetrievalLane.RELEVANCE else []
-        collected = dedupe_documents(initial)[:limit]
-        if len(collected) >= limit:
-            return _LaneOutcome(collected)
-
-        default_page_size = min(100, limit)
-        if collected and len(collected) < default_page_size:
-            return _LaneOutcome(collected)
-        page = 2 if collected else 1
+        first_page = request.primary_page if lane == RetrievalLane.RELEVANCE else None
+        collected = []
         warnings = []
-        while len(collected) < limit:
+        page = first_page.page if first_page else 1
+        page_size = first_page.limit if first_page else min(
+            self.source.capabilities.page_size(lane), limit, 100 if initial else limit,
+        )
+        scan_limit = min(request.lane_limit, self.source.capabilities.max_lane_limit, request.pool_max)
+        max_pages = max(1, math.ceil(scan_limit / page_size))
+        pages_read = 0
+        raw_count = 0
+        stop_reason = "scan_budget_exhausted"
+        while pages_read < max_pages:
             self.cancellation.raise_if_cancelled()
-            request_limit = min(
-                self.source.capabilities.page_size(lane),
-                limit - len(collected),
-            )
-            try:
-                response = await self.source.search(
-                    SourceSearchRequest(
+            if pages_read == 0 and (initial or first_page is not None):
+                hits = initial
+                metadata = first_page or SourceSearchMetadata(page=1, limit=page_size)
+            else:
+                try:
+                    response = await self.source.search(SourceSearchRequest(
                         query=request.question if lane == RetrievalLane.SEMANTIC else request.query,
-                        limit=request_limit,
-                        page=page,
-                        lane=lane,
-                        field_ids=request.field_ids,
-                    )
-                )
-                self.cancellation.raise_if_cancelled()
-            except Exception as exc:
-                if not collected:
-                    raise
-                code = f"retrieval_page_failed_candidates_retained:{lane}"
-                warnings.append(code)
-                self._event(
-                    "retrieval.degraded",
-                    {
-                        "code": "retrieval_page_failed_candidates_retained",
-                        "lane": lane,
-                        "page": page,
-                        "retained_candidates": len(collected),
-                        "error_type": type(exc).__name__,
-                    },
-                )
+                        limit=page_size, page=page, lane=lane, field_ids=request.field_ids,
+                    ))
+                    self.cancellation.raise_if_cancelled()
+                except Exception as exc:
+                    if not collected:
+                        raise
+                    warnings.append(f"retrieval_page_failed_candidates_retained:{lane}")
+                    self._event("retrieval.degraded", {
+                        "code": "retrieval_page_failed_candidates_retained", "lane": lane,
+                        "page": page, "retained_candidates": len(collected),
+                        "error_type": type(exc).__name__, **failure_details(exc),
+                    })
+                    stop_reason = "page_failed"
+                    break
+                hits, metadata = list(response.hits), response.metadata
+            pages_read += 1
+            returned = metadata.raw_count if metadata.raw_count is not None else len(hits)
+            raw_count += returned
+            # Keep the whole returned page for bibliometrics and checkpoint
+            # recovery. Ranking still receives the same bounded lane slice.
+            collected = dedupe_documents([*collected, *hits])
+            if len(collected) >= limit:
+                stop_reason = "candidate_limit_reached"
                 break
-            hits = list(response.hits)
-            if not hits:
-                break
-            collected.extend(hits)
-            page_size = max(1, int(response.metadata.limit or request_limit))
-            total = int(response.metadata.total or 0)
-            if self.source.capabilities.is_single_page(lane):
-                break
-            if len(hits) < page_size:
-                break
-            if total and len(collected) >= total:
+            # Use the source page size and raw count, never the deduplicated count.
+            # Page-number APIs must retain this size to keep offsets stable.
+            page_size = metadata.limit
+            max_pages = max(1, math.ceil(scan_limit / page_size))
+            if (
+                self.source.capabilities.is_single_page(lane)
+                or returned < page_size
+                or (metadata.total > 0 and page * page_size >= metadata.total)
+            ):
+                stop_reason = "source_exhausted"
                 break
             page += 1
-        return _LaneOutcome(dedupe_documents(collected)[:limit], warnings)
+        if stop_reason == "scan_budget_exhausted":
+            warnings.append(f"retrieval_scan_budget_exhausted:{lane}")
+        self._event("retrieval.lane_completed", {
+            "lane": lane, "pages_read": pages_read, "raw_count": raw_count,
+            "candidate_count": min(len(collected), limit), "stop_reason": stop_reason,
+        })
+        return _LaneOutcome(collected, warnings)
 
-    @staticmethod
-    def _apply_rerank(documents, items, provenance) -> list[PaperRecord]:
-        key_to_document = {document_key(document): document for document in documents}
-        aliases = {
-            alias: document_key(document)
-            for document in documents
-            for alias in document_alias_keys(document)
-        }
-        ranked = []
-        used = set()
-        for item in sorted(items, key=lambda value: float(value.score), reverse=True):
-            key = next(
-                (aliases[alias] for alias in document_alias_keys(item.document) if alias in aliases),
-                "",
-            )
-            if not key or key in used:
-                continue
-            used.add(key)
-            provenance.setdefault(key, {})["rerank_score"] = float(item.score)
-            ranked.append(key_to_document[key])
-        if not ranked:
-            raise ValueError("Reranker returned no candidates from the fused pool.")
-        ranked.extend(document for document in documents if document_key(document) not in used)
-        return ranked
-
-    def _lane_checkpoint(
+    async def _lane_checkpoint(
         self,
         request: RetrievalRequest,
         lane: str,
@@ -677,13 +340,16 @@ class RetrievalPipeline:
         warnings_by_lane: dict[str, list[str]],
     ) -> None:
         self.cancellation.raise_if_cancelled()
+        if self.observer.on_checkpoint is None:
+            return
         ordered_lanes = tuple(self.source.capabilities.lanes)
         state_results = {
             key: [document.model_dump(mode="json") for document in lane_results[key]]
             for key in ordered_lanes
             if key in lane_results
         }
-        self.observer.on_checkpoint(
+        await record_checkpoint(
+            self.observer,
             CheckpointDraft(
                 step_key="retrieve.lane",
                 idempotency_key=self._lane_idempotency_key(request, lane),
@@ -693,12 +359,14 @@ class RetrievalPipeline:
                     "warnings": self._ordered_lane_warnings(ordered_lanes, warnings_by_lane),
                     "resume_from_stage": request.checkpoint_resume_stage,
                 },
-                workflow_version="m2.retrieval.v1",
+                workflow_version="m2.retrieval.v2",
             )
         )
 
-    def _fusion_checkpoint(self, request: RetrievalRequest, result: RetrievalResult) -> None:
+    async def _fusion_checkpoint(self, request: RetrievalRequest, result: RetrievalResult) -> None:
         self.cancellation.raise_if_cancelled()
+        if self.observer.on_checkpoint is None:
+            return
         payload = {
             "source": self.source.name,
             "question": request.question,
@@ -710,12 +378,15 @@ class RetrievalPipeline:
         digest = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
-        self.observer.on_checkpoint(
+        await record_checkpoint(
+            self.observer,
             CheckpointDraft(
                 step_key="retrieve.fuse",
                 idempotency_key=f"retrieval:fuse:{digest}",
                 state={
+                    "bibliometric_corpus": result.bibliometric_corpus.model_dump(mode="json") if result.bibliometric_corpus else None,
                     "candidate_pool": [document.model_dump(mode="json") for document in result.documents],
+                    "embedding_state": result.embedding_state.model_dump(mode="json") if result.embedding_state else None,
                     "provenance_by_identity": result.provenance_by_identity,
                     "lane_counts": result.lane_counts,
                     "total_candidates": result.total_candidates,
@@ -723,7 +394,7 @@ class RetrievalPipeline:
                     "warnings": result.warnings,
                     "resume_from_stage": "post_retrieval",
                 },
-                workflow_version="m2.retrieval.v1",
+                workflow_version="m2.retrieval.v2",
             )
         )
 
@@ -754,101 +425,4 @@ class RetrievalPipeline:
         )
 
 
-def _tokens(text: str) -> list[str]:
-    return [
-        token.lower()
-        for token in _TOKEN_RE.findall(text or "")
-        if token.lower() not in _STOPWORDS
-    ]
-
-
-def _hashed_vector(text: str, dimensions: int = 512) -> dict[int, float]:
-    tokens = _tokens(text)
-    features: Iterable[str] = tokens
-    char_features = []
-    compact = re.sub(r"\s+", " ", (text or "").lower())
-    if len(compact) >= 3:
-        char_features = [
-            compact[index:index + 3]
-            for index in range(0, min(len(compact) - 2, 600))
-        ]
-    vector: dict[int, float] = {}
-    for feature in list(features) + char_features:
-        digest = blake2b(feature.encode("utf-8", errors="ignore"), digest_size=8).digest()
-        slot = int.from_bytes(digest[:4], "little") % dimensions
-        sign = 1.0 if digest[4] % 2 == 0 else -1.0
-        vector[slot] = vector.get(slot, 0.0) + sign
-    norm = math.sqrt(sum(value * value for value in vector.values()))
-    if norm <= 0:
-        return {}
-    return {key: value / norm for key, value in vector.items()}
-
-
-def _cosine(left: dict[int, float], right: dict[int, float]) -> float:
-    if not left or not right:
-        return 0.0
-    if len(left) > len(right):
-        left, right = right, left
-    score = sum(value * right.get(key, 0.0) for key, value in left.items())
-    return max(0.0, min(1.0, score))
-
-
-def _bm25_scores(query: str, documents: Sequence[str]) -> list[float]:
-    query_terms = _tokens(query)
-    if not query_terms or not documents:
-        return [0.0 for _ in documents]
-    doc_tokens = [_tokens(document) for document in documents]
-    doc_count = len(doc_tokens)
-    avg_len = sum(len(tokens) for tokens in doc_tokens) / max(1, doc_count)
-    doc_freq: dict[str, int] = {}
-    for tokens in doc_tokens:
-        for token in set(tokens):
-            doc_freq[token] = doc_freq.get(token, 0) + 1
-
-    scores = []
-    k1 = 1.5
-    b = 0.75
-    for tokens in doc_tokens:
-        term_freq: dict[str, int] = {}
-        for token in tokens:
-            term_freq[token] = term_freq.get(token, 0) + 1
-        doc_len = len(tokens)
-        score = 0.0
-        for term in query_terms:
-            tf = term_freq.get(term, 0)
-            if tf <= 0:
-                continue
-            df = doc_freq.get(term, 0)
-            idf = math.log(1 + ((doc_count - df + 0.5) / (df + 0.5)))
-            denom = tf + k1 * (1 - b + b * doc_len / max(avg_len, 1.0))
-            score += idf * ((tf * (k1 + 1)) / max(denom, 1e-9))
-        scores.append(score)
-    return scores
-
-
-def _term_coverage(query: str, document: str) -> float:
-    query_terms = set(_tokens(query))
-    if not query_terms:
-        return 0.0
-    document_terms = set(_tokens(document))
-    return len(query_terms & document_terms) / max(1, len(query_terms))
-
-
-def _normalize_scores(scores: Sequence[float]) -> list[float]:
-    if not scores:
-        return []
-    high = max(scores)
-    low = min(scores)
-    if high <= low:
-        return [1.0 if high > 0 else 0.0 for _ in scores]
-    return [(score - low) / (high - low) for score in scores]
-
-
-__all__ = [
-    "FusedRetrievalResult",
-    "RetrievalLane",
-    "RetrievalPipeline",
-    "dedupe_documents",
-    "document_text",
-    "fuse_candidates_rrf",
-]
+__all__ = ["RetrievalPipeline"]

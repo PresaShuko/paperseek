@@ -8,14 +8,16 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
-from paperseek_app.errors import RunOwnershipLost, RunPersistenceError
-from paperseek_app.execution import WorkflowExecution
+from paperseek_app.errors import RunOwnershipLost, RunPersistenceError, RunStateError
+from paperseek_app.execution import WorkflowExecution, run_blocking
 from paperseek_app.models import PendingEvent, RunStatus
 from paperseek_app.services import RunExecutionService, RunQueryService, RunSubmissionService
 from paperseek_community.artifacts import FileArtifactStore
+from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_app.worker import RunExecutor
@@ -57,8 +59,6 @@ class TrackingSource:
     async def traverse_citations(self, request):
         return await self.delegate.traverse_citations(request)
 
-    async def fetch_abstract(self, request):
-        return await self.delegate.fetch_abstract(request)
 
 
 class GatedLLM:
@@ -109,7 +109,6 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
                 query_portfolio_enabled=False,
             ),
             citation_enabled=False,
-            fetch_abstracts=False,
         )
 
     def _create(self, *, deadline_seconds: int = 3600):
@@ -120,7 +119,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
             deadline_seconds=deadline_seconds,
         )
 
-    async def _crash_after_retrieval_checkpoint(self) -> tuple[str, TrackingSource]:
+    async def _crash_after_selection_checkpoint(self) -> tuple[str, TrackingSource]:
         run = self._create()
         source = TrackingSource()
         llm = GatedLLM(self.fixture["llm_responses"], block_on_call=3)
@@ -147,7 +146,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
 
         detail = self.query_service.get_run(run.id)
         self.assertEqual(detail.status, RunStatus.RUNNING)
-        self.assertEqual(self.execution_service.get_checkpoint(run.id).step_key, "retrieve.fuse")
+        self.assertEqual(self.execution_service.get_checkpoint(run.id).step_key, "select_candidates")
         return run.id, source
 
     async def test_expired_lease_is_reclaimed_and_stale_generation_is_fenced(self) -> None:
@@ -169,6 +168,197 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
                 None,
             )
 
+    async def test_progress_is_durable_before_blocked_llm_finishes(self) -> None:
+        run = self._create()
+        llm = GatedLLM(self.fixture["llm_responses"])
+        source = TrackingSource()
+        executor = RunExecutor(
+            self.execution_service,
+            lambda *_: WorkflowExecution(llm=llm, source=source, request=self._request()),
+            owner_id="progress-worker",
+        )
+        task = asyncio.create_task(executor.run_once())
+        try:
+            await asyncio.wait_for(llm.started.wait(), timeout=3)
+            async with asyncio.timeout(3):
+                while not any(e.event_type == "query.started" for e in await run_blocking(self.uow.list_events, run.id)):
+                    await asyncio.sleep(0.02)
+            self.assertFalse(task.done())
+            self.assertIsNone(self.uow.get_checkpoint(run.id))
+            self.submission_service.request_cancel(run.id)
+            self.assertEqual((await asyncio.wait_for(task, 3)).status, RunStatus.CANCELLED)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_slow_final_artifact_keeps_lease_until_results_are_committed(self) -> None:
+        run = self._create()
+        started, release, renewed = threading.Event(), threading.Event(), threading.Event()
+        store = self.execution_service.artifact_store
+        original_put, original_renew = store.put, self.uow.renew_lease
+
+        def put(artifact):
+            if artifact.kind == "final_result":
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("Test did not release final artifact storage.")
+            return original_put(artifact)
+
+        def renew(*args):
+            result = original_renew(*args)
+            renewed.set()
+            return result
+
+        executor = RunExecutor(
+            self.execution_service,
+            lambda *_: WorkflowExecution(llm=FixedLLMAdapter(self.fixture["llm_responses"]),
+                source=TrackingSource(), request=self._request()),
+            owner_id="slow-finalization-worker", lease_seconds=30, heartbeat_seconds=0.05,
+        )
+        with patch.object(store, "put", side_effect=put), patch.object(self.uow, "renew_lease", side_effect=renew):
+            task = asyncio.create_task(executor.run_once())
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 3))
+                self.clock.advance(20)
+                renewed.clear()
+                self.assertTrue(await asyncio.to_thread(renewed.wait, 2))
+                self.clock.advance(20)
+                self.assertIsNone(await run_blocking(self.execution_service.claim_next_run, "competing-worker", 30))
+                release.set()
+                detail = await asyncio.wait_for(task, 3)
+                self.assertIn(detail.status, {RunStatus.COMPLETED, RunStatus.COMPLETED_WITH_WARNINGS})
+                self.assertEqual(detail.attempt, 1)
+            finally:
+                release.set()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_workflow_deadline_stops_llm_without_waiting_for_heartbeat(self) -> None:
+        self._create()
+        llm = GatedLLM(self.fixture["llm_responses"])
+        executor = RunExecutor(
+            self.execution_service,
+            lambda *_: WorkflowExecution(
+                llm=llm, source=TrackingSource(), request=self._request(),
+                deadline_at=time.monotonic() + 0.2,
+            ), owner_id="deadline-worker", heartbeat_seconds=20,
+        )
+        detail = await asyncio.wait_for(executor.run_once(), timeout=3)
+        self.assertEqual(detail.status, RunStatus.FAILED)
+        self.assertEqual(detail.error_code, "run_deadline_exceeded")
+        self.assertFalse(llm.release.is_set())
+
+    async def test_crash_during_final_upload_resumes_exact_result_without_model_calls(self) -> None:
+        run = self._create()
+        store = self.execution_service.artifact_store
+        original_put = store.put
+        committed = []
+
+        def put(artifact):
+            if artifact.kind == "export_json":
+                raise asyncio.CancelledError
+            stored = original_put(artifact)
+            if artifact.kind == "final_result":
+                committed.append(stored)
+            return stored
+
+        source = TrackingSource()
+        executor = RunExecutor(self.execution_service,
+            lambda *_: WorkflowExecution(llm=FixedLLMAdapter(self.fixture["llm_responses"]),
+                source=source, request=self._request()), owner_id="crashed-finalizer", lease_seconds=30)
+        with patch.object(store, "put", side_effect=put):
+            with self.assertRaises(asyncio.CancelledError):
+                await executor.run_once()
+        self.assertEqual(len(committed), 1)
+        original = store.read(committed[0])
+        calls = source.search_calls
+        self.clock.advance(31)
+        with patch.object(source, "search", side_effect=AssertionError("Must not repeat completed retrieval")):
+            executor.resolve = lambda *_: WorkflowExecution(llm=FixedLLMAdapter([]), source=source, request=self._request())
+            result = await executor.run_once()
+        self.assertIn(result.status, {RunStatus.COMPLETED, RunStatus.COMPLETED_WITH_WARNINGS})
+        self.assertEqual(result.attempt, 2)
+        self.assertEqual(source.search_calls, calls)
+        self.assertEqual(store.read(committed[0]), original)
+
+    async def test_cancelled_storage_call_drains_before_resource_cleanup(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        written = threading.Event()
+
+        def write():
+            started.set()
+            release.wait(timeout=5)
+            written.set()
+
+        task = asyncio.create_task(run_blocking(write))
+        try:
+            await asyncio.to_thread(started.wait, 2)
+            task.cancel()
+            await asyncio.sleep(0.02)
+            self.assertFalse(task.done())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(written.is_set())
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_sqlite_write_lock_does_not_block_event_loop(self) -> None:
+        self._create()
+        locked = threading.Event()
+        release = threading.Event()
+
+        def hold_lock():
+            with closing(sqlite3.connect(self.database)) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                locked.set()
+                release.wait(timeout=5)
+                connection.rollback()
+
+        holder = threading.Thread(target=hold_lock)
+        holder.start()
+        await asyncio.to_thread(locked.wait, 2)
+        llm = GatedLLM(self.fixture["llm_responses"])
+        executor = RunExecutor(
+            self.execution_service,
+            lambda *_: WorkflowExecution(llm=llm, source=TrackingSource(), request=self._request()),
+            owner_id="lock-worker",
+        )
+        task = asyncio.create_task(executor.run_once())
+        try:
+            started = time.perf_counter()
+            await asyncio.sleep(0.05)
+            self.assertLess(time.perf_counter() - started, 0.5)
+            self.assertFalse(task.done())
+        finally:
+            release.set()
+            await asyncio.to_thread(holder.join)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_concurrent_lane_checkpoint_failure_becomes_failed_run(self) -> None:
+        self._create()
+        original = self.execution_service.append_checkpoint
+
+        def fail_lane(lease, events, checkpoint):
+            if checkpoint.step_key == "retrieve.lane":
+                raise RunPersistenceError("synthetic lane write failure")
+            return original(lease, events, checkpoint)
+
+        source = TrackingSource()
+        executor = RunExecutor(
+            self.execution_service,
+            lambda *_: WorkflowExecution(
+                llm=FixedLLMAdapter(self.fixture["llm_responses"]), source=source, request=self._request(),
+            ), owner_id="lane-failure-worker",
+        )
+        with patch.object(self.execution_service, "append_checkpoint", side_effect=fail_lane):
+            detail = await executor.run_once()
+        self.assertEqual(detail.status, RunStatus.FAILED)
+        self.assertEqual(detail.error_code, "checkpoint_commit_failed")
+
     async def test_cancel_during_configuration_failure_finishes_cancel_not_failed(self) -> None:
         run = self._create()
 
@@ -181,6 +371,91 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
         self.assertEqual(result.status, RunStatus.CANCELLED)
         self.assertEqual(result.error_code, "")
         self.assertEqual(self.uow.list_events(run.id)[-1].event_type, "run.cancelled")
+
+    async def test_cancelled_worker_crash_releases_subject_and_fences_late_writes(self) -> None:
+        run = self.submission_service.submit_run(
+            subject="community", idempotency_key="first", request_digest="first",
+            question="Cancel a crashed worker", source="openalex", deadline_seconds=60,
+        )
+        credentials = EncryptedRunCredentialStore(self.database)
+        credentials.save(run.id, {"llm": {"api_key": "test-only-secret"}})
+        lease = self.execution_service.claim_next_run("crashed", lease_seconds=30)
+        self.submission_service.request_cancel(run.id)
+        self.assertIsNone(self.execution_service.claim_next_run("replacement"))
+        self.assertEqual(self.uow.get_run(run.id).status, RunStatus.CANCELLING)
+
+        self.clock.advance(61)
+        self.assertIsNone(self.execution_service.claim_next_run("replacement"))
+        self.assertIsNone(self.execution_service.claim_next_run("replacement"))
+        self.assertEqual(self.uow.get_run(run.id).status, RunStatus.CANCELLED)
+        self.assertEqual(credentials.resolve(run.id), {})
+        self.assertEqual(
+            [event.event_type for event in self.uow.list_events(run.id)].count("run.cancelled"), 1,
+        )
+        with self.assertRaises(RunStateError):
+            self.uow.complete_cancel(lease)
+        with self.assertRaises(RunStateError):
+            self.uow.append_events_and_checkpoint(
+                lease, [PendingEvent(event_type="worker.late", stage="executor")], None, None,
+            )
+        following = self.submission_service.submit_run(
+            subject="community", idempotency_key="second", request_digest="second",
+            question="Next search", source="openalex",
+        )
+        self.assertEqual(self.execution_service.claim_next_run("replacement").run_id, following.id)
+
+    async def test_cancel_recovery_racing_with_old_worker_is_safe(self) -> None:
+        run = self._create()
+        lease = self.execution_service.claim_next_run("old", lease_seconds=30)
+        self.submission_service.request_cancel(run.id)
+        self.clock.advance(31)
+        complete = self.uow.complete_cancel
+
+        def recover_then_complete(token):
+            self.assertIsNone(self.execution_service.claim_next_run("replacement"))
+            return complete(token)
+
+        with patch.object(self.uow, "complete_cancel", side_effect=recover_then_complete):
+            detail = self.execution_service.fail_claimed_run(lease, "run_configuration_invalid")
+        self.assertEqual(detail.status, RunStatus.CANCELLED)
+        self.assertEqual(detail.error_code, "")
+        self.assertEqual(
+            [event.event_type for event in self.uow.list_events(run.id)].count("run.cancelled"), 1,
+        )
+
+    async def test_corrupt_or_missing_checkpoint_fails_only_its_run(self) -> None:
+        for damage in ("corrupt", "missing"):
+            with self.subTest(damage=damage):
+                run_id, _ = await self._crash_after_selection_checkpoint()
+                checkpoint = self.uow.get_checkpoint(run_id)
+                artifact = self.uow.get_artifact(checkpoint.state_artifact_id)
+                path = self.data_dir / artifact.storage_key
+                if damage == "missing":
+                    path.unlink()
+                else:
+                    path.write_bytes(b"corrupted checkpoint")
+                self.clock.advance(31)
+                following = self._create()
+                closed = []
+
+                def resolve(run, _cancellation):
+                    async def close():
+                        closed.append(run.id)
+
+                    return WorkflowExecution(
+                        llm=FixedLLMAdapter(self.fixture["llm_responses"]),
+                        source=TrackingSource(), request=self._request(), close=close,
+                    )
+
+                executor = RunExecutor(self.execution_service, resolve, owner_id="replacement")
+                failed = await executor.run_once()
+                self.assertEqual(failed.id, run_id)
+                self.assertEqual(failed.status, RunStatus.FAILED)
+                self.assertEqual(failed.error_code, "artifact_persistence_failed")
+                completed = await executor.run_once()
+                self.assertEqual(completed.id, following.id)
+                self.assertEqual(completed.status, RunStatus.COMPLETED)
+                self.assertEqual(closed, [run_id, following.id])
 
     async def test_configuration_failure_from_stale_worker_cannot_fail_replacement(self) -> None:
         run = self._create()
@@ -323,7 +598,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
                              for event in self.uow.list_events(run.id)))
 
     async def test_process_rebuild_reclaims_and_resumes_last_complete_stage(self) -> None:
-        run_id, crashed_source = await self._crash_after_retrieval_checkpoint()
+        run_id, crashed_source = await self._crash_after_selection_checkpoint()
         self.assertEqual(crashed_source.search_calls, 1)
         self.clock.advance(31)
         self.uow.close()
@@ -364,15 +639,21 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
         )
         self.assertEqual(
             recovery_event.payload,
-            {"query": 1, "retrieval": 1, "citation": 0, "ranking": 0, "enrichment": 0},
+            {"query": 1, "retrieval": 1, "citation": 0, "selection": 1, "ranking": 0},
         )
         audit = rebuilt_query.get_run_audit(run_id)
         self.assertEqual(audit.recovery["query"], 1)
         self.assertEqual(audit.recovery["retrieval"], 1)
-        self.assertEqual(audit.recovery["total"], 2)
+        self.assertEqual(audit.recovery["selection"], 1)
+        self.assertEqual(audit.recovery["total"], 3)
+        # The recovered final result must retain the original analysis corpus,
+        # not silently fall back to the scored result subset.
+        corpus = json.loads(rebuilt_query.get_bibliometric_corpus(run_id).content)
+        self.assertGreaterEqual(len(corpus['papers']), detail.result_count)
+        self.assertEqual(corpus['scope'], 'retrieved_candidates')
 
     async def test_incompatible_checkpoint_fails_instead_of_guessing_state(self) -> None:
-        run_id, _ = await self._crash_after_retrieval_checkpoint()
+        run_id, _ = await self._crash_after_selection_checkpoint()
         with closing(sqlite3.connect(self.database)) as connection:
             connection.execute(
                 "UPDATE run_checkpoints SET workflow_version = 'unsupported.v0' WHERE run_id = ?",
@@ -396,7 +677,7 @@ class M3CrashLeaseCheckpointRecoveryContractTest(unittest.IsolatedAsyncioTestCas
         self.assertEqual(detail.error_code, "incompatible_checkpoint")
 
     async def test_incompatible_checkpoint_schema_fails_explicitly(self) -> None:
-        run_id, _ = await self._crash_after_retrieval_checkpoint()
+        run_id, _ = await self._crash_after_selection_checkpoint()
         with closing(sqlite3.connect(self.database)) as connection:
             connection.execute(
                 "UPDATE run_checkpoints SET schema_version = 99 WHERE run_id = ?",

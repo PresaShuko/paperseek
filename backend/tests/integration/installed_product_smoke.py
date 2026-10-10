@@ -66,7 +66,7 @@ def _wait_for_health(port: int, process: subprocess.Popen[str]) -> None:
             stdout, stderr = process.communicate()
             raise AssertionError(f"serve exited early: {stdout}\n{stderr}")
         try:
-            if httpx.get(f"http://127.0.0.1:{port}/health", timeout=1).status_code == 200:
+            if httpx.get(f"http://127.0.0.1:{port}/health", timeout=1, trust_env=False).status_code == 200:
                 return
         except httpx.HTTPError:
             pass
@@ -104,7 +104,7 @@ def main() -> None:
             )
 
     version = _run(executable, "version")
-    if version.returncode != 0 or version.stdout.strip() != "0.3.0":
+    if version.returncode != 0 or version.stdout.strip() != "1.0.0b1":
         raise AssertionError(version)
 
     doctor = _run(
@@ -142,7 +142,6 @@ def main() -> None:
         executable,
         "search",
         "durable literature search",
-        "--fetch-abstracts",
         "--database",
         str(database),
         "--source",
@@ -161,8 +160,6 @@ def main() -> None:
     uow = SQLiteRunUnitOfWork(database)
     try:
         service = RunQueryService(uow, FileArtifactStore(database.parent))
-        assert service.get_run(controlled_payload["run_id"]).config_snapshot["fetch_abstracts"] is True
-        assert service.get_run(missing_payload["run_id"]).config_snapshot["fetch_abstracts"] is False
         results = service.get_result_page(controlled_payload["run_id"], page_size=10).results
         history_ids = {item.id for item in service.get_history_page(page_size=20).items}
     finally:
@@ -199,11 +196,12 @@ def main() -> None:
             headers={"Idempotency-Key": "installed-no-worker"},
             json={"question": "queued for split worker", "source": "arxiv"},
             timeout=5,
+            trust_env=False,
         )
         response.raise_for_status()
         queued_id = response.json()["id"]
         time.sleep(0.25)
-        queued = httpx.get(f"http://127.0.0.1:{port}/api/v1/runs/{queued_id}", timeout=5).json()
+        queued = httpx.get(f"http://127.0.0.1:{port}/api/v1/runs/{queued_id}", timeout=5, trust_env=False).json()
         if queued["status"] != "queued":
             raise AssertionError(queued)
 
@@ -211,7 +209,7 @@ def main() -> None:
         worker_payload = json.loads(worker.stdout)
         if worker.returncode != 0 or worker_payload["run_id"] != queued_id:
             raise AssertionError((worker.returncode, worker_payload, worker.stderr))
-        claimed = httpx.get(f"http://127.0.0.1:{port}/api/v1/runs/{queued_id}", timeout=5).json()
+        claimed = httpx.get(f"http://127.0.0.1:{port}/api/v1/runs/{queued_id}", timeout=5, trust_env=False).json()
         if claimed["status"] != "failed":
             raise AssertionError(claimed)
     finally:

@@ -69,7 +69,7 @@ class M2SourceModelContractTest(unittest.TestCase):
         )
 
         self.assertEqual(request.model_dump(mode="json"), self.contract["request"])
-        self.assertEqual(result.metadata.model_dump(mode="json"), self.contract["metadata"])
+        self.assertEqual(result.metadata.model_dump(mode="json", exclude_none=True), self.contract["metadata"])
         self.assertEqual(result.hits[0], record)
         self.assertTrue(capabilities.supports("impact"))
         self.assertFalse(capabilities.supports("semantic"))

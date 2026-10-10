@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from paperseek_app.execution import WorkflowExecution
 from paperseek_app.models import RunStatus
 from paperseek_app.services import RunQueryService, RunSubmissionService
+from paperseek_app.worker import RunExecutor
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.cli import _parser, main as cli_main
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
@@ -22,6 +23,8 @@ from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_databas
 from paperseek_community.settings import CommunityDeploymentSettings
 from paperseek_app.submission import RunSubmission, prepare_run_submission
 from paperseek_core.models import QueryLoopBudget, ResearchWorkflowRequest
+from paperseek_core.models import FinalPaperResult, ResearchResult
+from paperseek_core.final_result import FinalResultAssembler
 from paperseek_core.ports import CancellationToken
 
 
@@ -48,7 +51,6 @@ def _fixed_resolver(run, _cancellation: CancellationToken) -> WorkflowExecution:
     return WorkflowExecution(
         llm=FixedLLMAdapter(source.fixture.llm_responses),
         source=source,
-        abstracts=source,
         request=ResearchWorkflowRequest(
             question=run.question,
             query_budget=QueryLoopBudget(
@@ -62,6 +64,29 @@ def _fixed_resolver(run, _cancellation: CancellationToken) -> WorkflowExecution:
 
 
 class M4CliProductEntryContract(unittest.TestCase):
+    def test_search_json_includes_all_256_persisted_results(self) -> None:
+        result = ResearchResult(
+            question="complete CLI output", search_intent="", search_plan={},
+            source="openalex", final_query="complete CLI output", db="OPENALEX",
+            ranked=[FinalPaperResult(rank=i + 1, uid=f"paper-{i}", title=f"Paper {i}") for i in range(256)],
+        )
+        result = result.model_copy(update={"artifacts": FinalResultAssembler().artifacts_for(result)})
+
+        async def run(*_args):
+            return result
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(WorkflowExecution, "run", run):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(
+                    ["search", result.question, "--database", str(Path(temp) / "paperseek.db"), "--output", "json"],
+                    deployment_settings=_settings(), execution_resolver=_fixed_resolver,
+                )
+            payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["result_count"], 256)
+        self.assertEqual([item["uid"] for item in payload["results"]], [f"paper-{i}" for i in range(256)])
+
     def test_parser_exposes_formal_commands_without_fixture_product_option(self) -> None:
         parser = _parser()
         help_text = parser.format_help()
@@ -85,7 +110,6 @@ class M4CliProductEntryContract(unittest.TestCase):
                     [
                         "search",
                         "durable literature search",
-                        "--fetch-abstracts",
                         "--database",
                         str(database),
                         "--source",
@@ -109,7 +133,6 @@ class M4CliProductEntryContract(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(detail.status, RunStatus.COMPLETED)
-        self.assertTrue(detail.config_snapshot["fetch_abstracts"])
         self.assertEqual([item.record.uid for item in results], ["fixed-001"])
         self.assertEqual([item.id for item in history], [detail.id])
 
@@ -184,6 +207,35 @@ class M4CliProductEntryContract(unittest.TestCase):
         self.assertEqual(payload["run_id"], queued.id)
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(detail.status, RunStatus.COMPLETED)
+
+    def test_worker_without_once_processes_multiple_runs_and_keeps_polling(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "paperseek.db"
+            migrate_database(database)
+            uow = SQLiteRunUnitOfWork(database)
+            try:
+                service = RunSubmissionService(uow)
+                runs = [service.create_run(f"search {index}", "openalex") for index in range(2)]
+                original_run_once = RunExecutor.run_once
+                calls = 0
+
+                async def stop_after_idle(executor):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 4:
+                        raise KeyboardInterrupt
+                    return await original_run_once(executor)
+
+                with patch.object(RunExecutor, "run_once", stop_after_idle):
+                    exit_code = cli_main(
+                        ["worker", "--database", str(database), "--poll-seconds", "0.001"],
+                        deployment_settings=_settings(), execution_resolver=_fixed_resolver,
+                    )
+                self.assertEqual(exit_code, 130)
+                self.assertEqual(calls, 4)
+                self.assertEqual([uow.get_run(run.id).status for run in runs], [RunStatus.COMPLETED] * 2)
+            finally:
+                uow.close()
 
     def test_serve_no_worker_accepts_but_does_not_claim_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

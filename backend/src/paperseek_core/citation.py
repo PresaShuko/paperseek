@@ -17,7 +17,8 @@ from paperseek_core.models import (
     CoreProgressEvent,
     PaperRecord,
 )
-from paperseek_core.execution import NEVER_CANCELLED
+from paperseek_core.execution import NEVER_CANCELLED, record_checkpoint
+from paperseek_core.http_retry import failure_details
 from paperseek_core.ports import CancellationToken, CitationPort, WorkflowObserver
 from paperseek_core.document_identity import document_key
 from paperseek_core.sources.contracts import SourceError
@@ -148,6 +149,45 @@ def _plan_counts(plans: list[CitationSeedPlan]) -> dict[str, int]:
     return counts
 
 
+def select_seed_candidates(
+    candidates: list[PaperRecord],
+    lanes: dict[str, list[PaperRecord]],
+    view_types: dict[str, str],
+    *,
+    limit: int,
+) -> list[PaperRecord]:
+    """Preserve the frozen successor-view and other-view seed quotas."""
+    candidate_by_key = {document_key(document): document for document in candidates}
+    selected: list[PaperRecord] = []
+    selected_keys: set[str] = set()
+
+    def add(documents: list[PaperRecord], quota: int) -> None:
+        added = 0
+        for document in documents:
+            key = document_key(document)
+            if not key or key not in candidate_by_key or key in selected_keys:
+                continue
+            selected.append(candidate_by_key[key])
+            selected_keys.add(key)
+            added += 1
+            if len(selected) >= limit or added >= quota:
+                break
+
+    successors = [view for view, kind in view_types.items() if kind == "successor_paradigm" and view in lanes]
+    for view in successors:
+        add(lanes[view], max(1, limit // 2))
+        if len(selected) >= limit:
+            return selected
+    others = [view for view in lanes if view not in successors]
+    quota = max(1, max(0, limit * 3 // 4 - len(selected)) // max(1, len(others)))
+    for view in others:
+        add(lanes[view], quota)
+        if len(selected) >= limit:
+            return selected
+    add(candidates, limit - len(selected))
+    return selected
+
+
 def _aliases(document: PaperRecord) -> set[str]:
     aliases = {document_key(document)} if document_key(document) else set()
     identifiers = document.identifiers
@@ -247,7 +287,7 @@ class CitationPipeline:
                 max_records=max_records,
                 field_ids=request.field_ids,
                 depth=depth,
-                request_attempts=1,
+                request_attempts=3,
                 request_timeout=10,
             )
             try:
@@ -271,7 +311,7 @@ class CitationPipeline:
                     continue
                 code = "citation_expansion_failed_base_candidates_retained"
                 citation_map.update({"status": "error", "error_type": type(exc).__name__})
-                self._event("citation.degraded", {"code": code, "error_type": type(exc).__name__})
+                self._event("citation.degraded", {"code": code, "error_type": type(exc).__name__, **failure_details(exc)})
                 return CitationExpansionResult(
                     candidates=candidates,
                     citation_map=citation_map,
@@ -301,22 +341,23 @@ class CitationPipeline:
             }
         )
         provenance = self._provenance(added, traversal.edges)
-        checkpoint = CheckpointDraft(
-            step_key="expand_citations",
-            idempotency_key=self._idempotency_key(plans, per_seed, max_records, depth),
-            state={
-                "citation_frontier": dict(traversal.frontier),
-                "citation_map": citation_map,
-                "candidate_ids": [document.uid for document in combined],
-                "candidates": [document.model_dump(mode="json") for document in combined],
-                "provenance_by_identity": provenance,
-                "warnings": [],
-                "resume_from_stage": "post_citation",
-            },
-            workflow_version="m2.citation.v1",
-        )
-        self.cancellation.raise_if_cancelled()
-        self.observer.on_checkpoint(checkpoint)
+        if self.observer.on_checkpoint is not None:
+            checkpoint = CheckpointDraft(
+                step_key="expand_citations",
+                idempotency_key=self._idempotency_key(plans, per_seed, max_records, depth),
+                state={
+                    "citation_frontier": dict(traversal.frontier),
+                    "citation_map": citation_map,
+                    "candidate_ids": [document.uid for document in combined],
+                    "candidates": [document.model_dump(mode="json") for document in combined],
+                    "provenance_by_identity": provenance,
+                    "warnings": [],
+                    "resume_from_stage": "post_citation",
+                },
+                workflow_version="m2.citation.v1",
+            )
+            self.cancellation.raise_if_cancelled()
+            await record_checkpoint(self.observer, checkpoint)
         self._event(
             "citation.progress",
             {"processed_seeds": len(plans), "seed_count": len(plans), "added_candidates": len(added)},
@@ -365,6 +406,8 @@ class CitationPipeline:
 
     @staticmethod
     def _retryable(exc: Exception) -> bool:
+        if failure_details(exc).get("attempts"):
+            return False  # The individual request already exhausted its retries.
         if not isinstance(exc, SourceError):
             return True
         return exc.status is None or exc.status == 429 or int(exc.status) >= 500

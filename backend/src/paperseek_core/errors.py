@@ -13,6 +13,10 @@ class QueryGenerationError(RuntimeError):
 class QuerySourceError(RuntimeError):
     """The primary query could not produce a recoverable source result."""
 
+    def __init__(self, message: str, *, code: str = "query_primary_source_failed") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class LLMRequestError(RuntimeError):
     """The configured LLM endpoint could not produce a usable response."""
@@ -23,3 +27,7 @@ class LLMRequestError(RuntimeError):
         super().__init__(message)
         if code is not None:
             self.code = code
+
+
+class EmptyRankingBatchError(RuntimeError):
+    """An LLM ranking batch returned no usable scores."""

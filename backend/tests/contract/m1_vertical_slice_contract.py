@@ -223,7 +223,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
         )
 
         self.assertEqual(detail.status, RunStatus.FAILED)
-        self.assertEqual(detail.error_code, "research_workflow_failed")
+        self.assertEqual(detail.error_code, "query_primary_source_failed")
         self.assertEqual(self.query_service.get_results(run.id), [])
         self.assertEqual(self.uow.get_checkpoint(run.id).step_key, "query.plan")
         self.assertNotIn(b"private upstream response body", self.database.read_bytes())
@@ -280,7 +280,7 @@ class M1VerticalSliceContractTest(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'run%'"
                 )
             }
-        self.assertEqual(version, 7)
+        self.assertEqual(version, 11)
         self.assertEqual(
             tables,
             {

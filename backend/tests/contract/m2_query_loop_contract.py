@@ -25,6 +25,7 @@ from paperseek_core.query_planning import QueryLoopController, QueryPlanner
 from paperseek_core.sources.contracts import (
     SourceCapabilities,
     SourceError,
+    SourceFailureKind,
     SourceSearchMetadata,
     SourceSearchRequest,
     SourceSearchResult,
@@ -379,10 +380,12 @@ class M2QueryLoopContractTest(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(result.retrieval_request.primary_hits, records)
+        self.assertEqual(result.retrieval_request.primary_page.raw_count, len(records))
+        self.assertEqual(result.retrieval_request.primary_page.limit, 100)
         self.assertEqual(result.retrieval_request.pool_max, 3000)
         self.assertEqual(result.retrieval_request.ranking_candidate_limit, 256)
         self.assertEqual(observer.checkpoints[-1].step_key, "query.complete")
-        self.assertEqual(observer.checkpoints[-1].workflow_version, "m2.query-loop.v1")
+        self.assertEqual(observer.checkpoints[-1].workflow_version, "m2.query-loop.v2")
         planned = next(event for event in observer.events if event.event_type == "query.planned")
         self.assertEqual(planned.payload["intent"], golden["search_plan"]["intent"])
         self.assertEqual(planned.payload["question_type"], golden["search_plan"]["question_type"])
@@ -462,7 +465,42 @@ class M2QueryLoopContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed_llm.calls, [])
         self.assertEqual(result.final_query, resume.current_query)
         self.assertEqual(result.primary_hits, records)
+        self.assertEqual(result.retrieval_request.primary_page, resume.primary_page)
         self.assertEqual(len(result.query_portfolio), 3)
+
+    async def test_invalid_resumed_query_raises_classified_error_before_source_request(self) -> None:
+        source = SequenceSource()
+        resume = QueryLoopResumeState(
+            question=QUESTION,
+            source=source.name,
+            search_plan=SearchPlan(intent=QUESTION),
+            current_query="",
+        )
+        with self.assertRaises(QueryGenerationError):
+            await QueryLoopPipeline(FixtureLLM(), source, RecordingObserver()).run(
+                QueryLoopRequest(question=QUESTION, resume=resume)
+            )
+        self.assertEqual(source.requests, [])
+
+    async def test_source_failure_keeps_safe_status_and_timeout_category(self) -> None:
+        for error, code in (
+            (SourceError("openalex", "private response", status=429, body="api_key=secret"), "source_rate_limited"),
+            (SourceError("openalex", "private URL", failure_kind=SourceFailureKind.FIRST_BYTE_TIMEOUT), "source_timeout"),
+        ):
+            with self.subTest(code=code):
+                observer = RecordingObserver()
+                resume = QueryLoopResumeState(question=QUESTION, source="openalex", search_plan=SearchPlan(intent=QUESTION), current_query="governance")
+                with self.assertRaises(QuerySourceError) as caught:
+                    await QueryLoopPipeline(FixtureLLM(), SequenceSource(error), observer).run(QueryLoopRequest(question=QUESTION, resume=resume))
+                self.assertEqual(caught.exception.code, code)
+                payload = observer.events[-1].payload
+                self.assertEqual(payload["code"], code)
+                if error.status:
+                    self.assertEqual(payload["http_status"], error.status)
+                else:
+                    self.assertEqual(payload["failure_kind"], "first_byte_timeout")
+                self.assertNotIn("private", str(observer.events))
+                self.assertNotIn("secret", str(observer.events))
 
     async def test_primary_failure_is_stable_and_optional_portfolio_failure_is_visible(self) -> None:
         secret = "sensitive upstream response"
@@ -478,7 +516,8 @@ class M2QueryLoopContractTest(unittest.IsolatedAsyncioTestCase):
             await QueryLoopPipeline(llm, source, observer).run(QueryLoopRequest(question=QUESTION))
         self.assertNotIn(secret, str(observer.events))
         self.assertEqual(observer.events[-1].event_type, "query.failed")
-        self.assertEqual(observer.events[-1].payload["code"], "query_primary_source_failed")
+        self.assertEqual(observer.events[-1].payload["code"], "source_authentication_failed")
+        self.assertEqual(observer.events[-1].payload["http_status"], 403)
 
         records = golden_records()
         portfolio_source = SequenceSource(

@@ -8,12 +8,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from paperseek_app.models import RunStatus
+from paperseek_app.api_schemas import ErrorResponse, ErrorOutput, ErrorDetails
 from paperseek_app.services import (
     RunCleanupService,
     RunQueryService,
     RunSubmissionService,
 )
 from paperseek_community.artifacts import FileArtifactStore
+from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork
 
 
@@ -41,14 +43,10 @@ class ApiError(Exception):
 
 
 def error_payload(code: str, message: str, details: dict | None = None) -> dict:
-    return {
-        "error": {
-            "code": code,
-            "message": message,
-            "request_id": str(uuid4()),
-            "details": details or {},
-        }
-    }
+    return ErrorResponse(error=ErrorOutput(
+        code=code, message=message, request_id=str(uuid4()),
+        details=ErrorDetails.model_validate(details or {}),
+    )).model_dump(mode="json", exclude_none=True)
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -70,8 +68,15 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
 
-def open_submission_service(database: Path) -> tuple[RunSubmissionService, SQLiteRunUnitOfWork]:
-    uow = SQLiteRunUnitOfWork(database)
+def open_submission_service(
+    database: Path,
+    *,
+    credential_store: EncryptedRunCredentialStore | None = None,
+    submission_credentials: dict[str, dict[str, str]] | None = None,
+) -> tuple[RunSubmissionService, SQLiteRunUnitOfWork]:
+    uow = SQLiteRunUnitOfWork(
+        database, credential_store=credential_store, submission_credentials=submission_credentials,
+    )
     return RunSubmissionService(uow), uow
 
 

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable
+from typing import Protocol, runtime_checkable
 
 from paperseek_core.models import (
-    AbstractFetchRequest,
-    AbstractFetchResult,
-    CandidateMetadataEnrichmentRequest,
-    CandidateMetadataEnrichmentResult,
     CheckpointDraft,
     CitationSourceRequest,
     CitationSourceResult,
     CoreProgressEvent,
+    DecisionBatchResult,
     PaperRecord,
+    RetrievalEmbeddingResult,
     RetrievalRerankResult,
 )
 from paperseek_core.sources.contracts import SourceCapabilities, SourceSearchRequest, SourceSearchResult
@@ -36,20 +35,6 @@ class LLMPort(Protocol):
     ) -> str: ...
 
 
-@runtime_checkable
-class AbstractPort(Protocol):
-    async def fetch_abstract(
-        self,
-        request: AbstractFetchRequest,
-    ) -> AbstractFetchResult: ...
-
-
-@runtime_checkable
-class CandidateMetadataPort(Protocol):
-    async def enrich_candidate_metadata(
-        self,
-        request: CandidateMetadataEnrichmentRequest,
-    ) -> CandidateMetadataEnrichmentResult: ...
 
 
 @runtime_checkable
@@ -66,7 +51,9 @@ class EmbeddingPort(Protocol):
         self,
         question: str,
         documents: list[PaperRecord],
-    ) -> list[float]: ...
+        *,
+        model: str | None = None,
+    ) -> RetrievalEmbeddingResult: ...
 
 
 @runtime_checkable
@@ -76,6 +63,15 @@ class RerankPort(Protocol):
         question: str,
         documents: list[PaperRecord],
     ) -> RetrievalRerankResult: ...
+
+
+@runtime_checkable
+class DecisionPort(Protocol):
+    provider: str
+    model: str
+    base_url: str
+
+    async def score(self, state: dict, questions: dict) -> DecisionBatchResult: ...
 
 
 @runtime_checkable
@@ -91,4 +87,5 @@ class CancellationToken(Protocol):
 class WorkflowObserver(Protocol):
     def on_event(self, event: CoreProgressEvent) -> None: ...
 
-    def on_checkpoint(self, checkpoint: CheckpointDraft) -> None: ...
+    # None disables recovery snapshots, including their construction/serialization.
+    on_checkpoint: Callable[[CheckpointDraft], Awaitable[None] | None] | None

@@ -4,7 +4,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
-    from paperseek_core.ports import CancellationToken
+    from paperseek_core.models import CheckpointDraft
+    from paperseek_core.ports import CancellationToken, WorkflowObserver
+
+
+async def record_checkpoint(observer: WorkflowObserver, checkpoint: CheckpointDraft) -> None:
+    if observer.on_checkpoint is None:
+        return
+    pending = observer.on_checkpoint(checkpoint)
+    if pending is not None:
+        await pending
 
 
 class _NeverCancelled:

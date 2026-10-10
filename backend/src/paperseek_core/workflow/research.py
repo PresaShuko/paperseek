@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import hashlib
 import json
 from typing import Any
 
-from paperseek_core.citation import CitationPipeline
-from paperseek_core.enrichment import AbstractEnrichmentPipeline
-from paperseek_core.execution import NEVER_CANCELLED
+from paperseek_core.citation import CitationPipeline, select_seed_candidates
+from paperseek_core.bibliometrics.corpus import merge_corpus
+from paperseek_core.execution import NEVER_CANCELLED, record_checkpoint
 from paperseek_core.final_result import FinalResultAssembler
 from paperseek_core.models import (
-    AbstractEnrichmentRequest,
     CheckpointDraft,
     CitationExpansionRequest,
     CoreProgressEvent,
@@ -23,10 +24,9 @@ from paperseek_core.models import (
     ResearchWorkflowResumeState,
 )
 from paperseek_core.ports import (
-    AbstractPort,
-    CandidateMetadataPort,
     CancellationToken,
     EmbeddingPort,
+    DecisionPort,
     LLMPort,
     RerankPort,
     SourcePort,
@@ -35,6 +35,7 @@ from paperseek_core.ports import (
 from paperseek_core.query_loop import QueryLoopPipeline
 from paperseek_core.document_identity import document_key
 from paperseek_core.ranking import RankingPipeline
+from paperseek_core.candidate_selection import CandidateSelectionPipeline
 from paperseek_core.retrieval import RetrievalPipeline
 
 
@@ -45,19 +46,17 @@ class ResearchWorkflow:
         llm: LLMPort,
         source: SourcePort,
         observer: WorkflowObserver,
-        abstracts: AbstractPort | None = None,
-        candidate_metadata: CandidateMetadataPort | None = None,
         embedding: EmbeddingPort | None = None,
         reranker: RerankPort | None = None,
+        decision: DecisionPort | None = None,
         cancellation: CancellationToken = NEVER_CANCELLED,
     ) -> None:
         self.llm = llm
         self.source = source
         self.observer = observer
-        self.abstracts = abstracts
-        self.candidate_metadata = candidate_metadata
         self.embedding = embedding
         self.reranker = reranker
+        self.decision = decision
         self.cancellation = cancellation
 
     async def run(self, request: ResearchWorkflowRequest) -> ResearchResult:
@@ -74,8 +73,8 @@ class ResearchWorkflow:
                 or bool(resume.retrieval_lane_results)
             ),
             "citation": int(resume.citation is not None),
+            "selection": int(resume.selection is not None),
             "ranking": int(bool(resume.ranking_scores) or bool(resume.ranking_completed_batch_ids)),
-            "enrichment": int(resume.enrichment is not None),
         }
         if any(recovery.values()):
             self._event("workflow.recovery", recovery)
@@ -95,15 +94,12 @@ class ResearchWorkflow:
                 update={
                     "resume_lane_results": resume.retrieval_lane_results,
                     "completed_lanes": resume.retrieval_completed_lanes,
-                    "crossref_metadata_enrichment": request.crossref_metadata_enrichment,
                 }
             )
             retrieval = await RetrievalPipeline(
                 self.source,
                 self.observer,
-                candidate_metadata=self.candidate_metadata,
                 embedding=self.embedding,
-                reranker=self.reranker,
                 cancellation=self.cancellation,
             ).run(retrieval_request)
         self.cancellation.raise_if_cancelled()
@@ -117,7 +113,12 @@ class ResearchWorkflow:
             ).run(
                 CitationExpansionRequest(
                     candidates=retrieval.documents,
-                    seed_candidates=retrieval.documents,
+                    seed_candidates=select_seed_candidates(
+                        retrieval.documents,
+                        {lane.removeprefix("query_view:"): records for lane, records in query.retrieval_request.supplemental_lanes.items() if lane.startswith("query_view:")},
+                        {view.view_id: view.view_type for view in query.search_plan.query_views},
+                        limit=min(request.query_budget.ranking_candidate_limit, max(request.citation_seed_count * 4, 64)),
+                    ),
                     enabled=request.citation_enabled,
                     seed_count=request.citation_seed_count,
                     per_seed=request.citation_per_seed,
@@ -131,6 +132,18 @@ class ResearchWorkflow:
             retrieval.provenance_by_identity,
             citation.provenance_by_identity,
         )
+        selection = await CandidateSelectionPipeline(
+            self.observer, embedding=self.embedding, reranker=self.reranker, decision=self.decision,
+            cancellation=self.cancellation,
+        ).run(
+            question=request.question, candidates=citation.candidates, provenance=provenance,
+            embedding_state=retrieval.embedding_state,
+            pool_max=request.query_budget.retrieval_pool_max,
+            ranking_limit=request.query_budget.ranking_candidate_limit,
+            rrf_k=query.retrieval_request.rrf_k, resume=resume.selection,
+            search_plan=query.search_plan.audit_summary(), decision_batches=resume.decision_batches,
+        )
+        provenance = selection.provenance_by_identity
         self.cancellation.raise_if_cancelled()
         ranking = await RankingPipeline(
             self.llm,
@@ -139,7 +152,7 @@ class ResearchWorkflow:
         ).run(
             RankingRequest(
                 question=request.question,
-                documents=citation.candidates[: request.query_budget.ranking_candidate_limit],
+                documents=selection.documents[:selection.selected_count],
                 plan_context=query.search_plan.audit_summary(),
                 provenance_by_identity=provenance,
                 batch_size=request.ranking_batch_size,
@@ -148,37 +161,6 @@ class ResearchWorkflow:
                 completed_batch_ids=resume.ranking_completed_batch_ids,
             )
         )
-        enriched_items = list(ranking.items)
-        enrichment_warnings: list[str] = []
-        if request.fetch_abstracts and enriched_items:
-            abstract_port = self.abstracts
-            if abstract_port is None and isinstance(self.source, AbstractPort):
-                abstract_port = self.source
-            if abstract_port is None:
-                enrichment_warnings = ["abstract_enrichment_unsupported"]
-                self.observer.on_event(
-                    CoreProgressEvent(
-                        event_type="enrichment.skipped",
-                        stage="enrichment",
-                        payload={"code": "abstract_enrichment_unsupported"},
-                    )
-                )
-            else:
-                enrichment = await AbstractEnrichmentPipeline(
-                    abstract_port,
-                    self.observer,
-                    cancellation=self.cancellation,
-                ).run(
-                    AbstractEnrichmentRequest(
-                        items=enriched_items,
-                        batch_size=request.enrichment_batch_size,
-                        concurrency=request.enrichment_concurrency,
-                        resume=resume.enrichment,
-                    )
-                )
-                enriched_items = enrichment.items
-                enrichment_warnings = enrichment.warnings
-
         warnings = list(
             dict.fromkeys(
                 [
@@ -186,12 +168,20 @@ class ResearchWorkflow:
                     *retrieval.warnings,
                     *citation.warnings,
                     *ranking.warnings,
-                    *enrichment_warnings,
+                    *selection.warnings,
                 ]
             )
         )
-        result = FinalResultAssembler().assemble(
+        result = await asyncio.to_thread(FinalResultAssembler().assemble,
             ResearchAssemblyRequest(
+                bibliometric_corpus=await asyncio.to_thread(
+                    merge_corpus, retrieval.bibliometric_corpus, citation.candidates,
+                    scored_ids={document_key(item.document) for item in ranking.items if item.score is not None},
+                    source_reported_total=query.total,
+                    retrieval_pool_limit=request.query_budget.retrieval_pool_max,
+                    scoring_limit=request.query_budget.ranking_candidate_limit,
+                    warnings=["bounded_retrieval"],
+                ) if retrieval.bibliometric_corpus is not None else None,
                 question=request.question,
                 source=self.source.name,
                 search_plan=query.search_plan,
@@ -211,14 +201,14 @@ class ResearchWorkflow:
                     for item in query.query_iteration_memory
                 ],
                 citation_map=citation.citation_map,
-                ranking_steps=self._ranking_steps(retrieval, citation, ranking),
-                search_state=self._search_state(query, citation.candidates, provenance),
-                items=enriched_items,
+                ranking_steps=self._ranking_steps(retrieval, citation, ranking, selection),
+                search_state=self._search_state(query, selection.documents, provenance),
+                items=ranking.items,
                 warnings=warnings,
             )
         )
         self.cancellation.raise_if_cancelled()
-        self._final_checkpoint(result)
+        await self._final_checkpoint(result)
         self._event(
             "workflow.completed",
             {
@@ -264,7 +254,7 @@ class ResearchWorkflow:
         return output
 
     @staticmethod
-    def _ranking_steps(retrieval, citation, ranking) -> list[dict[str, Any]]:
+    def _ranking_steps(retrieval, citation, ranking, selection) -> list[dict[str, Any]]:
         return [
             {
                 "id": "multi_lane_retrieval",
@@ -283,6 +273,16 @@ class ResearchWorkflow:
                 "total": len(citation.candidates),
                 "candidate_count": len(citation.candidates),
                 "added_candidates": int(citation.citation_map.get("added_candidates") or 0),
+            },
+            {
+                "id": "candidate_selection",
+                "title": "Preliminary ranking",
+                "status": "degraded" if selection.warnings else "complete",
+                "requested_mode": selection.requested_mode,
+                "actual_mode": selection.actual_mode,
+                "component_statuses": selection.component_statuses,
+                "candidate_count": len(selection.documents),
+                "selected_count": selection.selected_count,
             },
             {
                 "id": "llm_reranking",
@@ -312,6 +312,7 @@ class ResearchWorkflow:
                 "origins": detail.get("origins") or [],
                 "retrieval_lanes": detail.get("retrieval_lanes") or [],
                 "retrieval_score": float(detail.get("retrieval_score") or 0),
+                **{key: detail[key] for key in ("decision_score", "decision_rank", "decision_provider", "decision_model", "decision_confidence", "selection_rrf_score") if key in detail},
             }
         origin_counts: dict[str, int] = {}
         for detail in ledger.values():
@@ -335,8 +336,10 @@ class ResearchWorkflow:
             },
         }
 
-    def _final_checkpoint(self, result: ResearchResult) -> None:
+    async def _final_checkpoint(self, result: ResearchResult) -> None:
         self.cancellation.raise_if_cancelled()
+        if self.observer.on_checkpoint is None:
+            return
         artifact_rows = [
             {
                 "kind": artifact.kind,
@@ -349,6 +352,7 @@ class ResearchWorkflow:
         ]
         payload = {
             "final_result": result.public_payload(),
+            "result": result.model_dump(mode="json", exclude={"artifacts"}),
             "warnings": result.warnings,
             "artifacts": artifact_rows,
             "resume_from_stage": "complete",
@@ -356,12 +360,13 @@ class ResearchWorkflow:
         digest = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
-        self.observer.on_checkpoint(
+        await record_checkpoint(
+            self.observer,
             CheckpointDraft(
                 step_key="assemble_final_result",
                 idempotency_key=f"final:{digest}",
                 state=payload,
-                workflow_version="m2.research-workflow.v1",
+                workflow_version="m2.research-workflow.v2",
             )
         )
 

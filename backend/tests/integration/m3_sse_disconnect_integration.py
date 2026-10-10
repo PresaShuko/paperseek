@@ -67,7 +67,7 @@ class M3SseDisconnectIntegrationTest(unittest.TestCase):
             self.assertTrue(server.started)
 
             base_url = f"http://127.0.0.1:{port}"
-            with httpx.Client(base_url=base_url, timeout=5) as client:
+            with httpx.Client(base_url=base_url, timeout=5, trust_env=False) as client:
                 with client.stream("GET", f"/api/v1/runs/{run.id}/events") as response:
                     first = self._first_event(response)
                 self.assertEqual(first["sequence"], 1)

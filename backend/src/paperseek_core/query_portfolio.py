@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 
 from paperseek_core.document_identity import document_key
 from paperseek_core.models import (
@@ -20,13 +20,13 @@ from paperseek_core.query_planning import (
     normalize_query,
     select_query_views,
 )
-from paperseek_core.retrieval import dedupe_documents
+from paperseek_core.retrieval_fusion import dedupe_documents
 from paperseek_core.sources.contracts import SourceSearchRequest
 
 
 CheckpointWriter = Callable[
     [QueryLoopResumeState, str, str],
-    QueryLoopResumeState,
+    Awaitable[QueryLoopResumeState],
 ]
 
 
@@ -228,7 +228,7 @@ class QueryPortfolioExecutor:
                 execution.model_dump(mode="json"),
             )
             completed_ids.add(view.view_id)
-            current = self.checkpoint(
+            current = await self.checkpoint(
                 current,
                 "query_portfolio",
                 "query.portfolio",

@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
-import math
-import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from paperseek_core.document_identity import document_identity, document_key
-from paperseek_core.execution import NEVER_CANCELLED
+from paperseek_core.execution import NEVER_CANCELLED, record_checkpoint
+from paperseek_core.http_retry import failure_details
 from paperseek_core.models import (
     CheckpointDraft,
     CoreProgressEvent,
@@ -22,44 +20,9 @@ from paperseek_core.models import (
     RankingScore,
 )
 from paperseek_core.ports import CancellationToken, LLMPort, WorkflowObserver
-from paperseek_core.prompts import SYSTEM_RANKING_REASONS, SYSTEM_RESULT_RANKING
-
-
-class EmptyRankingBatchError(RuntimeError):
-    """Raised when an LLM ranking batch returns no usable scores."""
-
-
-def describe_document(document: PaperRecord, index: int, *, abstract_limit: int = 1200) -> str:
-    parts = [f"{index}. UID: {document.uid or document_key(document)}"]
-    if document.provider:
-        parts.append(f"   Provider: {document.provider}")
-    if document.title:
-        parts.append(f"   Title: {document.title}")
-    if document.types:
-        parts.append(f"   Document types: {'; '.join(document.types[:5])}")
-    if document.source:
-        source_parts = []
-        if document.source.source_title:
-            source_parts.append(document.source.source_title)
-        if document.source.publish_year:
-            source_parts.append(str(document.source.publish_year))
-        if document.source.volume:
-            source_parts.append(f"V{document.source.volume}")
-        if document.source.issue:
-            source_parts.append(f"I{document.source.issue}")
-        if source_parts:
-            parts.append(f"   Source: {', '.join(source_parts)}")
-    if document.names and document.names.authors:
-        authors = [
-            author.display_name or author.wos_standard or ""
-            for author in document.names.authors[:5]
-        ]
-        parts.append(f"   Authors: {', '.join(author for author in authors if author)}")
-    if document.keywords and document.keywords.author_keywords:
-        parts.append(f"   Keywords: {'; '.join(document.keywords.author_keywords[:8])}")
-    if document.abstract:
-        parts.append(f"   Abstract: {document.abstract[:max(200, int(abstract_limit or 1200))]}")
-    return "\n".join(parts)
+from paperseek_core.errors import EmptyRankingBatchError
+from paperseek_core.ranking_output import RankingOutputCodec
+from paperseek_core.ranking_scoring import RankingScorer
 
 
 @dataclass(frozen=True)
@@ -98,324 +61,6 @@ class RankingBatchScheduler:
         candidate_ids = [str(document.uid or identity(document)) for document in documents]
         digest = hashlib.sha256("\0".join(candidate_ids).encode("utf-8")).hexdigest()[:20]
         return f"{step_id}:{digest}"
-
-
-@dataclass(frozen=True)
-class RankingOutputCodec:
-    identity: Callable[[PaperRecord], str] = document_identity
-
-    @staticmethod
-    def json_object(raw: str) -> dict:
-        text = str(raw or "").strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-        try:
-            value = json.loads(text)
-            return value if isinstance(value, dict) else {}
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if not match:
-                return {}
-            try:
-                value = json.loads(match.group(0))
-                return value if isinstance(value, dict) else {}
-            except json.JSONDecodeError:
-                return {}
-
-    def parse_scores(self, raw: str, documents: list[PaperRecord]) -> list[dict[str, Any]]:
-        pairs = self.json_object(raw).get("scores")
-        if not isinstance(pairs, list):
-            return []
-        output = []
-        seen = set()
-        for pair in pairs:
-            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
-                continue
-            try:
-                index = int(pair[0])
-                score = float(pair[1])
-            except (TypeError, ValueError):
-                continue
-            if index < 1 or index > len(documents) or index in seen or not math.isfinite(score):
-                continue
-            seen.add(index)
-            output.append({
-                "uid": self.identity(documents[index - 1]),
-                "score": score,
-                "reasoning": "",
-            })
-        return output
-
-    @staticmethod
-    def parse_reasons(raw: str, identities: list[str]) -> dict[str, str]:
-        pairs = RankingOutputCodec.json_object(raw).get("reasons")
-        if not isinstance(pairs, list):
-            return {}
-        output = {}
-        for pair in pairs:
-            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
-                continue
-            try:
-                index = int(pair[0])
-            except (TypeError, ValueError):
-                continue
-            reason = re.sub(r"\s+", " ", str(pair[1] or "")).strip()
-            if 1 <= index <= len(identities) and reason:
-                output[identities[index - 1]] = reason
-        return output
-
-    def match_scores(
-        self,
-        documents: list[PaperRecord],
-        scores: Any,
-    ) -> tuple[list[dict[str, Any]], list[PaperRecord]]:
-        identities = [self.identity(document) for document in documents]
-        exact = {identity.casefold(): index for index, identity in enumerate(identities) if identity}
-        matched_indexes = set()
-        matched_scores = []
-        for entry in self.validated_scores(scores):
-            uid = str(entry.get("uid") or "").strip()
-            if not uid:
-                continue
-            index = exact.get(uid.casefold())
-            if index is None:
-                candidates = [
-                    candidate_index
-                    for candidate_index, identity in enumerate(identities)
-                    if identity
-                    and (uid.casefold() in identity.casefold() or identity.casefold() in uid.casefold())
-                ]
-                if len(candidates) == 1:
-                    index = candidates[0]
-            if index is None or index in matched_indexes:
-                continue
-            normalized = dict(entry)
-            normalized["uid"] = identities[index]
-            matched_scores.append(normalized)
-            matched_indexes.add(index)
-        missing = [
-            document
-            for index, document in enumerate(documents)
-            if index not in matched_indexes
-        ]
-        return matched_scores, missing
-
-    @staticmethod
-    def validated_scores(value: Any) -> list[dict[str, Any]]:
-        if not isinstance(value, list):
-            return []
-        output = []
-        for item in value:
-            try:
-                output.append(RankingScore.model_validate(item).model_dump())
-            except (TypeError, ValueError):
-                continue
-        return output
-
-
-class RankingScorer:
-    def __init__(self, llm: LLMPort):
-        self.llm = llm
-        self.codec = RankingOutputCodec()
-        self.missing_reason_count = 0
-
-    async def score_batch(
-        self,
-        question: str,
-        documents: list[PaperRecord],
-        plan_context: str,
-    ) -> list[dict[str, Any]]:
-        try:
-            scores = await self.request_compact_scores(question, documents, plan_context)
-        except Exception as exc:
-            if not self.should_retry_in_chunks(exc):
-                raise
-            scores = await self.request_scores_in_chunks(question, documents, plan_context)
-        matched, missing = self.codec.match_scores(documents, scores)
-        if missing:
-            scores = await self.request_scores_in_chunks(question, documents, plan_context)
-            matched, missing = self.codec.match_scores(documents, scores)
-            if missing:
-                raise EmptyRankingBatchError(
-                    f"Chunked score-only ranking omitted {len(missing)}/{len(documents)} candidate(s)."
-                )
-        return matched
-
-    async def attach_reasons(
-        self,
-        question: str,
-        documents: list[PaperRecord],
-        scores: list[dict[str, Any]],
-        plan_context: str,
-    ) -> list[dict[str, Any]]:
-        reason_documents = self.reason_documents(documents, scores)
-        reason_by_uid: dict[str, str] = {}
-        self.missing_reason_count = 0
-        for start in range(0, len(reason_documents), 64):
-            batch = reason_documents[start:start + 64]
-            try:
-                reason_by_uid.update(
-                    await self.request_reasons(question, batch, scores, plan_context)
-                )
-            except Exception:
-                pass
-        self.missing_reason_count = sum(
-            document_identity(document) not in reason_by_uid
-            for document in reason_documents
-        )
-        for entry in scores:
-            entry["reasoning"] = reason_by_uid.get(str(entry.get("uid") or ""), "")
-        return scores
-
-    @staticmethod
-    def should_retry_in_chunks(exc: Exception) -> bool:
-        text = str(exc or "").casefold()
-        if "429" in text or "rate_limit" in text or "too many requests" in text:
-            return False
-        return any(
-            marker in text
-            for marker in (
-                "context length",
-                "context_length",
-                "maximum context",
-                "max token",
-                "too many tokens",
-                "truncat",
-                "json",
-                "message content",
-                "did not contain",
-                "empty response",
-                "timed out",
-                "timeout",
-                "http 500",
-                "http 502",
-                "http 503",
-                "http 504",
-                "api error (500)",
-                "api error (502)",
-                "api error (503)",
-                "api error (504)",
-                "upstream transport failure",
-                "upstream proxy failed",
-                "proxy_error",
-                "network error",
-                "connection reset",
-            )
-        )
-
-    async def request_compact_scores(
-        self,
-        question: str,
-        documents: list[PaperRecord],
-        plan_context: str,
-    ) -> list[dict[str, Any]]:
-        descriptions = []
-        for index, document in enumerate(documents, 1):
-            description = describe_document(document, index, abstract_limit=500)
-            descriptions.append(
-                re.sub(rf"^{index}\. UID:.*$", f"{index}.", description, count=1, flags=re.MULTILINE)
-            )
-        papers_text = "\n\n".join(descriptions)
-        messages = [
-            {"role": "system", "content": SYSTEM_RESULT_RANKING},
-            {
-                "role": "user",
-                "content": (
-                    f"Research question: {question}\n\n"
-                    f"Stable SearchPlan:\n{plan_context}\n\n"
-                    f"Papers:\n\n{papers_text}\n\n"
-                    'Return only {"scores":[[index,score],...]} with one pair for every index.'
-                ),
-            },
-        ]
-        raw = await self.llm.chat_json(messages, temperature=0.0, max_tokens=4096)
-        return self.codec.parse_scores(raw, documents)
-
-    async def request_scores_in_chunks(
-        self,
-        question: str,
-        documents: list[PaperRecord],
-        plan_context: str,
-        chunk_size: int = 64,
-    ) -> list[dict[str, Any]]:
-        scores = []
-        for start in range(0, len(documents), chunk_size):
-            batch = documents[start:start + chunk_size]
-            batch_scores = await self.request_compact_scores(question, batch, plan_context)
-            matched, missing = self.codec.match_scores(batch, batch_scores)
-            if missing:
-                raise EmptyRankingBatchError(
-                    f"Score-only chunk {start // chunk_size + 1} omitted {len(missing)}/{len(batch)} candidate(s)."
-                )
-            scores.extend(matched)
-        return scores
-
-    def reason_documents(
-        self,
-        documents: list[PaperRecord],
-        scores: list[dict[str, Any]],
-    ) -> list[PaperRecord]:
-        score_by_uid = {
-            str(entry.get("uid") or ""): float(entry.get("score") or 0)
-            for entry in scores
-        }
-        ordered = sorted(
-            documents,
-            key=lambda document: score_by_uid.get(document_identity(document), 0),
-            reverse=True,
-        )
-        if len(ordered) < 50:
-            return ordered
-        high_scores = [
-            document
-            for document in ordered
-            if score_by_uid.get(document_identity(document), 0) >= 5
-        ]
-        return high_scores if len(high_scores) > 50 else ordered[:50]
-
-    async def request_reasons(
-        self,
-        question: str,
-        documents: list[PaperRecord],
-        scores: list[dict[str, Any]],
-        plan_context: str,
-    ) -> dict[str, str]:
-        score_by_uid = {
-            str(entry.get("uid") or ""): entry.get("score", 0)
-            for entry in scores
-        }
-        descriptions = []
-        identities = []
-        for index, document in enumerate(documents, 1):
-            identity = document_identity(document)
-            identities.append(identity)
-            description = describe_document(document, index, abstract_limit=700)
-            descriptions.append(
-                re.sub(
-                    rf"^{index}\. UID:.*$",
-                    f"{index}. Score: {score_by_uid.get(identity, 0)}",
-                    description,
-                    count=1,
-                    flags=re.MULTILINE,
-                )
-            )
-        retained_text = "\n\n".join(descriptions)
-        messages = [
-            {"role": "system", "content": SYSTEM_RANKING_REASONS},
-            {
-                "role": "user",
-                "content": (
-                    f"Research question: {question}\n\n"
-                    f"Stable SearchPlan:\n{plan_context}\n\n"
-                    f"Retained papers:\n\n{retained_text}\n\n"
-                    'Return only {"reasons":[[index,"reason"],...]}.'
-                ),
-            },
-        ]
-        max_tokens = min(8192, max(2048, len(documents) * 96))
-        raw = await self.llm.chat_json(messages, temperature=0.0, max_tokens=max_tokens)
-        return self.codec.parse_reasons(raw, identities)
 
 
 class RankingPipeline:
@@ -526,7 +171,7 @@ class RankingPipeline:
 
         scores.extend(batch_scores)
         completed_ids.add(batch_id)
-        self._checkpoint(request, batch_id, scores, completed_ids)
+        await self._checkpoint(request, batch_id, scores, completed_ids)
         self._event(
             "ranking.batch_completed",
             {
@@ -555,6 +200,7 @@ class RankingPipeline:
             if batch_ids[index] not in completed_ids
         ]
         schedule = scheduler.concurrency_schedule()
+        exhausted = []
         for tier_index, workers in enumerate(schedule):
             self.cancellation.raise_if_cancelled()
             if not remaining:
@@ -590,11 +236,12 @@ class RankingPipeline:
                             self.cancellation.raise_if_cancelled()
                             tasks.append(group.create_task(score(batch)))
                     outcomes = [task.result() for task in tasks]
-                    for (index, batch), outcome in zip(chunk, outcomes):
+                    for (index, batch), outcome in zip(chunk, outcomes, strict=True):
                         if isinstance(outcome, asyncio.CancelledError):
                             raise outcome
                         if isinstance(outcome, Exception):
-                            failed.append((index, batch))
+                            target = exhausted if failure_details(outcome).get("attempts") else failed
+                            target.append((index, batch))
                             empty_failures += isinstance(outcome, EmptyRankingBatchError)
                             rate_limited = rate_limited or self._is_rate_limit_error(outcome)
                             self._event(
@@ -606,12 +253,13 @@ class RankingPipeline:
                                     "concurrency": workers,
                                     "rate_limited": self._is_rate_limit_error(outcome),
                                     "error_code": str(getattr(outcome, "code", "") or ""),
+                                    **failure_details(outcome),
                                 },
                             )
                             continue
                         scores.extend(outcome)
                         completed_ids.add(batch_ids[index])
-                        self._checkpoint(request, batch_ids[index], scores, completed_ids)
+                        await self._checkpoint(request, batch_ids[index], scores, completed_ids)
                         self._event(
                             "ranking.batch_completed",
                             {
@@ -639,6 +287,7 @@ class RankingPipeline:
                 break
 
         warnings = []
+        remaining.extend(exhausted)
         if remaining:
             failed_candidates = sum(len(batch) for _, batch in remaining)
             self._degraded(
@@ -682,11 +331,12 @@ class RankingPipeline:
             {
                 "code": "ranking_reasons_missing",
                 "missing_reason_count": self.scorer.missing_reason_count,
+                **(self.scorer.reason_failures[0] if self.scorer.reason_failures else {}),
             },
         )
         return scores, ["ranking_reasons_missing"]
 
-    def _checkpoint(
+    async def _checkpoint(
         self,
         request: RankingRequest,
         batch_id: str,
@@ -694,7 +344,10 @@ class RankingPipeline:
         completed_ids: set[str],
     ) -> None:
         self.cancellation.raise_if_cancelled()
-        self.observer.on_checkpoint(
+        if self.observer.on_checkpoint is None:
+            return
+        await record_checkpoint(
+            self.observer,
             CheckpointDraft(
                 step_key="rank_results.batch",
                 idempotency_key=batch_id,
@@ -739,7 +392,8 @@ class RankingPipeline:
                     provenance=self._provenance(document, provenance_by_identity),
                 )
             )
-        return sorted(ranked, key=lambda item: float(item.score or 0), reverse=True)
+        input_order = {document_identity(doc): index for index, doc in enumerate(documents)}
+        return sorted(ranked, key=lambda item: (-float(item.score or 0), input_order[document_identity(item.document)]))
 
     @staticmethod
     def _provenance(
@@ -766,6 +420,7 @@ class RankingPipeline:
                 "error_code": str(getattr(exc, "code", "") or ""),
                 "failed_batches": failed_batches,
                 "failed_candidates": failed_candidates,
+                **failure_details(exc),
             },
         )
 
@@ -776,12 +431,4 @@ class RankingPipeline:
         )
 
 
-__all__ = [
-    "EmptyRankingBatchError",
-    "RankingBatchScheduler",
-    "RankingOutputCodec",
-    "RankingPipeline",
-    "RankingRequest",
-    "RankingScorer",
-    "SYSTEM_RESULT_RANKING",
-]
+__all__ = ["RankingBatchScheduler", "RankingPipeline"]

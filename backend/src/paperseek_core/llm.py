@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 
-from paperseek_core.key_pool import ApiKeyPool, retryable_key_status
+from paperseek_core.key_pool import ApiKeyPool
+from paperseek_core.http_retry import MODEL_ATTEMPTS
+from paperseek_core.model_http import bearer_headers, post_model_json
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.ports import CancellationToken
 
@@ -51,10 +52,12 @@ class HttpLLMAdapter:
         }
         thinking_control = self._thinking_control()
         body.update(thinking_control)
+        if self.model.rsplit("/", 1)[-1].lower().startswith("gpt-5.6"):
+            body.pop("temperature", None)
         response, api_key = await self._post(
             f"{self.base_url}/chat/completions",
             body,
-            self._bearer_headers,
+            bearer_headers,
             allow_status={400, 422},
         )
         if response.status_code in {400, 422}:
@@ -64,7 +67,7 @@ class HttpLLMAdapter:
             response, _ = await self._post(
                 f"{self.base_url}/chat/completions",
                 body,
-                self._bearer_headers,
+                bearer_headers,
                 attempt_keys=(api_key,),
             )
         try:
@@ -98,13 +101,16 @@ class HttpLLMAdapter:
         }
         if instructions:
             body["instructions"] = instructions
-        if self.model.lower().startswith(("o1", "o3", "o4", "gpt-5")):
+        if self.model.lower().startswith("gpt-5.6"):
+            body["reasoning"] = {"effort": "low"}
+            body.pop("temperature", None)
+        elif self.model.lower().startswith(("o1", "o3", "o4", "gpt-5")):
             # JSON extraction calls never consume a visible reasoning trace.
             body["reasoning"] = {"effort": "minimal"}
         response, _ = await self._post(
             f"{self.base_url}/responses",
             body,
-            self._bearer_headers,
+            bearer_headers,
         )
         try:
             payload = response.json()
@@ -156,51 +162,19 @@ class HttpLLMAdapter:
     ) -> tuple[httpx.Response, str]:
         if not self.api_keys.available and not url.startswith(("http://127.0.0.1", "http://localhost")):
             raise LLMRequestError("The configured LLM credential is unavailable.", code="provider_authentication_failed")
-        keys = attempt_keys or self.api_keys.attempts()
-        for index, api_key in enumerate(keys):
-            try:
-                response = await self._cancellable_post(url, body, headers(api_key))
-            except httpx.RequestError as exc:
-                if index + 1 < len(keys):
-                    continue
-                raise LLMRequestError("The LLM endpoint could not be reached.", code="provider_connection_failed") from exc
-            if response.status_code in (allow_status or set()) or 200 <= response.status_code < 300:
-                return response, api_key
-            if retryable_key_status(response.status_code) and index + 1 < len(keys):
-                continue
-            raise LLMRequestError(f"The LLM endpoint returned HTTP {response.status_code}.",
-                                  code=self._response_error_code(response))
-        raise LLMRequestError("The LLM endpoint could not be reached.")
-
-    async def _cancellable_post(
-        self,
-        url: str,
-        body: dict,
-        headers: dict[str, str],
-    ) -> httpx.Response:
-        self.cancellation.raise_if_cancelled()
-        request = asyncio.create_task(self.client.post(url, json=body, headers=headers))
-        cancelled = asyncio.create_task(self.cancellation.wait())
         try:
-            done, _ = await asyncio.wait({request, cancelled}, return_when=asyncio.FIRST_COMPLETED)
-            if cancelled in done:
-                request.cancel()
-                await asyncio.gather(request, return_exceptions=True)
-                self.cancellation.raise_if_cancelled()
-                raise asyncio.CancelledError
-            return await request
-        finally:
-            for task in (request, cancelled):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(request, cancelled, return_exceptions=True)
-
-    @staticmethod
-    def _bearer_headers(api_key: str) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        return headers
+            response, used_key = await post_model_json(
+                self.client, self.cancellation, url, body,
+                attempt_keys or self.api_keys.attempts(MODEL_ATTEMPTS), headers,
+            )
+        except httpx.RequestError as exc:
+            raise LLMRequestError("The LLM endpoint could not be reached.", code="provider_connection_failed") from exc
+        if response.status_code in (allow_status or set()) or 200 <= response.status_code < 300:
+            return response, used_key
+        error = LLMRequestError(f"The LLM endpoint returned HTTP {response.status_code}.",
+                                code=self._response_error_code(response))
+        error.retry_details = response.extensions["paperseek_retry"]
+        raise error
 
     @staticmethod
     def _anthropic_headers(api_key: str) -> dict[str, str]:
@@ -240,13 +214,17 @@ class HttpLLMAdapter:
         that reject the parameter fall through the 400/422 retry, which drops
         these fields together with response_format.
         """
-        model = self.model.lower()
+        model = self.model.rsplit("/", 1)[-1].lower()
         if self.api_type != "openai_chat":
             return {}
+        if model == "nemotron-3-super-120b-a12b":
+            return {"chat_template_kwargs": {"enable_thinking": False}}
         if "api.deepseek.com" in self.base_url and model.startswith("deepseek-"):
             return {"thinking": {"type": "disabled"}}
         if "dashscope" in self.base_url or model.startswith("qwen"):
             return {"enable_thinking": False}
+        if model.startswith("gpt-5.6"):
+            return {"reasoning_effort": "low"}
         if model.startswith(("o1", "o3", "o4", "gpt-5")):
             return {"reasoning_effort": "minimal"}
         if "generativelanguage.googleapis.com" in self.base_url and model.startswith("gemini-"):

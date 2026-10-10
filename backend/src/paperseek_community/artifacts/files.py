@@ -21,6 +21,14 @@ _SAFE_COMPONENT = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 class FileArtifactStore:
     def __init__(self, data_dir: Path | str) -> None:
         self.data_dir = Path(data_dir).expanduser().resolve()
+        # Checkpoint names can exceed MAX_PATH below a valid Windows data folder.
+        # Keep the extended prefix internal; stored keys remain portable and relative.
+        if os.name == "nt":
+            native_path = str(self.data_dir)
+            if not native_path.startswith("\\\\?\\"):
+                native_path = ("\\\\?\\UNC\\" + native_path[2:] if native_path.startswith("\\\\")
+                               else "\\\\?\\" + native_path)
+                self.data_dir = Path(native_path)
         self.artifact_root = self.data_dir / "artifacts"
         self.temp_root = self.artifact_root / ".tmp"
 

@@ -15,6 +15,7 @@ from paperseek_community.api_routes.run_lifecycle import (
 from paperseek_community.api_routes.run_results import register_run_result_routes
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_community.workspace_settings import WorkspaceSettingsStore
 from paperseek_core.ports import CancellationToken
 
 
@@ -24,6 +25,7 @@ def register_run_routes(
     database: Path,
     settings: CommunityDeploymentSettings,
     credentials: EncryptedRunCredentialStore,
+    workspace: WorkspaceSettingsStore,
     execution_resolver: Callable[[object, CancellationToken], WorkflowExecution] | None,
     accept_submissions_without_worker: bool,
 ) -> None:
@@ -32,6 +34,7 @@ def register_run_routes(
         database=database,
         settings=settings,
         credentials=credentials,
+        workspace=workspace,
         execution_resolver=execution_resolver,
         accept_submissions_without_worker=accept_submissions_without_worker,
     )

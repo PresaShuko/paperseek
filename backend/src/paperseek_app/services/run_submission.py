@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from paperseek_app.errors import RunNotFound
 from paperseek_app.models import RunDetail, RunVersions
 from paperseek_app.ports import RunUnitOfWork
 
@@ -53,4 +54,6 @@ class RunSubmissionService:
         )
 
     def request_cancel(self, run_id: str) -> RunDetail:
+        if self.uow.get_run(run_id).kind != "research":
+            raise RunNotFound(f"Run {run_id} was not found.")
         return self.uow.request_cancel(run_id)

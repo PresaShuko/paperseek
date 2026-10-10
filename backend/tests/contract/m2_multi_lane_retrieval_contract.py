@@ -5,17 +5,22 @@ import json
 from pathlib import Path
 import unittest
 
+import httpx
+
 from paperseek_core.errors import RetrievalSourceError
 from paperseek_core.models import (
     PaperIdentifiers,
     PaperRecord,
     RetrievalRequest,
+    RetrievalEmbeddingResult,
     RetrievalRerankItem,
     RetrievalRerankResult,
 )
 from paperseek_core.ports import EmbeddingPort, RerankPort, SourcePort
 from paperseek_core.document_identity import document_key
-from paperseek_core.retrieval import RetrievalLane, RetrievalPipeline
+from paperseek_core.retrieval_fusion import RetrievalLane
+from paperseek_core.retrieval import RetrievalPipeline
+from paperseek_core.candidate_selection import CandidateSelectionPipeline
 from paperseek_core.sources.contracts import (
     SourceCapabilities,
     SourceSearchMetadata,
@@ -105,11 +110,11 @@ class FixtureEmbedding:
         self.scores = scores
         self.calls: list[tuple[str, list[str]]] = []
 
-    async def embedding_scores(self, question: str, documents: list[PaperRecord]) -> list[float]:
+    async def embedding_scores(self, question: str, documents: list[PaperRecord], *, model=None) -> RetrievalEmbeddingResult:
         self.calls.append((question, [document.uid for document in documents]))
         if isinstance(self.scores, Exception):
             raise self.scores
-        return list(self.scores)
+        return RetrievalEmbeddingResult(scores=list(self.scores), model="fixture", provider="fixture")
 
 
 class FixtureReranker:
@@ -142,6 +147,60 @@ def golden_records() -> list[PaperRecord]:
 
 
 class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
+    async def test_bibliometrics_preserves_retrieved_corpus_before_selection_truncation(self):
+        documents = [record(f"candidate-{i}") for i in range(12)]
+        source = FixtureSource({}, capabilities=SourceCapabilities(source="fixture", lanes=("relevance",)))
+        observer = RecordingObserver()
+        result = await RetrievalPipeline(source, observer).run(RetrievalRequest(
+            question=QUESTION, query="query", primary_hits=documents + documents[:2],
+            lane_limit=12, pool_max=5, ranking_candidate_limit=3,
+        ))
+        self.assertEqual(len(result.documents), 5)
+        self.assertEqual(len(result.bibliometric_corpus.papers), 12)
+        self.assertEqual({paper.id for paper in result.bibliometric_corpus.papers}, {document_key(paper) for paper in documents})
+        self.assertEqual(len(observer.checkpoints[-1].state['bibliometric_corpus']['papers']), 12)
+        lane_state = next(item.state for item in observer.checkpoints if item.step_key == 'retrieve.lane')
+        resumed = await RetrievalPipeline(source, RecordingObserver()).run(RetrievalRequest(
+            question=QUESTION, query="query", lane_limit=12, pool_max=5, ranking_candidate_limit=3,
+            resume_lane_results=lane_state['lane_results'], completed_lanes=lane_state['completed_lanes'],
+        ))
+        self.assertEqual(len(resumed.documents), 5)
+        self.assertEqual(len(resumed.bibliometric_corpus.papers), 12)
+
+    async def test_openalex_semantic_reads_one_page_and_keeps_hard_field_restriction(self) -> None:
+        for matching_count in (0, 2, 50):
+            with self.subTest(matching_count=matching_count):
+                calls = []
+
+                def respond(request: httpx.Request) -> httpx.Response:
+                    if "search.semantic" not in request.url.params:
+                        return httpx.Response(200, json={"meta": {"count": 0}, "results": []})
+                    calls.append(request)
+                    self.assertNotIn("filter", request.url.params)
+                    self.assertEqual(request.url.params["page"], "1")
+                    self.assertEqual(request.url.params["per-page"], "50")
+                    works = [
+                        {"id": f"https://openalex.org/W{index}", "title": f"Paper {index}",
+                         "primary_topic": {"field": {"id": f"https://openalex.org/fields/{14 if index < matching_count else 17}"}}}
+                        for index in range(50)
+                    ]
+                    return httpx.Response(200, json={"meta": {"count": 50}, "results": works})
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                    source = OpenAlexSource(transport=AsyncHttpTransport(client=client), api_key="fixture")
+                    observer = RecordingObserver()
+                    result = await RetrievalPipeline(source, observer).run(RetrievalRequest(
+                        question=QUESTION, query="AI governance", field_ids=["14"], lane_limit=200,
+                    ))
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(result.warnings, [])
+                self.assertEqual(len(result.documents), matching_count)
+                self.assertIn("semantic", result.completed_lanes)
+                completed = next(event for event in observer.events
+                                 if event.event_type == "retrieval.lane_completed" and event.payload["lane"] == "semantic")
+                self.assertEqual(completed.payload["raw_count"], 50)
+                self.assertEqual(completed.payload["pages_read"], 1)
+
     async def test_provider_lane_depth_page_and_concurrency_capabilities_match_characterization(self) -> None:
         transport = AsyncHttpTransport()
         sources = [
@@ -249,6 +308,7 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
             },
         }
         for metadata in expected.values():
+            metadata["retrieval_similarity_method"] = "local_hash"
             metadata["origins"] = ["retrieval"]
             metadata["sources"] = ["openalex"]
         self.assertEqual(result.provenance_by_identity, expected)
@@ -257,7 +317,7 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.lane for call in source.calls], [RetrievalLane.IMPACT, RetrievalLane.RECENT])
         self.assertEqual(result.warnings, [])
         self.assertEqual(observer.checkpoints[-1].step_key, "retrieve.fuse")
-        self.assertEqual(observer.checkpoints[-1].workflow_version, "m2.retrieval.v1")
+        self.assertEqual(observer.checkpoints[-1].workflow_version, "m2.retrieval.v2")
         self.assertEqual(observer.checkpoints[-1].state["candidate_pool"], [document.model_dump(mode="json") for document in result.documents])
 
     async def test_capability_limits_queries_paging_concurrency_and_completion_order_are_preserved(self) -> None:
@@ -275,7 +335,7 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
         )
         source = FixtureSource(
             {
-                (RetrievalLane.RELEVANCE, 2): source_result(page_two, page=2, limit=50, total=150),
+                (RetrievalLane.RELEVANCE, 2): source_result(page_two, page=2, limit=100, total=150),
                 (RetrievalLane.SEMANTIC, 1): source_result(semantic, limit=100),
                 (RetrievalLane.IMPACT, 1): source_result(impact, limit=100),
                 (RetrievalLane.RECENT, 1): source_result(recent, limit=100),
@@ -298,7 +358,7 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(source.max_active, 2)
         self.assertEqual(source.max_active, 2)
         calls = {(call.lane, call.page): call for call in source.calls}
-        self.assertEqual((calls[(RetrievalLane.RELEVANCE, 2)].query, calls[(RetrievalLane.RELEVANCE, 2)].limit), ("compiled boolean query", 50))
+        self.assertEqual((calls[(RetrievalLane.RELEVANCE, 2)].query, calls[(RetrievalLane.RELEVANCE, 2)].limit), ("compiled boolean query", 100))
         self.assertEqual((calls[(RetrievalLane.SEMANTIC, 1)].query, calls[(RetrievalLane.SEMANTIC, 1)].limit), ("natural language research question", 100))
         self.assertEqual(calls[(RetrievalLane.IMPACT, 1)].limit, 100)
         self.assertEqual(calls[(RetrievalLane.RECENT, 1)].limit, 100)
@@ -313,7 +373,34 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(progress[-1]["lane_concurrency"], 2)
         completed = next(event for event in observer.events if event.event_type == "retrieval.completed")
         self.assertEqual(completed.payload["fusion"], "rrf")
-        self.assertEqual(completed.payload["llm_gate_candidate_count"], 153)
+        self.assertNotIn("llm_gate_candidate_count", completed.payload)
+
+    async def test_partial_last_page_keeps_offset_and_all_unique_candidates(self) -> None:
+        documents = [record(f"paper-{index}") for index in range(350)]
+
+        class OffsetSource:
+            name = "fixture"
+            capabilities = SourceCapabilities(
+                source=name, lanes=(RetrievalLane.RELEVANCE,), max_page_size=100,
+                max_lane_limit=350,
+            )
+            calls = []
+
+            async def search(self, request):
+                self.calls.append((request.page, request.limit))
+                start = (request.page - 1) * request.limit
+                return source_result(
+                    documents[start:start + request.limit], page=request.page,
+                    limit=request.limit, total=len(documents),
+                )
+
+        source = OffsetSource()
+        result = await RetrievalPipeline(source, RecordingObserver()).run(RetrievalRequest(
+            question="paper", query="paper", primary_hits=documents[:100],
+            lane_limit=350, pool_max=350, ranking_candidate_limit=350,
+        ))
+        self.assertEqual(source.calls, [(2, 100), (3, 100), (4, 100)])
+        self.assertEqual({item.uid for item in result.documents}, {item.uid for item in documents})
 
     async def test_later_page_failure_retains_primary_page_and_is_checkpointed_visibly(self) -> None:
         primary = [record(f"primary-{index}") for index in range(100)]
@@ -436,16 +523,20 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         observer = RecordingObserver()
-        result = await RetrievalPipeline(source, observer, embedding=embedding, reranker=reranker).run(
+        result = await RetrievalPipeline(source, observer, embedding=embedding).run(
             RetrievalRequest(question="Third", query="query", pool_max=2)
         )
 
+        selection = await CandidateSelectionPipeline(observer, embedding=embedding, reranker=reranker).run(
+            question="Third", candidates=result.documents, provenance=result.provenance_by_identity,
+            embedding_state=result.embedding_state, pool_max=2, ranking_limit=256,
+        )
         self.assertIsInstance(embedding, EmbeddingPort)
         self.assertIsInstance(reranker, RerankPort)
         self.assertEqual(result.total_candidates, 3)
-        self.assertEqual([document.uid for document in result.documents], ["third", "first"])
-        self.assertEqual(result.provenance_by_identity[document_key(third)]["rerank_score"], 0.95)
-        self.assertEqual(result.provenance_by_identity[document_key(first)]["rerank_score"], 0.2)
+        self.assertEqual([document.uid for document in selection.documents], ["third", "first"])
+        self.assertEqual(selection.provenance_by_identity[document_key(third)]["rerank_score"], 0.95)
+        self.assertEqual(selection.provenance_by_identity[document_key(first)]["rerank_score"], 0.2)
         self.assertEqual(result.provenance_by_identity[document_key(first)]["origins"], ["retrieval"])
         self.assertEqual(result.provenance_by_identity[document_key(first)]["sources"], ["fixture"])
         self.assertEqual(result.warnings, [])
@@ -455,10 +546,13 @@ class M2MultiLaneRetrievalContractTest(unittest.IsolatedAsyncioTestCase):
             source,
             fallback_observer,
             embedding=FixtureEmbedding(RuntimeError("embedding secret")),
-            reranker=FixtureReranker(RuntimeError("rerank secret")),
         ).run(RetrievalRequest(question="Third", query="query", pool_max=2))
+        selection = await CandidateSelectionPipeline(
+            fallback_observer, reranker=FixtureReranker(RuntimeError("rerank secret")),
+        ).run(question="Third", candidates=fallback.documents, provenance=fallback.provenance_by_identity,
+              embedding_state=None, pool_max=2, ranking_limit=256)
         self.assertEqual(
-            fallback.warnings,
+            [*fallback.warnings, *selection.warnings],
             [
                 "retrieval_embedding_failed_local_similarity_retained",
                 "retrieval_rerank_failed_rrf_order_retained",

@@ -76,7 +76,7 @@ def _bundle_web_sources(target: Path) -> None:
         return
     paths = [web / "package.json", web / "package-lock.json"]
     paths.extend(path for path in (web / "src").rglob("*") if path.suffix in {".vue", ".ts", ".css"})
-    paths.extend((web / "public").glob("*.png"))
+    paths.extend(path for path in (web / "public").rglob("*") if path.is_file())
     target.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(target, "w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(paths):

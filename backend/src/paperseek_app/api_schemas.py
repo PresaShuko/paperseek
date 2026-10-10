@@ -5,6 +5,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from paperseek_core.models import FinalPaperResult
 
 
+class ErrorDetails(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    run_id: str | None = None
+
+
+class ErrorOutput(BaseModel):
+    code: str
+    message: str
+    request_id: str
+    details: ErrorDetails = Field(default_factory=ErrorDetails)
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorOutput
+
+
 class DiagnosticCheckOutput(BaseModel):
     id: str
     status: str
@@ -66,7 +82,7 @@ class SourceListOutput(BaseModel):
 
 
 class ResultOutput(FinalPaperResult):
-    metadata_status: str = "not_requested"
+    pass
 
 
 class ResultPageOutput(BaseModel):

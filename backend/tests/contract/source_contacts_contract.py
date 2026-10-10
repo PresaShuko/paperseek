@@ -1,6 +1,7 @@
 """User-selected source contact metadata reaches the actual source adapters."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import os
 from types import SimpleNamespace
 import unittest
@@ -53,14 +54,12 @@ class SourceContactsContract(unittest.TestCase):
                 prepared = prepare_run_submission(RunSubmission(question="source metadata", source=source,
                     source_contacts=CONTACTS), self.settings)
                 run = SimpleNamespace(id=source, source=source, question=prepared.question,
-                                      config_snapshot=prepared.config_snapshot)
-                with patch("paperseek_community.composition.httpx.AsyncClient", client):
+                                      config_snapshot=prepared.config_snapshot,
+                                      deadline_at=datetime.now(timezone.utc) + timedelta(minutes=10))
+                with patch("paperseek_community.model_transport.httpx.AsyncClient", client):
                     execution = CommunityExecutionResolver(self.settings, Mock(resolve=Mock(return_value={})))(run, NEVER_CANCELLED)
                 try:
                     await execution.source.search(SourceSearchRequest(query="governance", limit=1, lane="relevance"))
-                    self.assertEqual(execution.abstracts.email, CONTACTS["crossref_email"])
-                    if source == "crossref":
-                        self.assertIs(execution.abstracts, execution.source)
                 finally:
                     await execution.close()
 

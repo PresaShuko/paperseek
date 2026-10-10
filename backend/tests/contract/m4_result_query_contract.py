@@ -7,13 +7,16 @@ must cover the full history, not just the loaded first page.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, event
 
 from paperseek_app.errors import InvalidCursor, InvalidResultQuery
 from paperseek_app.models import (
@@ -63,6 +66,62 @@ def _record(rank: int, **overrides) -> FinalPaperResult:
 
 
 class M4ResultQueryContractTest(unittest.TestCase):
+    def test_idle_event_stream_bounds_reads_and_backs_off(self):
+        run = self.submission_service.create_run("Idle event subscriber", "openalex")
+        app = create_app(self.database, accept_submissions_without_worker=True)
+        endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/v1/runs/{run_id}/events")
+        statements, delays = [], []
+
+        def observe(_connection, _cursor, statement, _parameters, _context, _executemany):
+            if statement.lstrip().startswith("SELECT"):
+                statements.append(statement)
+
+        class Request:
+            polls = 0
+            async def is_disconnected(self):
+                self.polls += 1
+                return self.polls >= 20
+
+        async def sleep(delay):
+            delays.append(delay)
+
+        async def consume():
+            response = await endpoint(Request(), run.id, last_event_id=None)
+            statements.clear()
+            with patch("paperseek_community.api_routes.event_stream.asyncio.sleep", sleep):
+                return [frame async for frame in response.body_iterator]
+
+        event.listen(Engine, "before_cursor_execute", observe)
+        try:
+            frames = asyncio.run(consume())
+        finally:
+            event.remove(Engine, "before_cursor_execute", observe)
+        self.assertEqual(len(frames), 1)
+        self.assertLessEqual(len(statements), 40)
+        self.assertGreater(delays[-1], delays[0])
+        self.assertLessEqual(max(delays), 1.0)
+
+    def test_cursor_offsets_reject_non_integer_and_out_of_storage_range(self):
+        run = self._seed_results()
+        with TestClient(create_app(self.database)) as client:
+            for offset in (True, 1.9, "2", float("inf"), float("nan"), 0, -1, 10**100):
+                for scope in ("results", "history-search"):
+                    with self.subTest(offset=offset, scope=scope):
+                        fields = {"run_id": run.id, "filter": self.query_service._result_fingerprint(None, None, None, "rank")} if scope == "results" else {"query": "query"}
+                        token = self.query_service._encode_cursor({"scope": scope, "offset": offset, **fields})
+                        endpoint = f"/api/v1/runs/{run.id}/results" if scope == "results" else "/api/v1/history"
+                        parameters = {"cursor": token} if scope == "results" else {"cursor": token, "query": "query"}
+                        response = client.get(endpoint, params=parameters)
+                        self.assertEqual(response.status_code, 400, response.text)
+                        self.assertEqual(response.json()["error"]["code"], "invalid_cursor")
+
+    def test_selected_export_only_materializes_selected_records(self):
+        run = self._complete([_record(i) for i in range(1, 501)])
+        with patch.object(FinalPaperResult, "model_validate", wraps=FinalPaperResult.model_validate) as materialize:
+            export = self.query_service.get_selected_export(run.id, "json", ["paper-499", "paper-2"])
+        self.assertEqual(materialize.call_count, 2)
+        self.assertEqual([paper["uid"] for paper in json.loads(export.content)["ranked"]], ["paper-2", "paper-499"])
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -88,8 +147,8 @@ class M4ResultQueryContractTest(unittest.TestCase):
             CheckpointDraft(
                 step_key="assemble_final_result",
                 idempotency_key="final-before-complete",
-                state={"final": True, "step_workflow_version": "m2.research-workflow.v1"},
-                workflow_version="m2.research-workflow.v1",
+                state={"final": True, "step_workflow_version": "m2.research-workflow.v2"},
+                workflow_version=run.versions.workflow_version,
                 schema_version=1,
             ),
         )
@@ -262,6 +321,64 @@ class M4ResultQueryContractTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["matched_count"], 1)
         self.assertEqual(payload["items"][0]["question"], "Visible through the API")
+
+    def test_pagination_only_materializes_requested_result_models(self) -> None:
+        run = self._complete([_record(index, score=0 if index % 2 else None) for index in range(1, 257)])
+        with patch.object(FinalPaperResult, "model_validate", wraps=FinalPaperResult.model_validate) as decode:
+            first = self.query_service.get_result_page(run.id, page_size=7, sort="score")
+            second = self.query_service.get_result_page(run.id, cursor=first.next_cursor, page_size=7, sort="score")
+        self.assertEqual(decode.call_count, 14)
+        self.assertEqual(first.total_count, 256)
+        self.assertEqual(first.scored_count, 128)
+        self.assertEqual(first.max_score, 0)
+        self.assertEqual(first.high_score_count, 0)
+        self.assertEqual([item.rank for item in second.results], list(range(15, 29, 2)))
+
+    def test_database_filters_preserve_unicode_and_literal_search(self) -> None:
+        run = self._complete([
+            _record(1, title="Straße 研究 100%_", abstract="\u2003", score=0),
+            _record(2, title="STRASSE", abstract="Evidence", score=None),
+            _record(3, title="Strasse", abstract="Evidence", score=8),
+        ])
+        page = self.query_service.get_result_page(run.id, query=" STRASSE ", page_size=1, sort="score")
+        self.assertEqual(page.matched_count, 3)
+        self.assertEqual([item.rank for item in page.results], [3])
+        literal = self.query_service.get_result_page(run.id, query="100%_")
+        self.assertEqual([item.rank for item in literal.results], [1])
+        filtered = self.query_service.get_result_page(run.id, query="strasse", metadata="abstract", min_score=0)
+        self.assertEqual([item.rank for item in filtered.results], [3])
+        self.assertEqual(filtered.total_count, 3)
+        self.assertEqual(filtered.scored_count, 2)
+
+    def test_history_database_search_is_unicode_literal_and_excludes_deleted(self) -> None:
+        first = self._complete([_record(1)], question="Straße 研究 100%_")
+        self._complete([_record(1)], question="STRASSE research")
+        page = self.query_service.get_history_page(query="strasse", page_size=1)
+        self.assertEqual(page.matched_count, 2)
+        second = self.query_service.get_history_page(query="strasse", page_size=1, cursor=page.next_cursor)
+        self.assertEqual(second.items[0].id, first.id)
+        literal = self.query_service.get_history_page(query="100%_")
+        self.assertEqual(literal.matched_count, 1)
+        self.uow.stage_run_deletion(first.id)
+        self.assertEqual(self.query_service.get_history_page(query="研究").matched_count, 0)
+
+    def test_batched_store_reader_matches_database_queries(self) -> None:
+        from paperseek_app.read_queries import query_results, search_history
+
+        run = self._complete([
+            _record(index, title=f"Straße {index}", score=None if index % 3 else index % 11,
+                    citation_count=index % 7, publish_year=2020 + index % 4)
+            for index in range(1, 257)
+        ], question="Straße 研究")
+        for sort in ("rank", "score", "citations", "year"):
+            options = dict(offset=7, limit=9, query="STRASSE", min_score=0, metadata=None, sort=sort)
+            with self.subTest(sort=sort), patch.object(self.uow, "get_results", wraps=self.uow.get_results) as reads:
+                portable = query_results(self.uow, run.id, **options)
+                native = self.uow.query_results(run.id, **options)
+                self.assertEqual(portable, native)
+                self.assertEqual([call.kwargs["limit"] for call in reads.call_args_list], [200, 200])
+        options = dict(query="strasse", offset=0, limit=1)
+        self.assertEqual(search_history(self.uow, **options), self.uow.search_history(**options))
 
     def test_high_score_count_uses_full_set_threshold(self) -> None:
         run = self._seed_results()

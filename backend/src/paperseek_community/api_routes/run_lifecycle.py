@@ -15,12 +15,12 @@ from paperseek_app.execution import WorkflowExecution
 from paperseek_app.models import RunDetail
 from paperseek_community.api_dependencies import (
     ApiError,
-    TERMINAL_STATUSES,
     open_query_service,
     open_submission_service,
 )
-from paperseek_community.credentials import EncryptedRunCredentialStore
+from paperseek_community.credentials import CredentialPersistenceError, EncryptedRunCredentialStore
 from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_community.workspace_settings import SettingsError, WorkspaceSettingsStore
 from paperseek_app.submission import (
     RunSubmission,
     SubmissionValidationError,
@@ -35,6 +35,7 @@ def register_run_submission_and_status_routes(
     database: Path,
     settings: CommunityDeploymentSettings,
     credentials: EncryptedRunCredentialStore,
+    workspace: WorkspaceSettingsStore,
     execution_resolver: Callable[[object, CancellationToken], WorkflowExecution] | None,
     accept_submissions_without_worker: bool,
 ) -> None:
@@ -48,10 +49,18 @@ def register_run_submission_and_status_routes(
         if execution_resolver is None and not accept_submissions_without_worker:
             raise ApiError(503, "executor_unavailable", "The embedded executor is not configured.")
         try:
+            submission = workspace.apply_to_submission(submission)
+        except SettingsError as exc:
+            raise ApiError(exc.status, exc.code, exc.code) from exc
+        try:
             prepared = prepare_run_submission(submission, settings)
         except SubmissionValidationError as exc:
             raise ApiError(422, exc.code, exc.message) from exc
-        run_service, uow = open_submission_service(database)
+        run_service, uow = open_submission_service(
+            database,
+            credential_store=credentials,
+            submission_credentials=submission.credentials.model_dump(mode="json"),
+        )
         try:
             detail = run_service.submit_run(
                 subject="community",
@@ -61,23 +70,16 @@ def register_run_submission_and_status_routes(
                 source=prepared.source,
                 config_snapshot=prepared.config_snapshot,
             )
-            if detail.status not in TERMINAL_STATUSES:
-                try:
-                    credentials.save(
-                        detail.id,
-                        submission.credentials.model_dump(mode="json"),
-                    )
-                except Exception as exc:
-                    run_service.request_cancel(detail.id)
-                    raise ApiError(
-                        500,
-                        "credential_persistence_failed",
-                        "Temporary credentials could not be stored safely.",
-                    ) from exc
             return detail.model_dump(mode="json")
+        except CredentialPersistenceError as exc:
+            raise ApiError(
+                500, "credential_persistence_failed", "Temporary credentials could not be stored safely.",
+            ) from exc
         except IdempotencyConflict as exc:
             raise ApiError(409, "idempotency_conflict", "The idempotency key belongs to another request.") from exc
         except ActiveRunExists as exc:
+            if uow.get_run(exc.run_id).kind == "review":
+                raise ApiError(409, "community_task_active", "A review task is already active.") from exc
             raise ApiError(
                 409,
                 "active_run_exists",

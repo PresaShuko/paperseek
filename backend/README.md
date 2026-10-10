@@ -1,33 +1,56 @@
-# PaperSeek backend
+# PaperSeek
 
-This directory is the Python 3.12 backend boundary for PaperSeek v0.3.0.
+**Open-source literature search, citation exploration, and abstract-based reviews.**
 
-## Optional abstract enrichment
+PaperSeek turns a research question into a reading list. It plans and refines queries, retrieves papers from your chosen source, expands citations where supported, and ranks relevance. Explore the results in a bilingual Web workspace, save local history, and export a reading list.
 
-Search keeps provider abstracts without making extra Crossref abstract requests by
-default. Use `paperseek search "your question" --fetch-abstracts`, or set
-`fetch_abstracts: true` in a run submission or MCP `start_search`, to fill missing
-abstracts for papers with a DOI. The choice is saved with the run for recovery;
-an unavailable abstract only adds a warning. This is separate from the optional
-Crossref candidate citation-count/year enrichment.
+[Project overview](https://github.com/MingfengHong/paperseek) · [Documentation](https://docs.paperseek.app/) · [中文文档](https://docs.paperseek.app/zh/) · [Try online](https://paperseek.app/)
 
-## Model service failures
+## Install
 
-Failed runs retain a safe `error_code` for rejected credentials, insufficient
-credits, rate limiting, unavailable services, connection failures, rejected
-requests or invalid responses. The Web UI translates these codes; upstream
-response bodies and credentials are not persisted. A 429 is rate limiting unless
-its structured error code/type says `insufficient_quota`; free-text messages are
-never parsed. See the [OpenAI error protocol](https://developers.openai.com/api/docs/guides/error-codes)
-and [OpenRouter response status definitions](https://openrouter.ai/docs/client-sdks/typescript/api-reference/responses).
-Key/model retries, cancellation priority and optional ranking degradation remain
-unchanged. These model-service limits are not PaperSeek's own daily allowance.
+Requires Python 3.12 or newer. The release package includes the Web UI.
 
-## Shared Web source delivery
+```sh
+python -m pip install "paperseek==1.0.0b1"
+paperseek serve
+```
 
-The Community wheel includes `paperseek_community/web_source.zip`, built from
-the same checkout as the backend. It contains the canonical Vue source, public
-assets and npm manifests, not node_modules, test output or environment files.
-Hosted verifies its existing Community wheel lock before extracting these build
-inputs; it does not maintain a second copy of the search/results UI. The installed
-Community server still serves only the prebuilt `static/` assets and needs no Node.
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). Configure a model API and data source in the application.
+
+## Capabilities
+
+- Eight scholarly sources: OpenAlex, arXiv, Crossref, Semantic Scholar, PubMed, Google Scholar via Serper, PaperHub, and Web of Science Starter.
+- Query iteration, bounded candidate retrieval, optional citation expansion, and relevance ranking.
+- OpenAI Responses, OpenAI-compatible Chat Completions, and Anthropic Messages model protocols.
+- Local fusion, Embedding + Rerank, or System One preliminary ranking.
+- Search history, filters, selection, citation maps, and complete CSV/JSON exports.
+- **Experimental** abstract-based reviews with editable outlines, section writing, versions, and Markdown/Word/BibTeX exports.
+
+A run begins with one selected data source. Search is bounded, not guaranteed exhaustive; reviews use available abstracts and metadata rather than automatically read full texts.
+
+## Terminal and integrations
+
+The CLI provides `serve`, `worker`, `search`, `doctor`, `migrate`, and `version`. Configure process environment variables before a terminal search; a nearby `.env` is not loaded automatically.
+
+```sh
+paperseek search "How does open-source funding affect maintenance?" --source openalex --search-budget medium --output json
+```
+
+The local HTTP API is under `/api/v1`, with its schema at `/openapi.json`. MCP is packaged separately:
+
+```sh
+python -m pip install "paperseek-mcp==1.0.0b1"
+paperseek-mcp --transport stdio
+```
+
+## Data and upgrades
+
+Community stores history in `~/.paperseek/paperseek.db` by default, with artifacts and credential-encryption material in its data directory. Back up the complete directory consistently.
+
+For Docker, separate workers, and 0.2 migration, see [self-hosting](https://docs.paperseek.app/self-hosting/) and [upgrading](https://docs.paperseek.app/self-hosting/upgrade).
+
+## Development and license
+
+The source distribution uses `paperseek_core` for research behavior, `paperseek_app` for use cases and ports, and `paperseek_community` for local adapters. Hosted consumes a fixed Community distribution. Common Vue sources are included for Hosted builds; installed Community serves the prebuilt assets.
+
+[Development guide](https://docs.paperseek.app/contributing) · [Report an issue](https://github.com/MingfengHong/paperseek/issues) · [Apache-2.0 license](https://github.com/MingfengHong/paperseek/blob/main/LICENSE)

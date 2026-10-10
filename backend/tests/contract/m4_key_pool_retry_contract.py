@@ -129,6 +129,11 @@ def _record() -> PaperRecord:
 
 
 class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        delay = patch("paperseek_core.http_retry.retry_delay", return_value=0)
+        delay.start()
+        self.addCleanup(delay.stop)
+
     async def test_every_protocol_preserves_the_requested_stage_output_limit(self) -> None:
         for api_type, field in (("openai_chat", "max_tokens"),
                                 ("openai_responses", "max_output_tokens"),
@@ -145,7 +150,7 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
                         await client.aclose()
                 self.assertEqual([request["body"][field] for request in server.requests], list(limits))
 
-    async def test_provider_failures_have_safe_distinct_codes_without_changing_attempts(self) -> None:
+    async def test_provider_failures_have_safe_codes_and_bounded_attempts(self) -> None:
         cases = [
             (401, "provider_authentication_failed"), (403, "provider_authentication_failed"),
             (402, "provider_quota_exhausted"), (429, "provider_rate_limited"),
@@ -159,7 +164,8 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
         ]
         for action, code in cases:
             with self.subTest(action=action):
-                async with ControlledAsyncHttpServer([action]) as server:
+                attempts = 5 if code in {"provider_rate_limited", "provider_unavailable", "provider_connection_failed"} else 1
+                async with ControlledAsyncHttpServer([action] * attempts) as server:
                     adapter, client = await self._llm(server, keys="private-key")
                     try:
                         with self.assertRaises(LLMRequestError) as caught:
@@ -169,7 +175,7 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
                         self.assertNotIn(server.base_url, str(caught.exception))
                     finally:
                         await client.aclose()
-                self.assertEqual(len(server.requests), 1)
+                self.assertEqual(len(server.requests), attempts)
 
     async def _llm(
         self,
@@ -229,7 +235,7 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
                     actual = [_auth(request, header).removeprefix("Bearer ") for request in server.requests]
                     self.assertEqual(actual, expected)
 
-    async def test_llm_400_does_not_switch_key_and_fourth_key_is_never_attempted(self) -> None:
+    async def test_llm_400_does_not_switch_key_and_transient_failure_can_reach_fourth_key(self) -> None:
         async with ControlledAsyncHttpServer([400, 200]) as server:
             adapter, client = await self._llm(server)
             try:
@@ -242,14 +248,12 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
         async with ControlledAsyncHttpServer([500, 500, 429, 200]) as server:
             adapter, client = await self._llm(server)
             try:
-                with self.assertRaises(LLMRequestError) as caught:
-                    await adapter.chat_json([{"role": "user", "content": "Return JSON."}])
-                self.assertEqual(caught.exception.code, "provider_rate_limited")
+                self.assertEqual(await adapter.chat_json([{"role": "user", "content": "Return JSON."}]), "{}")
             finally:
                 await client.aclose()
         self.assertEqual(
             [_auth(request) for request in server.requests],
-            ["Bearer key-a", "Bearer key-b", "Bearer key-c"],
+            ["Bearer key-a", "Bearer key-b", "Bearer key-c", "Bearer key-d"],
         )
 
     async def test_llm_transport_error_switches_key_but_cancellation_never_retries(self) -> None:
@@ -286,7 +290,7 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
             await client.aclose()
         self.assertEqual([_auth(request) for request in server.requests], ["Bearer key-a"])
 
-    async def test_embedding_and_reranker_share_three_attempt_rotation_contract(self) -> None:
+    async def test_embedding_and_reranker_recover_within_shared_attempt_budget(self) -> None:
         for kind in ("embedding", "reranker"):
             with self.subTest(kind=kind):
                 async with ControlledAsyncHttpServer([500, 500, 500, 200]) as server:
@@ -312,13 +316,12 @@ class M4KeyPoolRetryContract(IsolatedAsyncioTestCase):
                         )
                         operation = adapter.rerank("question", [_record()])
                     try:
-                        with self.assertRaises(RuntimeError):
-                            await operation
+                        await operation
                     finally:
                         await client.aclose()
                 self.assertEqual(
                     [_auth(request) for request in server.requests],
-                    ["Bearer key-a", "Bearer key-b", "Bearer key-c"],
+                    ["Bearer key-a", "Bearer key-b", "Bearer key-c", "Bearer key-d"],
                 )
 
     async def test_embedding_and_reranker_do_not_rotate_on_400(self) -> None:

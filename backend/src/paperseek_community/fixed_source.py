@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from paperseek_core.models import AbstractFetchRequest, AbstractFetchResult, PaperRecord
+from paperseek_core.models import PaperRecord
 from paperseek_core.sources.contracts import (
     SourceCapabilities,
     SourceSearchMetadata,
@@ -23,7 +23,6 @@ class FixedSourceFixture(BaseModel):
     question: str
     records: list[PaperRecord]
     llm_responses: list[str] = Field(default_factory=list)
-    abstracts: dict[str, str] = Field(default_factory=dict)
     expected: dict
 
 
@@ -57,15 +56,6 @@ class FixedSourceAdapter:
             ),
             hits=list(self.fixture.records),
         )
-
-    async def fetch_abstract(self, request: AbstractFetchRequest) -> AbstractFetchResult:
-        abstract = self.fixture.abstracts.get(request.doi, "")
-        return AbstractFetchResult(
-            doi=request.doi,
-            abstract=abstract,
-            found=bool(abstract),
-        )
-
 
 class FixedLLMAdapter:
     def __init__(self, responses: list[str]) -> None:

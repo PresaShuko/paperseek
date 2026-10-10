@@ -41,6 +41,9 @@ from paperseek_app.submission import (
     SubmissionValidationError,
     prepare_run_submission,
 )
+from paperseek_app.review.execution import ReviewExecutor
+from paperseek_community.review_composition import CommunityReviewResolver
+from paperseek_community.persistence.sqlite_review_jobs import SQLiteReviewUnitOfWork
 from paperseek_app.worker import RunExecutor
 from paperseek_core.ports import CancellationToken
 
@@ -88,18 +91,9 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument("--field-hint", default="")
     search.add_argument("--wos-db", default=None)
     search.add_argument(
-        "--fetch-abstracts", action="store_true",
-        help="Fill missing abstracts from Crossref DOI records (off by default).",
-    )
-    search.add_argument(
         "--citation-enabled",
         action=argparse.BooleanOptionalAction,
         default=None,
-    )
-    search.add_argument(
-        "--retrieval-crossref-enrichment",
-        action="store_true",
-        help="Fill missing candidate citation counts and years from Crossref DOI metadata.",
     )
     search.add_argument("--llm-provider", default="")
     search.add_argument("--llm-api-type", default="")
@@ -201,6 +195,7 @@ def main(
             resolver,
             once=args.once,
             poll_seconds=args.poll_seconds,
+            settings=settings,
         )
     return _search(database, settings, credentials, resolver, args)
 
@@ -274,9 +269,7 @@ def _search(
         field_hint=args.field_hint,
         wos_db=args.wos_db,
         citation_enabled=args.citation_enabled,
-        fetch_abstracts=args.fetch_abstracts,
         retrieval=RetrievalRouteInput(
-            crossref_metadata_enrichment=args.retrieval_crossref_enrichment,
         ),
         llm=LLMRouteInput(
             provider=args.llm_provider,
@@ -319,7 +312,14 @@ def _search(
         detail = asyncio.run(_execute_until_terminal(executor, query_service, run.id))
         if detail.status in TERMINAL_STATUSES:
             credentials.delete(detail.id)
-        results = query_service.get_result_page(detail.id, page_size=200).results
+        results = []
+        cursor = None
+        while True:
+            page = query_service.get_result_page(detail.id, page_size=200, cursor=cursor)
+            results.extend(page.results)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
         print(json.dumps(_result_payload(detail, results), ensure_ascii=False, sort_keys=True))
         return 0 if detail.status in {RunStatus.COMPLETED, RunStatus.COMPLETED_WITH_WARNINGS} else 1
     finally:
@@ -337,6 +337,9 @@ async def _execute_until_terminal(
             return detail
         executed = await executor.run_once()
         if executed is None:
+            detail = service.get_run(run_id)
+            if detail.status in TERMINAL_STATUSES:
+                return detail
             raise RuntimeError("The submitted CLI run could not be claimed.")
 
 
@@ -347,13 +350,17 @@ def _worker(
     *,
     once: bool,
     poll_seconds: float,
+    settings: CommunityDeploymentSettings | None = None,
 ) -> int:
-    uow = SQLiteRunUnitOfWork(database)
+    uow = SQLiteReviewUnitOfWork(database, claim_kind=None)
     try:
+        service = RunExecutionService(uow, FileArtifactStore(database.parent))
         executor = RunExecutor(
-            RunExecutionService(uow, FileArtifactStore(database.parent)),
+            service,
             resolver,
             owner_id=f"community-worker-{uuid4()}",
+            review_executor=ReviewExecutor(uow, service, CommunityReviewResolver(
+                settings or CommunityDeploymentSettings.from_environment(), credentials)),
         )
 
         async def work() -> RunDetail | None:
@@ -361,9 +368,10 @@ def _worker(
                 detail = await executor.run_once()
                 if detail is not None and detail.status in TERMINAL_STATUSES:
                     credentials.delete(detail.id)
-                if detail is not None or once:
+                if once:
                     return detail
-                await asyncio.sleep(poll_seconds)
+                if detail is None:
+                    await asyncio.sleep(poll_seconds)
 
         try:
             detail = asyncio.run(work())
@@ -392,7 +400,6 @@ def _result_payload(detail: RunDetail, results) -> dict[str, object]:
         "results": [
             {
                 **item.record.model_dump(mode="json"),
-                "metadata_status": item.metadata_status,
             }
             for item in results
         ],

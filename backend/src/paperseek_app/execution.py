@@ -5,8 +5,19 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from paperseek_core.models import ResearchWorkflowRequest
-from paperseek_core.ports import AbstractPort, CandidateMetadataPort, CancellationToken, EmbeddingPort, LLMPort, RerankPort, SourcePort, WorkflowObserver
+from paperseek_core.ports import CancellationToken, DecisionPort, EmbeddingPort, LLMPort, RerankPort, SourcePort, WorkflowObserver
 from paperseek_core.workflow import ResearchWorkflow
+
+
+async def run_blocking[T](function: Callable[..., T], *args, **kwargs) -> T:
+    """Keep synchronous storage off the event loop and drain writes before shutdown."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Threads cannot be cancelled. Wait before their store/client can be closed.
+        await task
+        raise
 
 
 class CancellationScope:
@@ -33,18 +44,19 @@ class WorkflowExecution:
     llm: LLMPort
     source: SourcePort
     request: ResearchWorkflowRequest
-    abstracts: AbstractPort | None = None
-    candidate_metadata: CandidateMetadataPort | None = None
     embedding: EmbeddingPort | None = None
     reranker: RerankPort | None = None
+    decision: DecisionPort | None = None
     close: Callable[[], Awaitable[None]] | None = None
+    deadline_at: float | None = None
 
     async def run(self, observer: WorkflowObserver, cancellation: CancellationToken):
-        return await ResearchWorkflow(
-            llm=self.llm, source=self.source, observer=observer, abstracts=self.abstracts,
-            candidate_metadata=self.candidate_metadata, embedding=self.embedding,
-            reranker=self.reranker, cancellation=cancellation,
-        ).run(self.request)
+        async with asyncio.timeout_at(self.deadline_at):
+            return await ResearchWorkflow(
+                llm=self.llm, source=self.source, observer=observer,
+                embedding=self.embedding,
+                reranker=self.reranker, decision=self.decision, cancellation=cancellation,
+            ).run(self.request)
 
 
 assert isinstance(CancellationScope(), CancellationToken)

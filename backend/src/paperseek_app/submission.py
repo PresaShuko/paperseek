@@ -6,15 +6,19 @@ import json
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from paperseek_app.configuration import (
     LLM_PROVIDERS,
     SubmissionDefaults,
+    RunConfigurationSnapshot,
     resolve_llm_route,
     normalize_wos_db,
 )
 from paperseek_app.source_catalog import SOURCE_BY_ID
+from paperseek_app.pre_ranking import (
+    RetrievalRouteInput, resolve_retrieval_route,
+)
 
 
 class LLMRouteInput(BaseModel):
@@ -39,30 +43,8 @@ class RunCredentialsInput(BaseModel):
     source: CredentialInput = Field(default_factory=CredentialInput)
     embedding: CredentialInput = Field(default_factory=CredentialInput)
     reranker: CredentialInput = Field(default_factory=CredentialInput)
+    decision: CredentialInput = Field(default_factory=CredentialInput)
 
-
-class EmbeddingRouteInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    provider: str = "local"
-    model: str = ""
-    base_url: str = ""
-
-
-class RerankerRouteInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    provider: str = ""
-    model: str = ""
-    base_url: str = ""
-
-
-class RetrievalRouteInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    embedding: EmbeddingRouteInput = Field(default_factory=EmbeddingRouteInput)
-    reranker: RerankerRouteInput = Field(default_factory=RerankerRouteInput)
-    crossref_metadata_enrichment: bool = False
 
 
 class ServiceSelectionInput(BaseModel):
@@ -91,6 +73,17 @@ class SourceContactsInput(BaseModel):
     pubmed_tool: str = Field(default="paperseek", max_length=128)
 
 
+class ConnectionSelectionInput(BaseModel):
+    """Saved-connection ids; a deployment resolves routes and keys server-side."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    llm: str = Field(default="", max_length=64)
+    embedding: str = Field(default="", max_length=64)
+    reranker: str = Field(default="", max_length=64)
+    decision: str = Field(default="", max_length=64)
+
+
 class RunConfigurationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -99,13 +92,13 @@ class RunConfigurationInput(BaseModel):
     field_ids: list[str] = Field(default_factory=list, max_length=100)
     field_hint: str = Field(default="", max_length=500)
     citation_enabled: bool | None = None
-    fetch_abstracts: bool = False
     wos_db: str | None = Field(default=None, max_length=64)
     source_contacts: SourceContactsInput = Field(default_factory=SourceContactsInput)
     llm: LLMRouteInput = Field(default_factory=LLMRouteInput)
     retrieval: RetrievalRouteInput = Field(default_factory=RetrievalRouteInput)
     credentials: RunCredentialsInput = Field(default_factory=RunCredentialsInput)
     service: ServiceSelectionInput | None = None
+    connections: ConnectionSelectionInput | None = None
 
 
 class RunSubmission(RunConfigurationInput):
@@ -127,7 +120,7 @@ class SubmissionValidationError(ValueError):
 class PreparedRunSubmission:
     question: str
     source: str
-    config_snapshot: dict[str, object]
+    config_snapshot: RunConfigurationSnapshot
     request_digest: str
 
 
@@ -146,6 +139,8 @@ def prepare_run_submission(
     submission: RunSubmission,
     settings: SubmissionDefaults,
 ) -> PreparedRunSubmission:
+    if submission.connections is not None:
+        _invalid("unsupported_connections", "Saved connections must be resolved before submission.")
     question = submission.question.strip()
     if not question:
         _invalid("invalid_question", "The research question is required.")
@@ -159,37 +154,10 @@ def prepare_run_submission(
             "unsupported_search_budget",
             "The selected search budget is not supported.",
         )
-    embedding_provider = submission.retrieval.embedding.provider.strip().lower() or "local"
-    reranker_provider = submission.retrieval.reranker.provider.strip().lower()
-    if embedding_provider not in {
-        "local",
-        "cstcloud",
-        "openai",
-        "dashscope",
-        "siliconflow",
-        "openrouter",
-        "nvidia",
-        "zhipu",
-        "volcengine",
-        "modelscope",
-        "custom",
-    }:
-        _invalid(
-            "unsupported_retrieval_provider",
-            "The embedding provider is not supported.",
-        )
-    if reranker_provider not in {
-        "",
-        "cstcloud",
-        "openrouter",
-        "nvidia",
-        "siliconflow",
-        "custom",
-    }:
-        _invalid(
-            "unsupported_retrieval_provider",
-            "The reranker provider is not supported.",
-        )
+    try:
+        retrieval = resolve_retrieval_route(submission.retrieval.model_dump())
+    except ValueError as exc:
+        _invalid("unsupported_retrieval_provider", str(exc))
 
     source_capabilities = source_definition.descriptor()["capabilities"]
     source_filter = source_capabilities["filter"]
@@ -235,23 +203,10 @@ def prepare_run_submission(
         "field_ids": field_ids,
         "field_hint": field_hint,
         "citation_enabled": citation_enabled,
-        "fetch_abstracts": submission.fetch_abstracts,
         "wos_db": normalize_wos_db(submission.wos_db, settings.wos_db),
         "source_contacts": contacts,
         "llm": resolve_llm_route(settings, submission.llm.model_dump()),
-        "retrieval": {
-            "crossref_metadata_enrichment": submission.retrieval.crossref_metadata_enrichment,
-            "embedding": {
-                "provider": embedding_provider,
-                "model": submission.retrieval.embedding.model.strip(),
-                "base_url": submission.retrieval.embedding.base_url.strip().rstrip("/"),
-            },
-            "reranker": {
-                "provider": reranker_provider,
-                "model": submission.retrieval.reranker.model.strip(),
-                "base_url": submission.retrieval.reranker.base_url.strip().rstrip("/"),
-            },
-        },
+        "retrieval": retrieval,
     }
     if snapshot["llm"]["provider"] not in LLM_PROVIDERS:
         _invalid(
@@ -274,12 +229,13 @@ def prepare_run_submission(
     return PreparedRunSubmission(
         question=question,
         source=source,
-        config_snapshot=snapshot,
+        config_snapshot=TypeAdapter(RunConfigurationSnapshot).validate_python(snapshot),
         request_digest=run_config_digest(snapshot),
     )
 
 
 __all__ = [
+    "ConnectionSelectionInput",
     "DiagnosticSubmission",
     "PreparedRunSubmission",
     "RunConfigurationInput",

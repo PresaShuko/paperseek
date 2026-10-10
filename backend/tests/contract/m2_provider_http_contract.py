@@ -119,7 +119,7 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(captured(client.calls[0]), self.contracts["openalex"])
-        self.assertEqual(result.metadata.model_dump(), {"total": 1, "page": 3, "limit": 25})
+        self.assertEqual(result.metadata.model_dump(exclude_none=True), {"total": 1, "page": 3, "limit": 25})
         record = result.hits[0]
         self.assertIsInstance(record, PaperRecord)
         self.assertEqual(record.uid, "https://openalex.org/W123")
@@ -129,6 +129,38 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.source.source_title, "Journal of AI Governance")
         self.assertEqual(record.abstract, "Governance evidence")
         self.assertEqual(record.citations[0].count, 12)
+
+    async def test_openalex_semantic_filters_fields_locally_without_unsupported_parameter(self) -> None:
+        works = [
+            {"id": f"https://openalex.org/W{index}", "title": f"Paper {index}",
+             "primary_topic": {"field": {"id": field}} if field else None}
+            for index, field in enumerate([
+                "https://openalex.org/fields/14", "https://openalex.org/fields/17",
+                "https://openalex.org/fields/22", None,
+            ])
+        ]
+
+        def semantic_response(call):
+            if "filter" in call["params"]:
+                return 400, b'{"error":"field filter not supported with semantic search"}', "application/json"
+            return 200, json.dumps({"meta": {"count": 4}, "results": works}).encode(), "application/json"
+
+        transport, client = self.transport({OpenAlexSource.BASE_URL: semantic_response})
+        source = OpenAlexSource(transport=transport, api_key="fixture-openalex-key")
+        result = await source.search(SourceSearchRequest(
+            query="AI governance", lane="semantic", limit=100,
+            field_ids=("https://openalex.org/fields/14", "17"),
+        ))
+
+        self.assertEqual([record.uid for record in result.hits], [work["id"] for work in works[:2]])
+        self.assertEqual(result.metadata.raw_count, 4)
+        self.assertEqual(client.calls[0]["params"]["per-page"], 50)
+        self.assertEqual(client.calls[0]["params"]["search.semantic"], "AI governance")
+        self.assertNotIn("sort", client.calls[0]["params"])
+        self.assertNotIn("filter", client.calls[0]["params"])
+
+        unrestricted = await source.search(SourceSearchRequest(query="AI governance", lane="semantic"))
+        self.assertEqual([record.uid for record in unrestricted.hits], [work["id"] for work in works])
 
     async def test_crossref_exact_request_and_mapping(self) -> None:
         transport, client = self.transport({CrossrefSource.BASE_URL: json_route("crossref.json")})
@@ -308,7 +340,7 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
 
         expected = [{"method": "GET", **item} for item in self.contracts["paperhub"]["requests"]]
         self.assertEqual([captured(call) for call in client.calls], expected)
-        self.assertEqual(result.metadata.model_dump(), {"total": 2, "page": 2, "limit": 1})
+        self.assertEqual(result.metadata.model_dump(exclude_none=True), {"total": 2, "page": 2, "limit": 1})
         record = result.hits[0]
         self.assertEqual(record.uid, "paperhub-old")
         self.assertEqual(record.source.source_title, "ICLR")
@@ -408,6 +440,18 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(source.capabilities.lanes)
                 self.assertTrue(source.capabilities.backoff_policy)
 
+    async def test_retry_after_does_not_retry_before_the_source_allows_it(self) -> None:
+        delays = []
+        statuses = iter((429, 200))
+        def handle(request):
+            return httpx.Response(next(statuses), headers={"Retry-After": "32"}, json={"meta": {"count": 0}, "results": []})
+        async def wait(seconds):
+            delays.append(seconds)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            source = OpenAlexSource(transport=AsyncHttpTransport(client=client, sleep=wait))
+            await source.search(SourceSearchRequest(query="governance"))
+        self.assertEqual(delays, [32.0])
+
     async def test_status_transport_invalid_payload_and_empty_result_semantics(self) -> None:
         for status in (401, 403, 429, 503):
             with self.subTest(status=status):
@@ -493,7 +537,7 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(raised.exception.source, name)
                     self.assertEqual(raised.exception.status, status)
                     self.assertEqual(raised.exception.query, self.request_for(name).query)
-                    expected = 2 if name == "wos" and status == 429 else 3 if name == "googlescholar" or status in (429, 503) and name != "wos" else 1
+                    expected = 3 if status in (429, 503) else 1
                     if name == "semanticscholar" and status == 503:
                         expected = 6
                     self.assertEqual(len(client.calls), expected)
@@ -508,7 +552,7 @@ class M2ProviderHttpContractTest(unittest.IsolatedAsyncioTestCase):
                     await source.search(self.request_for(name))
                 self.assertEqual(raised.exception.source, name)
                 self.assertIsNone(raised.exception.status)
-                expected = 3 if name != "wos" else 1
+                expected = 3
                 self.assertEqual(len(client.calls), expected)
 
     async def test_invalid_payload_classification_for_all_eight_sources(self) -> None:

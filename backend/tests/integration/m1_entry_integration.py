@@ -42,7 +42,6 @@ def _fixed_resolver(run, _cancellation) -> WorkflowExecution:
     return WorkflowExecution(
         llm=FixedLLMAdapter(source.fixture.llm_responses),
         source=source,
-        abstracts=source,
         request=ResearchWorkflowRequest(
             question=run.question,
             query_budget=QueryLoopBudget(
@@ -75,8 +74,8 @@ class M1EntryIntegrationTest(unittest.TestCase):
                 ).fetchone()
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(outputs, [{"schema_version": 7, "status": "migrated"}] * 2)
-        self.assertEqual(version, 7)
+        self.assertEqual(outputs, [{"schema_version": 11, "status": "migrated"}] * 2)
+        self.assertEqual(version, 11)
         self.assertEqual(artifact_table, ("run_artifacts",))
         self.assertEqual(cleanup_table, ("run_cleanup_jobs",))
 
@@ -143,7 +142,7 @@ class M1EntryIntegrationTest(unittest.TestCase):
         ).encode("utf-8")
 
         self.assertEqual(build_info.DISTRIBUTION, "paperseek")
-        self.assertEqual(build_info.VERSION, "0.3.0")
+        self.assertEqual(build_info.VERSION, "1.0.0b1")
         self.assertEqual(build_info.COMMUNITY_COMMIT, "source-tree")
         self.assertTrue(build_info.SOURCE_TREE_DIRTY)
         self.assertEqual(

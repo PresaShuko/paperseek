@@ -1,18 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
+from paperseek_community.persistence.sqlite_base import SQLiteRepositoryBase
+
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
-from paperseek_app.errors import RunError, RunPersistenceError, RunStateError
-from paperseek_app.models import (
-    LeaseToken,
-    PendingEvent,
-    PersistedCheckpoint,
-    PersistedEvent,
-    RunStatus,
-    StoredArtifact,
-)
+from paperseek_app.errors import RunPersistenceError, RunStateError
+from paperseek_app.models import LeaseToken, PendingEvent, PersistedCheckpoint, PersistedEvent, StoredArtifact
 from paperseek_community.persistence.sqlite_support import (
     json_dump as _json_dump,
     json_load as _json_load,
@@ -22,7 +18,7 @@ from paperseek_community.persistence.sqlite_support import (
 from paperseek_core.models import CheckpointDraft
 
 
-class SQLiteEventCheckpointRepository:
+class SQLiteEventCheckpointRepository(SQLiteRepositoryBase):
     def append_events_and_checkpoint(
         self,
         lease: LeaseToken,
@@ -40,6 +36,9 @@ class SQLiteEventCheckpointRepository:
             end_sequence = self._reserve_sequences(connection, lease, len(events), now)
             start_sequence = end_sequence - len(events) + 1
             self._insert_events(connection, lease.run_id, start_sequence, events, now)
+            if checkpoint is None and events:
+                connection.execute(text("UPDATE runs SET current_step=:step WHERE id=:run_id"),
+                                   {"step": events[-1].stage, "run_id": lease.run_id})
             if checkpoint is not None:
                 run = connection.execute(
                     text(
@@ -191,70 +190,5 @@ class SQLiteEventCheckpointRepository:
             raise RunPersistenceError("Run checkpoints could not be read.") from exc
         return [self._checkpoint(row) for row in rows]
 
-    def _reserve_sequences(
-        self,
-        connection: Connection,
-        lease: LeaseToken,
-        count: int,
-        now: str,
-    ) -> int:
-        row = connection.execute(
-            text(
-                """
-                UPDATE runs
-                SET last_event_sequence = last_event_sequence + :count,
-                    updated_at = :now
-                WHERE id = :run_id
-                  AND status = :running
-                  AND lease_owner = :owner_id
-                  AND lease_generation = :lease_generation
-                  AND lease_expires_at > :now
-                RETURNING last_event_sequence
-                """
-            ),
-            {
-                "count": count,
-                "now": now,
-                "run_id": lease.run_id,
-                "running": RunStatus.RUNNING.value,
-                "owner_id": lease.owner_id,
-                "lease_generation": lease.lease_generation,
-            },
-        ).mappings().one_or_none()
-        if row is None:
-            self._raise_write_rejected(connection, lease, now)
-        return int(row["last_event_sequence"])
-
-    @staticmethod
-    def _insert_events(
-        connection: Connection,
-        run_id: str,
-        start_sequence: int,
-        events: list[PendingEvent],
-        occurred_at: str,
-    ) -> None:
-        for offset, item in enumerate(events):
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO run_events (
-                        run_id, sequence, event_type, stage,
-                        occurred_at, schema_version, payload_json
-                    ) VALUES (
-                        :run_id, :sequence, :event_type, :stage,
-                        :occurred_at, :schema_version, :payload_json
-                    )
-                    """
-                ),
-                {
-                    "run_id": run_id,
-                    "sequence": start_sequence + offset,
-                    "event_type": item.event_type,
-                    "stage": item.stage,
-                    "occurred_at": occurred_at,
-                    "schema_version": item.schema_version,
-                    "payload_json": _json_dump(item.payload),
-                },
-            )
 
 __all__ = ["SQLiteEventCheckpointRepository"]

@@ -1,4 +1,4 @@
-"""Research-core package boundary for the v0.3.0 cutover."""
+"""Research-core package boundary for the v1.0.0b1 cutover."""
 
 from paperseek_core.models import (
     PaperAuthor,
@@ -11,7 +11,7 @@ from paperseek_core.models import (
     PaperSource,
 )
 
-__version__ = "0.3.0"
+__version__ = "1.0.0b1"
 
 __all__ = [
     "PaperAuthor",

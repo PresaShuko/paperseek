@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from paperseek_core.document_identity import document_alias_keys
 
 from paperseek_core import ranking, retrieval
 from paperseek_core.models import PaperIdentifiers, PaperRecord
@@ -68,7 +69,7 @@ class DocumentIdentityContract(unittest.TestCase):
         )
 
         self.assertEqual(
-            retrieval.document_alias_keys(document),
+            document_alias_keys(document),
             ("doi:10.1234/shared", "title:shared title"),
         )
         self.assertEqual(ranking.document_identity(document), "Provider:Visible UID")

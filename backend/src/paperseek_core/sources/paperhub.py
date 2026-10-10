@@ -90,7 +90,7 @@ class PaperHubSource:
                     query=query,
                 )
                 if response.status_code >= 400:
-                    raise SourceError(self.name, f"Paper Hub manifest returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+                    raise SourceError(self.name, f"Paper Hub manifest returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
                 try:
                     manifest = response.json()
                 except ValueError as exc:
@@ -135,7 +135,7 @@ class PaperHubSource:
         url = f"{self.RAW_BASE_URL}/{file_name}"
         response, _ = await self.transport.request(self.name, "GET", url, headers={"Accept": "application/json"}, timeout=90, query=query)
         if response.status_code >= 400:
-            raise SourceError(self.name, f"Paper Hub shard {file_name} returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+            raise SourceError(self.name, f"Paper Hub shard {file_name} returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
         try:
             payload = response.json()
         except ValueError as exc:
@@ -235,7 +235,7 @@ class PaperHubSource:
     @staticmethod
     def _score_term(paper: dict[str, Any], term: str) -> int:
         fields = (str(paper.get("title") or "").lower(), " ".join(map(str, paper.get("keywords") or [])).lower(), str(paper.get("abstract") or "").lower(), " ".join(map(str, paper.get("authors") or [])).lower(), f"{paper.get('conference') or ''} {paper.get('year') or ''} {paper.get('presentation') or ''}".lower())
-        return sum(weight for value, weight in zip(fields, (8, 5, 3, 2, 4)) if term in value)
+        return sum(weight for value, weight in zip(fields, (8, 5, 3, 2, 4), strict=True) if term in value)
 
     @staticmethod
     def _conference_weight(paper: dict[str, Any]) -> int:

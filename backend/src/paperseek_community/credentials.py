@@ -8,6 +8,11 @@ from pathlib import Path
 import sqlite3
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from sqlalchemy.engine import Connection
+
+
+class CredentialPersistenceError(RuntimeError):
+    pass
 
 
 class EncryptedRunCredentialStore:
@@ -19,7 +24,13 @@ class EncryptedRunCredentialStore:
         self.database_path = Path(database_path).expanduser().resolve()
         self.key_path = self.database_path.parent / "credentials.master.key"
 
-    def save(self, run_id: str, credentials: dict[str, dict[str, str]]) -> None:
+    def save(
+        self,
+        run_id: str,
+        credentials: dict[str, dict[str, str]],
+        *,
+        connection: Connection | None = None,
+    ) -> None:
         normalized = {
             kind: {key: str(value) for key, value in values.items() if str(value)}
             for kind, values in credentials.items()
@@ -30,8 +41,8 @@ class EncryptedRunCredentialStore:
         key = self._load_or_create_key()
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(hours=25)
-        with closing(sqlite3.connect(self.database_path)) as connection:
-            connection.execute("PRAGMA foreign_keys = ON")
+
+        def write(execute) -> None:
             for kind, values in normalized.items():
                 nonce = os.urandom(12)
                 ciphertext = AESGCM(key).encrypt(
@@ -39,7 +50,7 @@ class EncryptedRunCredentialStore:
                     json.dumps(values, ensure_ascii=False, sort_keys=True).encode("utf-8"),
                     self._aad(run_id, kind),
                 )
-                connection.execute(
+                execute(
                     """
                     INSERT INTO run_credentials (
                         run_id, credential_kind, ciphertext, nonce,
@@ -62,7 +73,14 @@ class EncryptedRunCredentialStore:
                         expires_at.isoformat(timespec="microseconds"),
                     ),
                 )
-            connection.commit()
+
+        if connection is not None:
+            write(connection.exec_driver_sql)
+        else:
+            with closing(sqlite3.connect(self.database_path)) as local:
+                local.execute("PRAGMA foreign_keys = ON")
+                write(local.execute)
+                local.commit()
 
     def resolve(self, run_id: str) -> dict[str, dict[str, str]]:
         with closing(sqlite3.connect(self.database_path)) as connection:
@@ -91,6 +109,10 @@ class EncryptedRunCredentialStore:
         with closing(sqlite3.connect(self.database_path)) as connection:
             connection.execute("DELETE FROM run_credentials WHERE run_id = ?", (run_id,))
             connection.commit()
+
+    def master_key(self) -> bytes:
+        """The Community secret key, shared with saved workspace connections."""
+        return self._load_or_create_key()
 
     def _load_or_create_key(self) -> bytes:
         try:

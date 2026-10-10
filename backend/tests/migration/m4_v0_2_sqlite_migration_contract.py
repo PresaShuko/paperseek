@@ -48,7 +48,7 @@ class V02SQLiteMigrationContract(unittest.TestCase):
             report = migrate_v0_2_database(source, target, backup)
 
             self.assertEqual(report["status"], "migrated")
-            self.assertEqual(report["schema_version"], 7)
+            self.assertEqual(report["schema_version"], 11)
             self.assertEqual(report["runs_migrated"], 3)
             self.assertEqual(report["results_migrated"], 2)
             self.assertEqual(report["legacy_active_runs_closed"], 1)
@@ -231,7 +231,7 @@ class V02SQLiteMigrationContract(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     )
                 }
-                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
             self.assertFalse({"search_runs", "search_events", "search_results"} & tables)
             self.assertEqual(_table_count(database, "runs"), 3)
             self.assertEqual(_table_count(database, "legacy_migration_batches"), 1)
@@ -299,7 +299,7 @@ class V02SQLiteMigrationContract(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
             self.assertEqual(payload["status"], "migrated")
-            self.assertEqual(payload["schema_version"], 7)
+            self.assertEqual(payload["schema_version"], 11)
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):

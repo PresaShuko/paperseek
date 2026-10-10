@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, Query
 
 from paperseek_app.errors import InvalidCursor, RunNotFound, RunStateError
-from paperseek_app.models import DeletionReceipt, HistoryPage
+from paperseek_app.models import DeletionReceipt, HistoryPage, RecordRename
 from paperseek_community.api_dependencies import (
     ApiError,
     drain_cleanup_jobs,
@@ -15,6 +15,19 @@ from paperseek_community.api_dependencies import (
 
 
 def register_history_routes(app: FastAPI, *, database: Path) -> None:
+    @app.patch("/api/v1/history/{run_id}", status_code=204)
+    def rename_history(run_id: str, request: RecordRename):
+        from fastapi import Response
+
+        _, uow = open_query_service(database)
+        try:
+            uow.rename_history(run_id, request.title)
+        except RunNotFound as exc:
+            raise ApiError(404, "run_not_found", "Run not found.") from exc
+        finally:
+            uow.close()
+        return Response(status_code=204)
+
     @app.get("/api/v1/history", response_model=HistoryPage)
     def get_history(
         cursor: str | None = None,

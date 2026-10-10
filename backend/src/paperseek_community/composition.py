@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+import time
 
-import httpx
+from paperseek_community.model_transport import create_http_client
 
 from paperseek_app.configuration import resolve_llm_route
+from paperseek_app.pre_ranking import resolve_retrieval_route
+from paperseek_core.decision_client import SystemOneAdapter
 from paperseek_app.execution import WorkflowExecution
 from paperseek_app.models import RunDetail
 from paperseek_app.services import RunExecutionService, RunSubmissionService
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.fixed_source import FixedLLMAdapter, FixedSourceAdapter
 from paperseek_community.credentials import EncryptedRunCredentialStore
+from paperseek_community.credential_resolution import resolve_model_credentials
 from paperseek_core.llm import HttpLLMAdapter
 from paperseek_community.persistence import SQLiteRunUnitOfWork, migrate_database
 from paperseek_core.retrieval_clients import ExternalEmbeddingAdapter, ExternalRerankerAdapter
@@ -49,20 +53,17 @@ class CommunityExecutionResolver:
         self.credentials = credentials
 
     def __call__(self, run: RunDetail, cancellation: CancellationToken) -> WorkflowExecution:
+        deadline_at = time.monotonic() + max(0, (run.deadline_at - datetime.now(timezone.utc)).total_seconds())
         stored = self.credentials.resolve(run.id)
-        llm_credentials = stored.get("llm", {})
         source_credentials = stored.get("source", {})
-        embedding_credentials = stored.get("embedding", {})
-        reranker_credentials = stored.get("reranker", {})
         contacts = run.config_snapshot.get("source_contacts", {})
         route = resolve_llm_route(self.settings, dict(run.config_snapshot.get("llm") or {}))
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
-            limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
-        )
+        retrieval = resolve_retrieval_route(run.config_snapshot.get("retrieval") or {})
+        model_keys = resolve_model_credentials(self.settings, route, retrieval, stored)
+        client = create_http_client([route, *(retrieval.get(kind) or {} for kind in ("embedding", "reranker", "decision"))])
         transport = AsyncHttpTransport(
             client=client,
-            context=RequestContext(step_key="source.request", cancellation=cancellation),
+            context=RequestContext(step_key="source.request", cancellation=cancellation, deadline_at=deadline_at),
         )
         source = self._source(
             run.source,
@@ -88,17 +89,8 @@ class CommunityExecutionResolver:
             api_type=route["api_type"],
             base_url=route["base_url"],
             model=route["model"],
-            api_key=llm_credentials.get("api_key") or self.settings.llm_api_key,
+            api_key=model_keys["llm"],
         )
-        abstracts = (
-            source
-            if isinstance(source, CrossrefSource)
-            else CrossrefSource(
-                transport=transport,
-                email=contacts.get("crossref_email") or self.settings.contact_email,
-            )
-        )
-        retrieval = dict(run.config_snapshot.get("retrieval") or {})
         embedding_route = dict(retrieval.get("embedding") or {})
         reranker_route = dict(retrieval.get("reranker") or {})
         embedding = None
@@ -109,7 +101,7 @@ class CommunityExecutionResolver:
                 provider=str(embedding_route.get("provider")),
                 model=str(embedding_route.get("model") or ""),
                 base_url=str(embedding_route.get("base_url") or ""),
-                api_key=embedding_credentials.get("api_key") or llm_credentials.get("api_key") or self.settings.llm_api_key,
+                api_key=model_keys["embedding"],
             )
         reranker = None
         if reranker_route.get("provider"):
@@ -119,13 +111,21 @@ class CommunityExecutionResolver:
                 provider=str(reranker_route.get("provider")),
                 model=str(reranker_route.get("model") or ""),
                 base_url=str(reranker_route.get("base_url") or ""),
-                api_key=reranker_credentials.get("api_key") or llm_credentials.get("api_key") or self.settings.llm_api_key,
+                api_key=model_keys["reranker"],
+            )
+        decision = None
+        if retrieval["mode"] == "decision":
+            decision_route = retrieval["decision"]
+            decision = SystemOneAdapter(
+                AsyncHttpTransport(client=client, context=RequestContext(
+                    step_key="selection.decision", cancellation=cancellation, deadline_at=deadline_at,
+                )),
+                **decision_route, api_key=model_keys["decision"],
             )
         return WorkflowExecution(
+            decision=decision,
             llm=llm,
             source=source,
-            abstracts=abstracts,
-            candidate_metadata=abstracts,
             embedding=embedding,
             reranker=reranker,
             request=ResearchWorkflowRequest(
@@ -137,16 +137,13 @@ class CommunityExecutionResolver:
                 ),
                 query_budget=query_budget,
                 citation_enabled=bool(run.config_snapshot.get("citation_enabled", True)),
-                fetch_abstracts=run.config_snapshot["fetch_abstracts"],
                 citation_seed_count=preset.citation_seed_count,
                 citation_per_seed=preset.citation_per_seed,
                 citation_max_records=preset.citation_max_records,
                 citation_depth=preset.citation_depth,
-                crossref_metadata_enrichment=bool(
-                    retrieval.get("crossref_metadata_enrichment", False)
-                ),
             ),
             close=client.aclose,
+            deadline_at=deadline_at,
         )
 
     def _source(
@@ -158,39 +155,55 @@ class CommunityExecutionResolver:
         wos_db: str,
         contacts: dict[str, str],
     ):
-        key = submitted_key or {
-            "openalex": self.settings.openalex_api_key,
-            "semanticscholar": self.settings.semantic_scholar_api_key,
-            "pubmed": self.settings.pubmed_api_key,
-            "wos": self.settings.wos_api_key,
-            "googlescholar": self.settings.google_scholar_api_key,
-        }.get(name, "")
-        factories = {
-            "openalex": lambda: OpenAlexSource(
-                transport=transport,
-                api_key=key,
-                email=contacts.get("openalex_email") or self.settings.contact_email,
-            ),
-            "arxiv": lambda: ArxivSource(transport=transport),
-            "crossref": lambda: CrossrefSource(
-                transport=transport,
-                email=contacts.get("crossref_email") or self.settings.contact_email,
-            ),
-            "semanticscholar": lambda: SemanticScholarSource(transport=transport, api_key=key),
-            "pubmed": lambda: PubMedSource(
-                transport=transport,
-                api_key=key,
-                email=contacts.get("pubmed_email") or self.settings.contact_email,
-                tool=contacts.get("pubmed_tool") or "paperseek",
-            ),
-            "wos": lambda: WosSource(transport=transport, api_key=key, db=wos_db),
-            "googlescholar": lambda: GoogleScholarSource(transport=transport, api_key=key),
-            "paperhub": lambda: PaperHubSource(transport=transport),
-        }
-        try:
-            return factories[name]()
-        except KeyError as exc:
-            raise ValueError("The queued run selected an unsupported source.") from exc
+        return build_source(name, transport, submitted_key, wos_db=wos_db, contacts=contacts, settings=self.settings)
+
+
+def deployment_source_key(name: str, settings: CommunityDeploymentSettings) -> str:
+    return {
+        "openalex": settings.openalex_api_key,
+        "semanticscholar": settings.semantic_scholar_api_key,
+        "pubmed": settings.pubmed_api_key,
+        "wos": settings.wos_api_key,
+        "googlescholar": settings.google_scholar_api_key,
+    }.get(name, "")
+
+
+def build_source(
+    name: str,
+    transport: AsyncHttpTransport,
+    submitted_key: str,
+    *,
+    wos_db: str,
+    contacts: dict[str, str],
+    settings: CommunityDeploymentSettings,
+):
+    key = submitted_key or deployment_source_key(name, settings)
+    factories = {
+        "openalex": lambda: OpenAlexSource(
+            transport=transport,
+            api_key=key,
+            email=contacts.get("openalex_email") or settings.contact_email,
+        ),
+        "arxiv": lambda: ArxivSource(transport=transport),
+        "crossref": lambda: CrossrefSource(
+            transport=transport,
+            email=contacts.get("crossref_email") or settings.contact_email,
+        ),
+        "semanticscholar": lambda: SemanticScholarSource(transport=transport, api_key=key),
+        "pubmed": lambda: PubMedSource(
+            transport=transport,
+            api_key=key,
+            email=contacts.get("pubmed_email") or settings.contact_email,
+            tool=contacts.get("pubmed_tool") or "paperseek",
+        ),
+        "wos": lambda: WosSource(transport=transport, api_key=key, db=wos_db),
+        "googlescholar": lambda: GoogleScholarSource(transport=transport, api_key=key),
+        "paperhub": lambda: PaperHubSource(transport=transport),
+    }
+    try:
+        return factories[name]()
+    except KeyError as exc:
+        raise ValueError("The queued run selected an unsupported source.") from exc
 
 
 def execute_fixture_search(
@@ -220,7 +233,6 @@ def execute_fixture_search(
             return WorkflowExecution(
                 llm=FixedLLMAdapter(current.fixture.llm_responses),
                 source=current,
-                abstracts=current,
                 request=ResearchWorkflowRequest(
                     question=detail.question,
                     query_budget=QueryLoopBudget(

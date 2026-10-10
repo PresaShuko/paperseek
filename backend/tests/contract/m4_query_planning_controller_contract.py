@@ -84,6 +84,7 @@ class QueryPlanningControllerContract(unittest.TestCase):
                 "message": "Accepted 25 records within the target range.",
                 "adjustment": "",
                 "reason": "The source count is inside the user-facing target range.",
+                "stop_reason": "",
             },
         )
 

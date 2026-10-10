@@ -5,6 +5,7 @@ import re
 import time
 from typing import Any
 
+from paperseek_core.key_pool import RequestKeys
 from paperseek_core.models import PaperAuthor, PaperCitation, PaperIdentifiers, PaperKeywords, PaperLinks, PaperNames, PaperRecord, PaperSource
 from paperseek_core.sources.contracts import SourceCapabilities, SourceError, SourceSearchMetadata, SourceSearchRequest, SourceSearchResult
 from paperseek_core.sources.http import AsyncHttpTransport, split_api_keys
@@ -13,7 +14,6 @@ from paperseek_core.sources.http import AsyncHttpTransport, split_api_keys
 class GoogleScholarSource:
     name = "googlescholar"
     BASE_URL = "https://google.serper.dev/scholar"
-    RETRY_STATUSES = frozenset({401, 403, 408, 409, 425, 429, 500, 502, 503, 504})
 
     def __init__(self, *, transport: AsyncHttpTransport, api_key: str = "") -> None:
         self.transport = transport
@@ -52,7 +52,7 @@ class GoogleScholarSource:
             response, info = await self._post_with_key_rotation({"q": query, "page": page_number}, query)
             pages_scanned += 1
             if response.status_code >= 400:
-                raise SourceError(self.name, f"Google Scholar via Serper returned HTTP {response.status_code}.", status=response.status_code, body=response.text[:1000], query=query)
+                raise SourceError(self.name, f"Google Scholar via Serper returned HTTP {response.status_code}.", status=response.status_code, retry_details=response.extensions.get("paperseek_retry"), body=response.text[:1000], query=query)
             try:
                 payload = response.json()
             except ValueError as exc:
@@ -86,37 +86,15 @@ class GoogleScholarSource:
         )
 
     async def _post_with_key_rotation(self, payload: dict[str, Any], query: str):
-        attempts = max(1, min(max(3, len(self.api_keys)), len(self.api_keys) * 3))
-        last_response = None
-        last_error: SourceError | None = None
-        for attempt in range(1, attempts + 1):
-            key = self.api_keys[self._index % len(self.api_keys)]
+        keys = RequestKeys(self.api_keys[self._index % len(self.api_keys):] + self.api_keys[:self._index % len(self.api_keys)])
+        def headers(_attempt: int) -> dict[str, str]:
+            key = keys.next_key()
             self._index += 1
-            try:
-                response, info = await self.transport.request(
-                    self.name,
-                    "POST",
-                    self.BASE_URL,
-                    json=payload,
-                    headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "paperseek/1.0", "X-API-KEY": key},
-                    timeout=45,
-                    query=query,
-                    attempts=1,
-                    retry_statuses=frozenset(),
-                    retry_transport=False,
-                )
-                last_response = response
-                info["attempts"] = attempt
-                if response.status_code not in self.RETRY_STATUSES or attempt >= attempts:
-                    return response, info
-            except SourceError as exc:
-                last_error = exc
-                if attempt >= attempts:
-                    break
-            await self.transport.wait(0.7 * attempt)
-        if last_response is not None:
-            return last_response, {"method": "POST", "url": self.BASE_URL, "status": last_response.status_code, "attempts": attempts}
-        raise SourceError(self.name, f"Google Scholar via Serper request failed after {attempts} attempts: {last_error}", query=query) from last_error
+            return {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "paperseek/1.0", "X-API-KEY": key}
+        return await self.transport.request(
+            self.name, "POST", self.BASE_URL, json=payload, headers=headers,
+            timeout=45, query=query, retry_auth=keys.reject_current,
+        )
 
     @staticmethod
     def _record_key(item: dict[str, Any]) -> str:

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from contextlib import closing
+from datetime import timedelta
 from importlib.resources import files
 import json
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sqlite3
 import tempfile
-from threading import Thread
+from threading import Event, Thread
 import time
 import unittest
+from unittest.mock import patch
 
 from alembic import command
 from alembic.config import Config
@@ -48,7 +50,6 @@ def _execution(run, _cancellation) -> WorkflowExecution:
     return WorkflowExecution(
         llm=FixedLLMAdapter(source.fixture.llm_responses),
         source=source,
-        abstracts=source,
         request=ResearchWorkflowRequest(
             question=run.question,
             query_budget=QueryLoopBudget(
@@ -80,9 +81,9 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
         with closing(sqlite3.connect(database)) as connection:
             before = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
 
-        self.assertEqual(migrate_database(database), 7)
+        self.assertEqual(migrate_database(database), 11)
         with closing(sqlite3.connect(database)) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0], before)
             self.assertIn(
                 "owner_subject",
@@ -142,6 +143,78 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
 
         store.delete(run.id)
         self.assertEqual(store.resolve(run.id), {})
+
+    def test_run_and_credentials_become_visible_together_and_retries_do_not_overwrite(self) -> None:
+        store = EncryptedRunCredentialStore(self.database)
+        entered, release = Event(), Event()
+        original_save = store.save
+
+        def delayed_save(run_id, credentials, **kwargs):
+            original_save(run_id, credentials, **kwargs)
+            entered.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("The test did not release credential persistence.")
+
+        payload = {"question": "Atomic credentials", "credentials": {"llm": {"api_key": "first-secret"}}}
+        responses = []
+        with TestClient(create_app(
+            self.database, accept_submissions_without_worker=True, credential_store=store,
+        )) as client:
+            with patch.object(store, "save", side_effect=delayed_save):
+                thread = Thread(target=lambda: responses.append(client.post(
+                    "/api/v1/runs", json=payload, headers={"Idempotency-Key": "atomic"},
+                )))
+                thread.start()
+                try:
+                    self.assertTrue(entered.wait(timeout=3))
+                    with closing(sqlite3.connect(self.database)) as connection:
+                        self.assertEqual(connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0], 0)
+                        self.assertEqual(connection.execute("SELECT COUNT(*) FROM run_credentials").fetchone()[0], 0)
+                    self.assertIsNone(self.uow.claim_next_run("worker", timedelta(seconds=60)))
+                finally:
+                    release.set()
+                    thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(responses[0].status_code, 202)
+            run_id = responses[0].json()["id"]
+            lease = self.uow.claim_next_run("worker", timedelta(seconds=60))
+            self.assertEqual(lease.run_id, run_id)
+            self.assertEqual(store.resolve(run_id), {"llm": {"api_key": "first-secret"}})
+            payload["credentials"]["llm"]["api_key"] = "replacement-secret"
+            retry = client.post("/api/v1/runs", json=payload, headers={"Idempotency-Key": "atomic"})
+            self.assertEqual(retry.status_code, 202)
+            self.assertEqual(retry.json()["id"], run_id)
+            self.assertEqual(store.resolve(run_id), {"llm": {"api_key": "first-secret"}})
+            self.uow.request_cancel(run_id)
+            self.uow.complete_cancel(lease)
+            terminal_retry = client.post("/api/v1/runs", json=payload, headers={"Idempotency-Key": "atomic"})
+            self.assertEqual(terminal_retry.status_code, 202)
+            self.assertEqual(store.resolve(run_id), {})
+
+    def test_credential_failure_rolls_back_submission_and_allows_retry(self) -> None:
+        store = EncryptedRunCredentialStore(self.database)
+        original_save = store.save
+
+        def fail_after_write(run_id, credentials, **kwargs):
+            original_save(run_id, credentials, **kwargs)
+            raise OSError("fixture storage failure")
+
+        payload = {"question": "Rollback credentials", "credentials": {"llm": {"api_key": "secret"}}}
+        with TestClient(create_app(
+            self.database, accept_submissions_without_worker=True, credential_store=store,
+        )) as client:
+            with patch.object(store, "save", side_effect=fail_after_write):
+                failed = client.post("/api/v1/runs", json=payload, headers={"Idempotency-Key": "retry"})
+            self.assertEqual(failed.status_code, 500)
+            self.assertEqual(failed.json()["error"]["code"], "credential_persistence_failed")
+            with closing(sqlite3.connect(self.database)) as connection:
+                for table in ("runs", "run_submissions", "run_events", "run_credentials"):
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0)
+            retried = client.post("/api/v1/runs", json=payload, headers={"Idempotency-Key": "retry"})
+            self.assertEqual(retried.status_code, 202)
+            run_id = retried.json()["id"]
+            client.post(f"/api/v1/runs/{run_id}/cancel")
+            self.assertEqual(store.resolve(run_id), {})
 
     def test_community_rejects_hosted_service_selection_without_creating_a_run(self) -> None:
         with TestClient(create_app(self.database, accept_submissions_without_worker=True)) as client:
@@ -248,6 +321,10 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
                 f"/runs/{run_id}/results",
                 f"/runs/{run_id}/citation-map",
                 "/history",
+                "/settings",
+                "/settings/models",
+                "/settings/sources",
+                "/settings/general",
             ):
                 deep_link = client.get(route)
                 self.assertEqual(deep_link.status_code, 200, route)
@@ -261,6 +338,8 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
                 "/api/v1/not-a-route",
                 "/results",
                 "/citation-map",
+                "/settings/unknown",
+                "/settings/models/unknown",
                 f"/api/v1/runs/{run_id}/artifacts",
                 f"/api/v1/runs/{run_id}/audit",
                 f"/api/v1/runs/{run_id}/logs",
@@ -466,7 +545,7 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             self.assertEqual(
                 detail.json()["config_snapshot"]["retrieval"],
                 {
-                    "crossref_metadata_enrichment": False,
+                    "mode": "embedding_rerank",
                     "embedding": {
                         "provider": "openai",
                         "model": "text-embedding-3-large",
@@ -635,7 +714,6 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "Custom loopback composition",
             "arxiv",
             {
-                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "llm": {
                     "provider": "custom",
@@ -665,7 +743,6 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "External retrieval composition",
             "openalex",
             {
-                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "retrieval": {
                     "embedding": {
@@ -721,7 +798,6 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "Structured source fields",
             "openalex",
             {
-                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "field_ids": ["17", "22"],
                 "field_hint": "",
@@ -756,7 +832,6 @@ class M4SubmissionProductEntryContractTest(unittest.TestCase):
             "Context-preserving source search",
             "paperhub",
             {
-                "fetch_abstracts": False,
                 "search_budget": "fast",
                 "field_ids": [],
                 "field_hint": "distributed systems",

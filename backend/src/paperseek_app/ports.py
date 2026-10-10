@@ -12,6 +12,8 @@ from paperseek_app.models import (
     PersistedCheckpoint,
     PersistedEvent,
     PersistedResult,
+    ResultPage,
+    HistoryPage,
     RunDetail,
     RunVersions,
     StoredArtifact,
@@ -94,7 +96,17 @@ class RunUnitOfWork(Protocol):
         *,
         after_rank: int = 0,
         limit: int | None = None,
+        uids: list[str] | None = None,
     ) -> list[PersistedResult]: ...
+
+    def query_results(
+        self, run_id: str, *, offset: int, limit: int, query: str | None,
+        min_score: float | None, metadata: str | None, sort: str,
+    ) -> ResultPage: ...
+
+    def search_history(self, *, query: str, offset: int, limit: int) -> HistoryPage: ...
+
+    def rename_history(self, run_id: str, title: str) -> None: ...
 
     def list_history(
         self,

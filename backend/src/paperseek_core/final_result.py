@@ -33,6 +33,7 @@ class FinalResultAssembler:
             if item.document.uid
         }
         result = ResearchResult(
+            bibliometric_corpus=request.bibliometric_corpus,
             question=request.question,
             search_intent=request.search_plan.audit_summary(),
             search_plan=request.search_plan.model_dump(mode="json"),
@@ -46,13 +47,31 @@ class FinalResultAssembler:
             iterations=request.iterations,
             history=[_dump(item) for item in request.history],
             search_state=request.search_state,
-            citation_map=request.citation_map,
+            citation_map=self._citation_map(request.citation_map, ranked),
             ranking_steps=request.ranking_steps,
             ranked=ranked,
             warnings=list(dict.fromkeys(request.warnings)),
             provenance_by_identity=provenance,
         )
         return result.model_copy(update={"artifacts": self.artifacts_for(result)})
+
+    @staticmethod
+    def _citation_map(citation_map: dict[str, Any], ranked: list[FinalPaperResult]) -> dict[str, Any]:
+        if not citation_map:
+            return {}
+        nodes = {node["id"]: {**node, "roles": list(node.get("roles") or [])} for node in citation_map.get("nodes", []) if node.get("id")}
+        for paper in ranked:
+            node_id = paper.uid or paper.id or paper.title
+            if not node_id:
+                continue
+            node = nodes.setdefault(node_id, {
+                "id": node_id, "title": paper.title or "(no title)", "year": paper.year,
+                "source": paper.venue, "citations": paper.citation_count, "roles": [], "seed_uids": [],
+            })
+            if "result" not in node["roles"]:
+                node["roles"].append("result")
+            node.update(rank=paper.rank, score=paper.score, reasoning=paper.reasoning)
+        return {**citation_map, "nodes": list(nodes.values())}
 
     @staticmethod
     def _paper(rank: int, item: RankedPaper) -> FinalPaperResult:
@@ -108,7 +127,12 @@ class FinalResultAssembler:
 
     def artifacts_for(self, result: ResearchResult) -> list[ArtifactDraft]:
         """Serialize a final result, including imported history, without rerunning research."""
-        public = result.public_payload()
+        # Retain export inputs in the saved result without changing the public response.
+        public = result.public_payload() | {
+            "query_iteration_memory": result.query_iteration_memory,
+            "warnings": result.warnings,
+            "provenance_by_identity": result.provenance_by_identity,
+        }
         export = {
             "question": result.question,
             "search_intent": result.search_intent,
@@ -133,18 +157,18 @@ class FinalResultAssembler:
         }
         if result.warnings:
             export["warnings"] = list(result.warnings)
-        return [
+        artifacts = [
             ArtifactDraft(
                 kind="final_result",
                 filename="final_result.json",
                 media_type="application/json",
-                content=json.dumps(public, ensure_ascii=False, indent=2) + "\n",
+                content=json.dumps(public, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             ),
             ArtifactDraft(
                 kind="export_json",
                 filename="export.json",
                 media_type="application/json",
-                content=json.dumps(export, ensure_ascii=False, indent=2) + "\n",
+                content=json.dumps(export, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             ),
             ArtifactDraft(
                 kind="export_csv",
@@ -162,9 +186,15 @@ class FinalResultAssembler:
                 kind="citation_map",
                 filename="citation_map.json",
                 media_type="application/json",
-                content=json.dumps(result.citation_map, ensure_ascii=False, indent=2) + "\n",
+                content=json.dumps(result.citation_map, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             ),
         ]
+        if result.bibliometric_corpus is not None:
+            artifacts.append(ArtifactDraft(
+                kind="bibliometric_corpus", filename="bibliometric_corpus.json",
+                media_type="application/json", content=result.bibliometric_corpus.model_dump_json(),
+            ))
+        return artifacts
 
     @staticmethod
     def _csv(items: list[FinalPaperResult]) -> str:
