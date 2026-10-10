@@ -109,10 +109,12 @@ watch(() => pageHeader.title, (title) => {
   <div class="app" :class="{ 'sb-collapsed': !small && !open }">
     <Sidebar v-if="!small" :key="historyKey" :visible="open" :history-enabled="historyEnabled">
       <template v-if="$slots.account" #account><slot name="account" /></template>
+      <template v-if="$slots['history-off']" #history-off="scope"><slot name="history-off" v-bind="scope" /></template>
     </Sidebar>
     <div v-if="small && open" class="sb-sheet" role="dialog" aria-modal="true" :aria-label="u('nav')" @click.self="closeSheet" @keydown="sheetKey">
       <Sidebar :key="historyKey" visible :history-enabled="historyEnabled" @navigate="closeSheet">
         <template v-if="$slots.account" #account><slot name="account" /></template>
+      <template v-if="$slots['history-off']" #history-off="scope"><slot name="history-off" v-bind="scope" /></template>
       </Sidebar>
     </div>
     <div class="inset">

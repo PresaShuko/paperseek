@@ -32,7 +32,7 @@ async function copyPath() {
 </script>
 
 <template>
-  <div class="stack" style="gap: 24px; max-width: 880px">
+  <div class="stack" style="gap: 24px">
     <section class="card c" aria-labelledby="local-title">
       <div class="card-header"><div><h2 id="local-title" class="card-title">{{ u("localData") }}</h2><p class="help" style="margin-top: 4px">{{ u("localDataDesc") }}</p></div></div>
       <div class="card-content stack" style="gap: 0">

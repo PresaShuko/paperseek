@@ -144,6 +144,10 @@ function current(record: HistoryRecord): boolean {
         <Icon v-if="page.loading" name="loader" size="sm" />{{ u("loadMore") }}
       </button>
     </div>
+    <div v-else-if="$slots['history-off']" class="sb-group sb-scroll">
+      <div class="sb-label"><span>{{ u(`history_${module}`) }}</span></div>
+      <slot name="history-off" :module="module" />
+    </div>
     <div class="sb-group sb-foot">
       <RouterLink class="sb-btn" :class="{ active: settings }" to="/settings/models" :aria-current="settings ? 'page' : undefined" @click="emit('navigate')"><Icon name="settings" />{{ u("settings") }}</RouterLink>
       <a class="sb-btn" href="https://docs.paperseek.app/" target="_blank" rel="noopener"><Icon name="circle-help" />{{ u("docs") }}</a>
