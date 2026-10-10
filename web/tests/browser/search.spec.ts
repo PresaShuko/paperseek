@@ -50,7 +50,12 @@ test("first run without an LLM connection shows setup steps and blocks submissio
   state.connections = [];
   state.defaults.search_llm = "";
   await open(page, "/search", state);
-  await expect(page.getByText("开始前，先连接一个模型")).toBeVisible();
+  const setup = page.getByRole("region", { name: "开始前，先连接一个模型" });
+  await expect(setup).toBeVisible();
+  // Source keys are an optional step to configure, not something already done.
+  await expect(setup.locator(".step-dot.done")).toHaveCount(0);
+  await expect(setup).toContainText("数据源密钥 · 可选");
+  await expect(setup.getByRole("link", { name: "配置" }).first()).toHaveAttribute("href", "/settings/sources");
   await page.getByLabel("研究问题").fill("question");
   await expect(page.getByRole("button", { name: "开始检索" })).toBeDisabled();
   await page.getByRole("link", { name: "添加连接" }).click();

@@ -173,15 +173,18 @@ function errorText(code: string) {
 <template>
   <main class="page create">
     <slot name="notice" />
-    <section v-if="needsSetup" class="alert" style="grid-template-columns: 16px 1fr" aria-labelledby="setup-title">
-      <Icon name="info" />
-      <p id="setup-title" class="alert-title">{{ u("setupTitle") }}</p>
-      <div class="alert-desc stack" style="margin-top: 4px">
-        <div class="task"><span class="step-dot active" style="width: 20px; height: 20px; font-size: 11px">1</span><span class="sm" style="color: var(--foreground)">{{ u("setupLlm") }} <span class="muted">· {{ u("setupRequired") }}</span></span><RouterLink class="btn btn-sm" :to="{ path: '/settings/models', query: { add: 'llm' } }" style="height: 28px">{{ u("addConnection") }}</RouterLink></div>
-        <div class="task"><span class="step-dot done" style="width: 20px; height: 20px"><Icon name="check" size="xs" /></span><span class="sm">{{ u("setupSources", { n: freeSources }) }}</span><RouterLink class="btn btn-ghost btn-sm" to="/settings/sources" style="height: 28px">{{ u("view") }}</RouterLink></div>
-        <div class="task"><span class="step-dot" style="width: 20px; height: 20px; font-size: 11px">3</span><span class="sm">{{ u("setupOptional") }}</span><RouterLink class="btn btn-ghost btn-sm" to="/settings/models" style="height: 28px">{{ u("configure") }}</RouterLink></div>
-      </div>
-    </section>
+    <!-- A deployment may supply its own first-use guide. -->
+    <slot v-if="needsSetup" name="setup" :free-sources="freeSources">
+      <section class="alert" style="grid-template-columns: 16px 1fr" aria-labelledby="setup-title">
+        <Icon name="info" />
+        <p id="setup-title" class="alert-title">{{ u("setupTitle") }}</p>
+        <div class="alert-desc stack" style="margin-top: 4px">
+          <div class="task"><span class="step-dot active" style="width: 20px; height: 20px; font-size: 11px">1</span><span class="sm" style="color: var(--foreground)">{{ u("setupLlm") }} <span class="muted">· {{ u("setupRequired") }}</span></span><RouterLink class="btn btn-sm" :to="{ path: '/settings/models', query: { add: 'llm' } }" style="height: 28px">{{ u("addConnection") }}</RouterLink></div>
+          <div class="task"><span class="step-dot" style="width: 20px; height: 20px; font-size: 11px">2</span><span class="sm">{{ u("setupSources") }} <span class="muted">· {{ u("setupSourcesHint", { n: freeSources }) }}</span></span><RouterLink class="btn btn-ghost btn-sm" to="/settings/sources" style="height: 28px">{{ u("configure") }}</RouterLink></div>
+          <div class="task"><span class="step-dot" style="width: 20px; height: 20px; font-size: 11px">3</span><span class="sm">{{ u("setupOptional") }}</span><RouterLink class="btn btn-ghost btn-sm" to="/settings/models" style="height: 28px">{{ u("configure") }}</RouterLink></div>
+        </div>
+      </section>
+    </slot>
     <section v-else-if="activeRun" class="alert" role="status">
       <Icon name="loader" />
       <p class="alert-title">{{ u("activeRunTitle") }}</p>
