@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import sqlite3
 import time
-from typing import Literal
+from typing import Callable, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -538,8 +538,14 @@ def _probe_code(exc: BaseException) -> str:
     return "request_failed"
 
 
-async def probe_connection(kind: str, route: dict[str, str], api_key: str) -> dict[str, object]:
-    """One small real request; any 2xx answer proves endpoint, model and key."""
+async def probe_connection(
+    kind: str, route: dict[str, str], api_key: str, *,
+    client_factory: Callable[[list[dict]], httpx.AsyncClient] = create_http_client,
+) -> dict[str, object]:
+    """One small real request; any 2xx answer proves endpoint, model and key.
+
+    A deployment that restricts outbound requests supplies its own client factory.
+    """
     base = route["base_url"].rstrip("/")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_key:
@@ -580,7 +586,7 @@ async def probe_connection(kind: str, route: dict[str, str], api_key: str) -> di
         })]
     started = time.perf_counter()
     try:
-        async with create_http_client([route]) as client:
+        async with client_factory([route]) as client:
             for index, (url, body) in enumerate(requests):
                 response = await client.post(url, json=body, headers=headers, timeout=PROBE_TIMEOUT)
                 if response.status_code not in {400, 422} or index == len(requests) - 1:
