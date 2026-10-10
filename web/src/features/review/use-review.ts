@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { ApiError } from "../../api/client";
-import { connectionForRoute, loadSettings, workspaceSettings } from "../settings/store";
+import { connectionById, connectionForRoute, loadSettings, workspaceSettings } from "../settings/store";
 import { reviewApi, type CitationStyle, type JobRequest, type Review } from "./api";
 
 export function useReview(id: Ref<string>, citationStyle: Ref<CitationStyle>) {
@@ -27,6 +27,10 @@ export function useReview(id: Ref<string>, citationStyle: Ref<CitationStyle>) {
       modelLoaded = true;
     }
   }
+  // A connection that disappears (deleted, or another service mode) falls back to the default.
+  watch(() => workspaceSettings.connections, () => {
+    if (modelLoaded && workspaceSettings.loaded && !connectionById(connection.value)) connection.value = workspaceSettings.defaults?.review_llm || "";
+  });
   async function refresh() { try { await load(); } catch (e) { report(e); } }
   watch(citationStyle, refresh);
   function scheduleRefresh() {
