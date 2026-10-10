@@ -18,7 +18,7 @@ Hosted consumes a pinned Community distribution. Fix shared behavior here instea
 
 ## Architecture {#architecture}
 
-Version 1.0.0-beta completes an architectural refactor into a modular monolith with persistent task execution. Research logic, application operations, and deployment-specific adapters have separate responsibilities, while shipping as a usable local application.
+Version 1.0.0-beta1 completes an architectural refactor into a modular monolith with persistent task execution. Research logic, application operations, and deployment-specific adapters have separate responsibilities, while shipping as a usable local application.
 
 ### Dependency boundaries
 
@@ -40,7 +40,7 @@ Vue 3 + TypeScript pages consume `/api/v1`; the OpenAPI generation script produc
 
 Hosted consumes a pinned Community wheel with a verified source identity and checksum. It extracts the shared Vue sources from that same wheel and adds account and service UI. A shared change takes effect there when the pinned artifact is rebuilt and updated, not merely when a neighboring checkout is edited.
 
-For the changes introduced by this release, see the [1.0.0-beta changelog](changelog.md#v1-0-0-beta). For existing local installations, follow the [upgrade guide](self-hosting/upgrade.md). The [workspace maintenance guide](reference/bibliometrics-architecture.md) maps the new modules to their source responsibilities and verification points.
+For the changes introduced by this release, see the [1.0.0-beta1 changelog](changelog.md#v1-0-0-beta). For existing local installations, follow the [upgrade guide](self-hosting/upgrade.md). The [workspace maintenance guide](reference/bibliometrics-architecture.md) maps the new modules to their source responsibilities and verification points.
 
 ## Development setup
 

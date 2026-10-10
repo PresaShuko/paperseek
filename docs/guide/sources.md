@@ -4,7 +4,7 @@ Choose an index that fits your research. Coverage, metadata, access, and filters
 
 ## Source directory
 
-| Source | Community / BYOK access | Focus |
+| Source | Community / your own key | Focus |
 | --- | --- | --- |
 | [OpenAlex](https://openalex.org/) | Key recommended | Broad discovery and citation expansion |
 | [arXiv](https://arxiv.org/) | No key | Scientific preprints |
@@ -17,7 +17,7 @@ Choose an index that fits your research. Coverage, metadata, access, and filters
 
 
 
-PaperSeek Service uses operator-configured source access. BYOK retains source configuration; account capabilities and site policy determine access to any server credential. A model key is not a data-source key.
+PaperSeek Service uses operator-configured source access. With your own key, add source keys in Settings; sources that recommend a key require one. A model key is not a data-source key.
 
 ## Obtain credentials
 
@@ -27,7 +27,7 @@ PaperSeek Service uses operator-configured source access. BYOK retains source co
 - [Serper account](https://serper.dev/).
 - [WoS Starter application](https://developer.clarivate.com/apis/wos-starter).
 
-Provider subscriptions and rate limits are separate from PaperSeek accounts and allowances.
+Provider subscriptions and rate limits are separate from PaperSeek accounts and credits.
 
 ## Fields and categories
 
@@ -39,7 +39,7 @@ Restricting a field can exclude interdisciplinary work. Start without it unless 
 
 Records can lack abstracts, years, citation counts, or open PDF links. Missing metadata is not a quality judgment.
 
-Version 1.0.0-beta has no separate cross-source abstract-filling or citation-count enrichment switch. Choose informative abstracts for review writing.
+Version 1.0.0-beta1 has no separate cross-source abstract-filling or citation-count enrichment switch. Choose informative abstracts for review writing.
 
 ## Multiple keys
 

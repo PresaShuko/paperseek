@@ -5,7 +5,7 @@
   <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
   <p>
     <a href="https://github.com/MingfengHong/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
-    <img alt="Version 1.0.0-beta" src="https://img.shields.io/badge/version-1.0.0--beta-171717?style=flat-square">
+    <img alt="Version 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
     <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
   </p>
@@ -23,14 +23,14 @@ PaperSeek turns a research question into a reading list. It plans and refines qu
 
 Run the Community edition on your own machine or server, or use [PaperSeek online](https://paperseek.app/). Bring your preferred model API; use the Web UI, CLI, HTTP API, or MCP integration.
 
-![PaperSeek 1.0.0-beta research workspace](docs/public/images/paperseek-workspace-beta.png)
+![PaperSeek 1.0.0-beta1 research workspace](docs/public/images/workspace-results-en.png)
 
-*Community 1.0.0-beta with an offline demonstration record. Hosted shares the workspace and adds account and service controls.*
+*Community 1.0.0-beta1 with an offline demonstration record. Hosted shares the workspace and adds account and service controls.*
 
 ## Contents
 
 - [Why PaperSeek](#why-paperseek)
-- [What’s new in 1.0.0-beta](#whats-new-in-100-beta)
+- [What’s new in 1.0.0-beta1](#whats-new-in-100-beta)
 - [How it works](#how-it-works)
 - [Data sources](#data-sources)
 - [Quick start](#quick-start)
@@ -55,9 +55,9 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 
 **Keep the next step close.** Filter and select papers, export complete results, reopen history, or turn a selected evidence set into an experimental review project.
 
-## What’s new in 1.0.0-beta
+## What’s new in 1.0.0-beta1
 
-**1.0.0-beta is a complete architectural refactor with breaking changes.** The runtime, frontend, persistence, and integrations now form a modular application with durable task execution.
+**1.0.0-beta1 is a complete architectural refactor with breaking changes.** The runtime, frontend, persistence, and integrations now form a modular application with durable task execution.
 
 - Search, Bibliometrics, and Review top tabs, each with a collapsible history sidebar; language and model controls in the settings menu.
 - Preliminary bibliometrics over the full retrieved deduplicated candidate corpus: distributions, keyword co-occurrence, bibliographic coupling, field coverage, and independent exports. LLM scoring remains a subset.
@@ -70,7 +70,7 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 
 Read the [full changelog](https://docs.paperseek.app/changelog#v1-0-0-beta) for the architectural changes. Upgrading from 0.2 requires Python 3.12+ and the [migration guide](https://docs.paperseek.app/self-hosting/upgrade): user data has a migration path, while old internal imports, frontend endpoints, and retired commands/configuration are not retained.
 
-This beta follows 0.2.x directly. The public version is **1.0.0-beta**; Python packages use **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
+This beta follows 0.2.x directly. The public version is **1.0.0-beta1**; Python packages use **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
 
 ## How it works
 
@@ -122,7 +122,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta` in the Compose environment to pin the image.
+Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta1` in the Compose environment to pin the image.
 
 ### From source
 

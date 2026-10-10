@@ -49,10 +49,10 @@ Protocol and base URL must agree. A server that implements Chat Completions does
 
 ## Optional ranking services
 
-Local fusion needs no external preliminary-ranking endpoint. Embedding + Rerank and System One require their corresponding connections when used in Community or BYOK. Their keys and model IDs can differ from the main language model.
+Local fusion needs no external preliminary-ranking endpoint. Embedding + Rerank and System One require their corresponding connections when used in Community or with your own key online. Their keys and model IDs can differ from the main language model.
 
 ## Online configuration
 
-PaperSeek Service provides model lists and server-managed connections. BYOK allows public provider connections subject to server-side address validation. Deployment secrets, internal routes, and allowlists are operator settings, not end-user fields.
+PaperSeek Service provides model lists and server-managed connections. With your own key, public provider connections are allowed after server-side address validation. Deployment secrets, internal routes, and allowlists are operator settings, not end-user fields.
 
 See the [online guide](../online/index.md).

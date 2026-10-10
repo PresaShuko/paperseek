@@ -21,7 +21,7 @@ python -m pip install "paperseek==1.0.0b1"
 ~~~
 :::
 
-For a 1.0.0-beta source checkout, use `python -m pip install ./backend` instead. After changing frontend source, follow the [contributor build instructions](../contributing.md).
+For a 1.0.0-beta1 source checkout, use `python -m pip install ./backend` instead. After changing frontend source, follow the [contributor build instructions](../contributing.md).
 
 ## 2. Start
 

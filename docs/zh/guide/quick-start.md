@@ -21,7 +21,7 @@ python -m pip install "paperseek==1.0.0b1"
 ~~~
 :::
 
-从 1.0.0-beta 源码安装时，改为 `python -m pip install ./backend`。修改前端源码后，请按[贡献指南](../contributing.md)重新构建界面。
+从 1.0.0-beta1 源码安装时，改为 `python -m pip install ./backend`。修改前端源码后，请按[贡献指南](../contributing.md)重新构建界面。
 
 ## 2. 启动
 

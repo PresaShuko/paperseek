@@ -19,11 +19,11 @@ If the page loses its connection, reopen the saved run and inspect its status be
 
 A 404 displayed during an OpenAlex run does not by itself prove that OpenAlex returned it: model requests and application routes also occur during the task. Record the stage, safe error code, task ID, and time.
 
-PaperSeek service allowance and an upstream provider's credit balance are different. Increasing one does not change the other.
+PaperSeek Service credits and an upstream provider's balance are different. Increasing one does not change the other.
 
 ## My endpoint is rejected online
 
-Online BYOK blocks localhost, private networks, and other non-public destinations. Use a public provider URL, or use Community for a model running on your own machine. A valid URL must also implement the chosen API protocol.
+Online, your own key cannot point to localhost, private networks, and other non-public destinations. Use a public provider URL, or use Community for a model running on your own machine. A valid URL must also implement the chosen API protocol.
 
 ## No results, missing abstracts, or different counts
 

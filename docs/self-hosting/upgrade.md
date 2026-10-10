@@ -1,10 +1,10 @@
-# Upgrade to 1.0.0-beta
+# Upgrade to 1.0.0-beta1
 
-Version 1.0.0-beta is a complete architectural refactor with breaking changes to the Python runtime, frontend, local storage, and integrations. It provides an explicit user-data migration path; old Python imports, internal APIs, and frontend endpoints are not compatibility contracts.
+Version 1.0.0-beta1 is a complete architectural refactor with breaking changes to the Python runtime, frontend, local storage, and integrations. It provides an explicit user-data migration path; old Python imports, internal APIs, and frontend endpoints are not compatibility contracts.
 
 ## What changes for an existing installation
 
-| Area | 1.0.0-beta upgrade requirement |
+| Area | 1.0.0-beta1 upgrade requirement |
 | --- | --- |
 | Runtime | Use Python 3.12 or newer; install into a fresh environment |
 | Entry points | Use `paperseek serve` and the current six-command CLI; update scripts that call retired commands |
@@ -21,7 +21,7 @@ This guide covers a Community installation. Using PaperSeek online does not requ
 
 1. Finish or cancel active work, then stop the old application and any worker.
 2. Back up its database, artifacts, and configuration outside the checkout.
-3. Install 1.0.0-beta in a separate environment.
+3. Install 1.0.0-beta1 in a separate environment.
 4. Test the migrated copy before replacing the old installation.
 
 Keep the original backup until you have checked saved questions, result counts, and exports.

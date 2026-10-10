@@ -1,50 +1,60 @@
 # PaperSeek online
 
-[Open PaperSeek](https://paperseek.app/) to search from your browser. The online edition shares the Community search workflow, results, citation map, and experimental review workspace.
+[Open PaperSeek](https://paperseek.app/) to search from your browser. The online edition shares the Community search workflow, results, bibliometrics, citation map, and experimental review workspace. PaperSeek online is in public beta.
 
-## Choose a mode
+## Two ways to run a task
 
-Use the mode menu in the navigation bar.
+Switch at any time from the account menu at the bottom of the sidebar, or in **Settings › Model service**.
 
-| | PaperSeek Service | Bring Your Own Key |
+| | PaperSeek Service | Your own key |
 | --- | --- | --- |
-| Model access | Operated by the site | Your model API credentials |
-| Search configuration | Source, field, budget, model, and ranking method | Community model and search configuration |
-| Model connection | Choose a model from a list | Configure provider, protocol, URL, and key |
-| Account | Required | Optional for a temporary search |
-| Saved history and reviews | Available when signed in | Available when signed in |
+| Models | Provided by PaperSeek, chosen from a list | Your saved model connections |
+| Keys | None needed | Saved to your account in Settings |
+| Credits | Uses daily credits | No credits |
+| Account | Required | Required to save history; a signed-out temporary search is possible |
 
-The source access requirements and the model credentials are separate. A model API key does not grant access to a literature database.
+Model keys and data-source keys are separate. A model API key does not grant access to a literature database.
 
 ## Use PaperSeek Service
 
-1. Sign in and select **PaperSeek Service**.
-2. Choose a data source and, if needed, a research field.
-3. Choose a model and search budget.
-4. Describe the question and start the search.
+1. Sign in. PaperSeek Service is the default mode.
+2. Describe your question, choose a data source and a search budget.
+3. Start the search. The form shows how many credits the task uses and how many are left today.
 
-Local fusion is the default preliminary ranking method. You can also choose Embedding + Rerank or System One when offered. The site manages their connections. Writing models are selected from a list as well.
+Choose the built-in models for searching, writing, and preliminary ranking in **Settings › Model service**. Available models and sources are shown in the application and can change with the site's configuration.
 
-Available models, sources, and allowances are shown in the application. They can change with the site's configuration.
+## Credits
 
-## Use Bring Your Own Key
+During the public beta every account receives **20 free credits a day**. Only PaperSeek Service uses credits:
 
-Select **Bring Your Own Key**, then configure models as described in [Models & ranking](../guide/models.md). The server makes provider requests using the submitted credentials.
+| Task | Credits |
+| --- | --- |
+| Search | 1 |
+| Bibliometric analysis | 1 |
+| Review | 5 for the whole review |
 
-Online BYOK accepts public model endpoints. Localhost, `127.0.0.1`, private network addresses, and other non-public destinations are blocked. To use a model on your own machine or LAN, run the [Community edition](../self-hosting/index.md).
+Credits are deducted when a task starts. A review is charged once, by its first writing task; generating the outline again, writing, and rewriting sections of the same review are free. If a task fails or is cancelled, its credits are returned; a task that completes with warnings is not refunded.
 
-An anonymous search has no saved account history. Temporary results can be lost after expiry or a server restart. Sign in **before starting** a search that you want to retain or use for a review; signing in later does not import an anonymous run.
+Your remaining credits appear in the sidebar and in **Settings › User**, together with the daily refill time. To ask for a larger allowance during the public beta, email [support@paperseek.app](mailto:support@paperseek.app) with your account ID (copy it in Settings › User), your institution, and how you use PaperSeek.
+
+## Use your own key
+
+1. Select **Your own key** from the account menu.
+2. In **Settings › Model service**, add a model connection under **My model connections** (see [Models & ranking](../guide/models.md)).
+3. Under **Data-source keys**, add keys for the sources you use. With your own key, sources that recommend a key require one; arXiv, Crossref, and other key-free sources work without one.
+
+Keys are encrypted on the PaperSeek server, used only for your own tasks, and never shown again; the page displays only their last four characters. Tasks with your own key use no credits. Provider charges and rate limits belong to your own provider account.
+
+Online, only public model endpoints are accepted. Localhost, `127.0.0.1`, private network addresses, and other non-public destinations are blocked. To use a model on your own machine or network, run the [Community edition](../self-hosting/index.md).
+
+## Search without signing in
+
+Without an account you can run a temporary search: choose a provider and model, and type your model key (and a data-source key if the source needs one) directly into the search form. Keys are used for that search only and are never saved, including in the browser.
+
+A temporary search is held in server memory. You can refresh the tab while it is available, but it is not added to history, and it may be gone after the tab closes, it expires, or the service restarts. Bibliometrics, reviews, history, and Settings require an account. Sign in **before starting** a search you want to keep; signing in later does not import a temporary search.
 
 ## When your task is queued
 
-The site limits how many tasks execute at the same time. A queued task shows its queue position and waiting state; it starts when capacity becomes available. Closing and reopening a saved task does not create another copy.
-
-You can cancel while waiting. A full queue or an expired wait requires a later retry. Avoid repeatedly submitting the same question while it is already queued or running.
-
-## Allowances and upstream charges
-
-The account view shows service allowances. Service search allowance is counted on successful completion, including completion with warnings; failed and cancelled searches do not count as successful searches. Managed writing has a separate allowance.
-
-BYOK model charges belong to your provider account. Provider credit and rate limits are separate from PaperSeek allowances.
+The site limits how many tasks run at the same time. A queued task shows its position and starts automatically when there is room; there is no need to submit it again. You can leave the queue while waiting, which returns any credits.
 
 See [Your account](account.md), [Search](../guide/search.md), and [Troubleshooting](../reference/troubleshooting.md).

@@ -37,7 +37,7 @@ docker compose up -d
 
 On PowerShell, replace `cp` with `Copy-Item`. Edit `.env` with your deployment defaults before starting.
 
-The service listens on port **8765** and stores data in the `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta` in the Compose environment to pin the release; otherwise the supplied Compose file uses `latest`.
+The service listens on port **8765** and stores data in the `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta1` in the Compose environment to pin the release; otherwise the supplied Compose file uses `latest`.
 
 ```sh
 docker compose logs -f paperseek
@@ -74,4 +74,4 @@ The default server binds to loopback. Community is designed for a trusted local 
 
 Stop the API and worker before copying the whole data directory or Docker volume. Restore into a separate location first and verify history, results, and artifacts before replacing a live installation.
 
-Continue with [configuration](../reference/configuration.md) or the [1.0.0-beta migration guide](upgrade.md).
+Continue with [configuration](../reference/configuration.md) or the [1.0.0-beta1 migration guide](upgrade.md).

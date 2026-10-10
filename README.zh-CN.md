@@ -5,7 +5,7 @@
   <p>开源文献检索、初步文献计量与基于摘要的文献综述。</p>
   <p>
     <a href="LICENSE"><img alt="Apache 2.0 许可" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
-    <img alt="版本 1.0.0-beta" src="https://img.shields.io/badge/version-1.0.0--beta-171717?style=flat-square">
+    <img alt="版本 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
     <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
   </p>
@@ -18,14 +18,14 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 可以在自己的电脑或服务器运行社区版，也可以直接打开 [PaperSeek 在线版](https://paperseek.app/)。自由选择模型 API，通过 Web、命令行、HTTP API 或 MCP 接入。
 
-![PaperSeek 1.0.0-beta 研究工作区](docs/public/images/paperseek-workspace-beta-zh.png)
+![PaperSeek 1.0.0-beta1 研究工作区](docs/public/images/workspace-results-zh.png)
 
-*社区版 1.0.0-beta，含离线演示记录。在线版共用工作区，并增加账户和服务模式控制。*
+*社区版 1.0.0-beta1，含离线演示记录。在线版共用工作区，并增加账户和服务模式控制。*
 
 ## 目录
 
 - [为什么使用 PaperSeek](#为什么使用-paperseek)
-- [1.0.0-beta 的变化](#100-beta-的变化)
+- [1.0.0-beta1 的变化](#100-beta-的变化)
 - [工作流程](#工作流程)
 - [数据源](#数据源)
 - [快速开始](#快速开始)
@@ -50,9 +50,9 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 **自然衔接下一步。** 筛选、选择和导出文献，重新打开历史，或将一组摘要证据整理为实验性综述项目。
 
-## 1.0.0-beta 的变化
+## 1.0.0-beta1 的变化
 
-**1.0.0-beta 是一次包含不兼容变更的完整架构重构。** 运行时、前端、持久化和集成统一为按职责划分、支持持久任务执行的模块化应用。
+**1.0.0-beta1 是一次包含不兼容变更的完整架构重构。** 运行时、前端、持久化和集成统一为按职责划分、支持持久任务执行的模块化应用。
 
 - 文献检索、文献计量、文献综述三个顶部模块，各自拥有可折叠历史侧栏；中英文和模型配置集中到右上角设置。
 - 对实际获取的完整去重候选集做初步计量：年份与来源分布、关键词共现、文献耦合、数据覆盖率与独立导出；LLM 仍只评分原子集。
@@ -65,7 +65,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 架构变化详见[完整更新日志](https://docs.paperseek.app/zh/changelog#v1-0-0-beta)。从 0.2 升级需要 Python 3.12+，请先阅读[迁移指南](https://docs.paperseek.app/zh/self-hosting/upgrade)：用户数据有明确迁移路径，旧内部导入、前端接口及废弃命令／配置不再保留。
 
-此版本直接接续 0.2.x；公开版本为 **1.0.0-beta**，Python 包版本为 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
+此版本直接接续 0.2.x；公开版本为 **1.0.0-beta1**，Python 包版本为 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
 
 ## 工作流程
 
@@ -117,7 +117,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-启动前编辑 `.env`。PowerShell 可以使用 `Copy-Item` 替代 `cp`。Compose 默认使用 8765 端口，并通过 `paperseek-data` 卷持久化数据。可在 Compose 环境中设置 `PAPERSEEK_VERSION=1.0.0-beta` 固定镜像版本。
+启动前编辑 `.env`。PowerShell 可以使用 `Copy-Item` 替代 `cp`。Compose 默认使用 8765 端口，并通过 `paperseek-data` 卷持久化数据。可在 Compose 环境中设置 `PAPERSEEK_VERSION=1.0.0-beta1` 固定镜像版本。
 
 ### 从源码安装
 

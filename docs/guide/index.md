@@ -9,10 +9,10 @@ It combines language models with scholarly data sources. You can inspect the sea
 | | Community edition | PaperSeek online |
 | --- | --- | --- |
 | Start | Install on your computer or server | Open [paperseek.app](https://paperseek.app/) |
-| Models | Configure your model services | PaperSeek Service or Bring Your Own Key |
+| Models | Configure your model services | PaperSeek Service or your own key |
 | History | Local database and files | Your signed-in account |
 | Account | No PaperSeek account required | Required for saved history and reviews |
-| Local model endpoints | Supported on your deployment | Public endpoints only in BYOK |
+| Local model endpoints | Supported on your deployment | Public endpoints only, with your own key |
 
 [Install Community](quick-start.md) · [Use the online version](../online/index.md)
 

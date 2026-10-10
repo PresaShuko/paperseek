@@ -18,7 +18,7 @@ Hosted 使用固定的 Community 分发包。公共行为应在此修复，不�
 
 ## 架构 {#architecture}
 
-1.0.0-beta 完成了向模块化单体与持久任务执行架构的重构。研究逻辑、应用操作和部署适配各自承担明确职责，并共同交付为可直接使用的本地应用。
+1.0.0-beta1 完成了向模块化单体与持久任务执行架构的重构。研究逻辑、应用操作和部署适配各自承担明确职责，并共同交付为可直接使用的本地应用。
 
 ### 依赖边界
 
@@ -40,7 +40,7 @@ Vue 3 + TypeScript 页面通过 `/api/v1` 工作；OpenAPI 生成脚本同时产
 
 Hosted 使用经过源码身份和校验和验证的固定 Community wheel，从同一 wheel 提取共享 Vue 源码，再加入账户和服务界面。公共改动在重新构建并更新锁定发行物后才会进入 Hosted，修改相邻源码目录不会自动更新已安装版本。
 
-本次变化见 [1.0.0-beta 更新日志](changelog.md#v1-0-0-beta)，已有本地安装请按[升级指南](self-hosting/upgrade.md)迁移。新模块的文件职责和验证入口见[工作区维护说明（英文）](../reference/bibliometrics-architecture.md)。
+本次变化见 [1.0.0-beta1 更新日志](changelog.md#v1-0-0-beta)，已有本地安装请按[升级指南](self-hosting/upgrade.md)迁移。新模块的文件职责和验证入口见[工作区维护说明（英文）](../reference/bibliometrics-architecture.md)。
 
 ## 开发环境
 

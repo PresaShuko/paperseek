@@ -4,8 +4,8 @@ const base = process.env.DOCS_BASE || '/'
 const groups = [
   ['Start here', '开始使用', [['Introduction', '认识 PaperSeek', 'guide/'], ['Quick start', '快速开始', 'guide/quick-start']]],
   ['Using PaperSeek', '使用 PaperSeek', [['Workspace & history', '工作区与历史', 'guide/workspace'], ['Search', '文献检索', 'guide/search'], ['Bibliometrics', '文献计量', 'guide/bibliometrics'], ['Data sources', '数据源', 'guide/sources'], ['Models & ranking', '模型与排序', 'guide/models'], ['Results & history', '结果与历史', 'guide/results'], ['Citation maps', '引用图谱', 'guide/citation-map'], ['Reviews · Experimental', '综述 · 实验性', 'guide/reviews']]],
-  ['PaperSeek online', '在线版', [['Service & BYOK', 'PaperSeek 服务与 BYOK', 'online/'], ['Your account', '账户与登录', 'online/account']]],
-  ['Run it yourself', '自托管与集成', [['Local & Docker', '本地与 Docker', 'self-hosting/'], ['Upgrade to 1.0.0-beta', '升级至 1.0.0-beta', 'self-hosting/upgrade'], ['Command line', '命令行', 'integrations/cli'], ['Agent Skill', 'Agent Skill', 'integrations/skill'], ['MCP', 'MCP', 'integrations/mcp'], ['HTTP API', 'HTTP API', 'integrations/api']]],
+  ['PaperSeek online', '在线版', [['Service, keys & credits', '服务、密钥与积分', 'online/'], ['Your account', '账户与登录', 'online/account']]],
+  ['Run it yourself', '自托管与集成', [['Local & Docker', '本地与 Docker', 'self-hosting/'], ['Upgrade to 1.0.0-beta1', '升级至 1.0.0-beta1', 'self-hosting/upgrade'], ['Command line', '命令行', 'integrations/cli'], ['Agent Skill', 'Agent Skill', 'integrations/skill'], ['MCP', 'MCP', 'integrations/mcp'], ['HTTP API', 'HTTP API', 'integrations/api']]],
   ['Reference', '参考', [['Configuration', '配置参考', 'reference/configuration'], ['Troubleshooting', '常见问题', 'reference/troubleshooting'], ['Contributing', '参与贡献', 'contributing']]],
   ['Changelog', '更新日志', [['All releases', '版本记录', 'changelog']]]
 ] as const
@@ -16,7 +16,7 @@ function navigation(zh = false): DefaultTheme.Config {
     nav: [
       { text: zh ? '文档' : 'Documentation', link: `${prefix}guide/`, activeMatch: `${prefix}(guide|self-hosting|integrations|reference|contributing)` },
       { text: zh ? '在线版' : 'Online guide', link: `${prefix}online/`, activeMatch: `${prefix}online/` },
-      { text: 'v1.0.0-beta', link: `${prefix}changelog` },
+      { text: 'v1.0.0-beta1', link: `${prefix}changelog` },
       { text: zh ? '打开 PaperSeek' : 'Open PaperSeek', link: 'https://paperseek.app/' }
     ],
     sidebar: groups.map(([en, cn, pages]) => ({
@@ -65,8 +65,8 @@ export default defineConfig({
     zh: { label: '简体中文', lang: 'zh-CN', description: '从研究问题到阅读清单。开源文献检索、引用图谱与基于摘要的文献综述。', themeConfig: navigation(true) }
   },
   themeConfig: {
-    logo: '/paperseek-mark.png',
-    siteTitle: 'PaperSeek',
+    logo: { light: '/paperseek-lockup.svg', dark: '/paperseek-lockup-dark.svg', alt: 'PaperSeek' },
+    siteTitle: false,
     socialLinks: [{ icon: 'github', link: 'https://github.com/MingfengHong/paperseek' }],
     search: { provider: 'local', options: { miniSearch: { options: {
       tokenize(text) {

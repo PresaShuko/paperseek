@@ -37,7 +37,7 @@ docker compose up -d
 
 PowerShell 中可将 `cp` 换成 `Copy-Item`。启动前编辑 `.env`，填写需要的默认配置。
 
-服务端口为 **8765**，数据存入 `paperseek-data` 命名卷。可在 Compose 环境中设置 `PAPERSEEK_VERSION=1.0.0-beta` 固定版本；未设置时，随仓库提供的 Compose 使用 `latest`。
+服务端口为 **8765**，数据存入 `paperseek-data` 命名卷。可在 Compose 环境中设置 `PAPERSEEK_VERSION=1.0.0-beta1` 固定版本；未设置时，随仓库提供的 Compose 使用 `latest`。
 
 ```sh
 docker compose logs -f paperseek

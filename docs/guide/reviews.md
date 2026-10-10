@@ -22,7 +22,7 @@ Provide a topic and select English or Chinese, then Short, Standard, or Detailed
 
 Default chapter counts are **1, 3, and 6**, with a custom range of **1–14**. This is not a fixed word-count guarantee; the evidence and outline determine what can be written.
 
-Configure a writing model in Community/BYOK, or choose an allowed model in PaperSeek Service.
+Configure a writing model in Community or with your own key online, or choose an allowed model in PaperSeek Service.
 
 ## 3. Check the outline
 

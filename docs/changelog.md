@@ -6,18 +6,25 @@ outline: 2
 
 Features, improvements, and upgrade notes, from the first demo to PaperSeek 1.0.0-beta.
 
-## 1.0.0-beta {#v1-0-0-beta}
+## 1.0.0-beta1 {#v1-0-0-beta}
 
-PaperSeek 1.0.0-beta is a **complete architectural refactor with breaking changes**. It rebuilds the execution model, frontend, storage boundaries, and distribution around a shared research application, with an explicit migration path for existing user data.
+PaperSeek 1.0.0-beta1 is a **complete architectural refactor with breaking changes**. It rebuilds the execution model, frontend, storage boundaries, and distribution around a shared research application, with an explicit migration path for existing user data.
 
 ### Three modules and independent histories
 
-- Top-level Search, Bibliometrics, and Review tabs, a collapsible module history sidebar, and a bottom account menu and standalone settings pages in the shadcn visual style.
+- A redesigned workspace in the shadcn visual style: Search, Bibliometrics, and Reviews in a collapsible sidebar with each module's history, and the account at the bottom.
+- Settings pages for model APIs, data sources, general preferences, and the user's data: clear saved keys or all history, each after typing a confirmation phrase. Running tasks are stopped before history is cleared.
 - Preliminary bibliometrics over the actually retrieved deduplicated candidate corpus; native-field coverage, keyword co-occurrence, bounded bibliographic coupling, cached networks, and independent exports. LLM scoring remains a subset.
 - Review citation evidence alongside papers, outline, and draft; new reviews preserve available source graph snapshots.
 - Rename records without changing original queries or execution settings.
 
-This beta follows 0.2.x directly. Python packages use the normalized version `1.0.0b1`; the public release and container tag are `1.0.0-beta`. The documentation describes this target release; deployment status is reported separately.
+This beta follows 0.2.x directly. Python packages use the normalized version `1.0.0b1`; the public release and container tag are `1.0.0-beta1`. The documentation describes this target release; deployment status is reported separately.
+
+### PaperSeek online
+
+- Sign in for PaperSeek Service: built-in models, no keys, and free daily credits during the public beta (20 a day). A search or an analysis uses 1 credit and a review 5, deducted when the task starts; a failed or cancelled task returns them.
+- Your own key: save model connections and data-source keys to your account in Settings; tasks then use your API and no credits. Data sources that recommend a key require one in this mode.
+- Without signing in, run one temporary search with your own key typed into the form. It is held in memory only and never saved.
 
 ### Architecture rebuilt around clear responsibilities
 

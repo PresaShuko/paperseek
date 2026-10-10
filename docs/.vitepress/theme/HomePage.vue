@@ -14,7 +14,7 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
   <main class="ps-home" id="main-content">
     <section class="ps-hero ps-container" aria-labelledby="hero-heading">
       <div class="ps-hero-copy">
-        <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta', '认识 PaperSeek 1.0.0-beta') }}<span aria-hidden="true">↗</span></a>
+        <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta1', '认识 PaperSeek 1.0.0-beta1') }}<span aria-hidden="true">↗</span></a>
         <h1 id="hero-heading">{{ t('Follow the question.', '从问题出发，') }}<br><span>{{ t('Find the evidence.', '找到研究的线索。') }}</span></h1>
         <p class="ps-hero-description">{{ t('A thoughtful way through the literature. Turn your research question into a reading list, explore how papers connect, and bring the evidence together.', '把研究问题变成值得阅读的文献清单，沿着引用发现新的线索，再将分散的证据整理成综述。让文献探索更有条理。') }}</p>
         <div class="ps-actions">
@@ -29,7 +29,7 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
     <section class="ps-section ps-container" aria-labelledby="tour-heading">
       <h2 id="tour-heading" class="ps-sr-only">{{ t("Explore the research workspace", "探索文献研究工作区") }}</h2>
       <ProductTour :zh="zh" />
-      <p class="ps-tour-caption">{{ t('An illustrative look at the workflow. Your results depend on the question, source, and model you choose.', '流程示意。实际结果取决于研究问题、数据源和所选模型。') }}</p>
+      <p class="ps-tour-caption">{{ t('Real screens with illustrative papers. Your results depend on the question, source, and model you choose.', '真实界面，文献为示例。实际结果取决于研究问题、数据源和所选模型。') }}</p>
       <div class="ps-principles">
         <article><span class="ps-step-number">01 / {{ t('SEARCH', '检索') }}</span><h3>{{ t('Go beyond a single query.', '不止于一次关键词检索。') }}</h3><p>{{ t('PaperSeek plans queries, refines the search, and combines complementary retrieval paths before ranking the candidates.', '从问题理解到检索式迭代，综合不同召回路径，再对候选文献排序。你可以查看每一步进展。') }}</p><a :href="link('guide/search')">{{ t('How search works', '了解检索流程') }} →</a></article>
         <article><span class="ps-step-number">02 / {{ t('ANALYZE', '计量') }}</span><h3>{{ t('Explore the whole retrieved corpus.', '观察完整候选集。') }}</h3><p>{{ t('Inspect distributions, keyword co-occurrence, and shared references using the full retrieved corpus. Keep model scoring focused on its subset.', '用实际获取的候选集分析分布、关键词共现和共同参考文献，模型评分仍只针对原子集。') }}</p><a :href="link('guide/bibliometrics')">{{ t('Explore bibliometrics', '了解文献计量') }} →</a></article>
@@ -49,7 +49,7 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
       <div class="ps-container">
         <div class="ps-section-heading"><div><p class="ps-eyebrow">{{ t('MAKE IT YOURS', '选择适合你的方式') }}</p><h2>{{ t('Your research.', '你的研究，') }}<br><span>{{ t('Your way of working.', '用你习惯的方式。') }}</span></h2></div><p>{{ t('Use PaperSeek in your browser, or keep the workspace on your own machine. The same search foundation, with a different home for your data.', '直接打开在线版，或在自己的设备上运行。相同的检索基础，不同的数据存储与模型配置方式。') }}</p></div>
         <div class="ps-choice-grid">
-          <article class="ps-choice"><div class="ps-choice-icon" aria-hidden="true">↗</div><p class="ps-eyebrow">PAPERSEEK ONLINE</p><h3>{{ t('Open a tab. Follow an idea.', '打开浏览器，开始探索。') }}</h3><p>{{ t('Choose PaperSeek Service or Bring Your Own Key. Sign in to keep history and work on reviews.', '选择 PaperSeek 服务或 Bring Your Own Key。登录后保存检索历史，并继续整理综述。') }}</p><a class="ps-button ps-button-primary" href="https://paperseek.app/">{{ t('Open PaperSeek', '打开 PaperSeek') }} ↗</a><a class="ps-text-link" :href="link('online/')">{{ t('Read the online guide', '阅读在线版指南') }} →</a></article>
+          <article class="ps-choice"><div class="ps-choice-icon" aria-hidden="true">↗</div><p class="ps-eyebrow">PAPERSEEK ONLINE</p><h3>{{ t('Open a tab. Follow an idea.', '打开浏览器，开始探索。') }}</h3><p>{{ t('Sign in for PaperSeek Service with free daily credits during the public beta, or use your own model key. History and reviews stay with your account.', '登录后使用 PaperSeek 服务，公测期间每日免费积分；也可以使用自己的模型密钥。检索历史和综述随账户保存。') }}</p><a class="ps-button ps-button-primary" href="https://paperseek.app/">{{ t('Open PaperSeek', '打开 PaperSeek') }} ↗</a><a class="ps-text-link" :href="link('online/')">{{ t('Read the online guide', '阅读在线版指南') }} →</a></article>
           <article class="ps-choice"><div class="ps-choice-icon" aria-hidden="true">⌘</div><p class="ps-eyebrow">COMMUNITY EDITION</p><h3>{{ t('A workspace of your own.', '在自己的设备上研究。') }}</h3><p>{{ t('Run the open-source app locally or with Docker. Bring your model credentials and keep history in local storage.', '本地安装或使用 Docker 部署。配置自己的模型，把历史与文件保存在自己管理的存储中。') }}</p><a class="ps-button" :href="link('guide/quick-start')">{{ t('Install Community', '安装社区版') }} →</a><a class="ps-text-link" :href="link('integrations/skill')">{{ t('Use the Agent Skill', '使用 Agent Skill') }} →</a></article>
         </div>
       </div>
