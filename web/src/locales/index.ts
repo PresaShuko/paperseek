@@ -991,6 +991,11 @@ function applyDocumentLanguage(language: Language): void {
 // Applied at module load, before the app mounts, to avoid a language flash (§10.11).
 applyDocumentLanguage(locale.language);
 
+/** Add product-specific text (such as a deployment's own error codes) before the app mounts. */
+export function extendMessages(entries: Record<Language, Record<string, string>>): void {
+  for (const language of Object.keys(entries) as Language[]) Object.assign(messages[language], entries[language]);
+}
+
 export function useLocale() {
   const t = (key: string): string => messages[locale.language][key] || (reviewMessages[locale.language] as Record<string, string>)[key] || key;
   const displayName = (prefix: "provider" | "source", value: string, fallback = ""): string => {
