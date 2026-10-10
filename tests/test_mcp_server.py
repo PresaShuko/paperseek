@@ -35,7 +35,24 @@ async def _run_stdio_smoke():
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
     environment = dict(os.environ)
+    for key in CONFIG_ENV_KEYS:
+        environment.pop(key, None)
     environment["PYTHONPATH"] = str(ROOT)
+    environment.update(
+        {
+            "DATA_SOURCE": "arxiv",
+            "LLM_PROVIDER": "ollama",
+            "LLM_API_TYPE": "openai_chat",
+            "LLM_MODEL": "fixture-model",
+            "LLM_BASE_URL": "http://127.0.0.1:11434/v1",
+            "LLM_API_KEY": "",
+            "PAPERSEEK_DOTENV_DISABLED": "true",
+            "PAPERSEEK_CONFIG_DIR": str(ROOT / "tests/fixtures/mcp/no-user-config"),
+            "PAPERSEEK_HISTORY_ENABLED": "false",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        }
+    )
     parameters = StdioServerParameters(
         command=sys.executable,
         args=["-m", "paperseek.mcp_server"],

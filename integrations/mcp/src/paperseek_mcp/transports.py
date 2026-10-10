@@ -5,14 +5,14 @@ from collections import deque
 from dataclasses import dataclass
 import hmac
 import time
-from typing import Any
 
 from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
 from mcp.server.mcpserver import MCPServer
 from mcp.server.streamable_http_manager import RequestBodyLimitMiddleware
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import Response
+from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from paperseek_mcp.server import create_server
@@ -104,6 +104,23 @@ class BoundedHTTPApplication:
             await self._app(scope, receive, send)
 
 
+class PrivateTokenApplication:
+    """Protect private HTTP with a pre-shared token, without advertising OAuth."""
+
+    def __init__(self, app: ASGIApp, verifier: StaticTokenVerifier) -> None:
+        self._app = app
+        self._authenticated = AuthenticationMiddleware(
+            RequireAuthMiddleware(app, required_scopes=["paperseek:mcp"]),
+            backend=BearerAuthBackend(verifier),
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            await self._authenticated(scope, receive, send)
+        else:
+            await self._app(scope, receive, send)
+
+
 @dataclass(slots=True)
 class MCPRuntime:
     server: MCPServer
@@ -138,20 +155,10 @@ class MCPRuntime:
 
 def create_runtime(config: TransportConfig, application: PaperSeekApplication) -> MCPRuntime:
     token_verifier = None
-    auth = None
-    if config.service_token:
+    if config.transport != "stdio" and config.service_token:
         resource = config.public_url or f"http://{config.host}:{config.port}{config.path}"
         token_verifier = StaticTokenVerifier(config.service_token, resource)
-        auth = AuthSettings(
-            issuer_url=resource,
-            resource_server_url=resource,
-            required_scopes=["paperseek:mcp"],
-        )
-    server = create_server(
-        application,
-        token_verifier=token_verifier,
-        auth=auth,
-    )
+    server = create_server(application)
     if config.transport == "stdio":
         return MCPRuntime(
             server=server,
@@ -187,6 +194,8 @@ def create_runtime(config: TransportConfig, application: PaperSeekApplication) -
         )
     else:
         raise ValueError("The selected MCP transport is not supported.")
+    if token_verifier is not None:
+        http_app = PrivateTokenApplication(http_app, token_verifier)
     bounded = BoundedHTTPApplication(http_app)
     return MCPRuntime(
         server=server,

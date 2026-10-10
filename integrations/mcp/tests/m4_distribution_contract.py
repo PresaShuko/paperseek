@@ -8,7 +8,8 @@ import unittest
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
 COMMUNITY_ROOT = MCP_ROOT.parents[1]
-VERSION = "0.3.0"
+VERSION = "1.0.0b1"
+RELEASE = "1.0.0-beta"
 SERVER_NAME = "io.github.MingfengHong/paperseek"
 
 
@@ -43,7 +44,7 @@ class M4MCPDistributionContract(unittest.TestCase):
 
         self.assertEqual(metadata["$schema"], "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json")
         self.assertEqual(metadata["name"], SERVER_NAME)
-        self.assertEqual(metadata["version"], VERSION)
+        self.assertEqual(metadata["version"], RELEASE)
         self.assertEqual(metadata["repository"], {
             "source": "github",
             "url": "https://github.com/MingfengHong/paperseek",
@@ -54,7 +55,7 @@ class M4MCPDistributionContract(unittest.TestCase):
         self.assertEqual(packages["pypi"]["transport"], {"type": "stdio"})
         self.assertEqual(
             packages["oci"]["identifier"],
-            f"ghcr.io/mingfenghong/paperseek-mcp:{VERSION}",
+            f"ghcr.io/mingfenghong/paperseek-mcp:{RELEASE}",
         )
         self.assertEqual(packages["oci"]["transport"], {
             "type": "streamable-http",
@@ -69,12 +70,12 @@ class M4MCPDistributionContract(unittest.TestCase):
 
         self.assertIn("ghcr.io/mingfenghong/paperseek-mcp", dockerfile)
         self.assertIn(f'io.modelcontextprotocol.server.name="{SERVER_NAME}"', dockerfile)
-        self.assertIn(f'org.opencontainers.image.version="{VERSION}"', dockerfile)
+        self.assertIn(f'org.opencontainers.image.version="{RELEASE}"', dockerfile)
         self.assertIn('ENTRYPOINT ["paperseek-mcp"]', dockerfile)
         self.assertIn('"--host", "0.0.0.0"', dockerfile)
         self.assertNotIn("PAPERSEEK_MCP_SERVICE_TOKEN=", dockerfile)
         self.assertIn("sha256sum --check SHA256SUMS", dockerfile)
-        self.assertIn("--no-index --find-links /wheels paperseek-mcp==0.3.0", dockerfile)
+        self.assertIn("--no-index --find-links /wheels paperseek-mcp==1.0.0b1", dockerfile)
         self.assertNotIn("paperseek-mcp", compose)
         self.assertIn("backend/.pytest_cache", dockerignore)
 
@@ -82,7 +83,7 @@ class M4MCPDistributionContract(unittest.TestCase):
         readme = (MCP_ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn(f"<!-- mcp-name: {SERVER_NAME} -->", readme)
-        self.assertIn("pip install paperseek-mcp==0.3.0", readme)
+        self.assertIn("pip install paperseek-mcp==1.0.0b1", readme)
         self.assertNotIn("paperseek[mcp]", readme)
         self.assertNotIn("paperseek.mcp_server", readme)
 

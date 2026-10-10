@@ -37,6 +37,12 @@ jobs:
       - name: Compile Python
         run: uv run --locked python -m compileall -q src
 
+      - name: Lint Python
+        run: uv run --locked ruff check --config pyproject.toml src ../integrations/mcp/src
+
+      - name: Check shared transport and credential types
+        run: uv run --locked mypy
+
       - name: Check dependency boundaries
         run: uv run --locked python tests/import_boundaries.py
 
@@ -65,6 +71,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.9.24
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -81,6 +95,12 @@ jobs:
 
       - name: Type-check Web
         run: npm run typecheck
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser contracts
+        run: npm run test:browser
 
       - name: Build Web
         run: |
@@ -132,8 +152,8 @@ jobs:
         run: |
           uv venv .mcp-installed --python 3.12
           uv pip install --python .mcp-installed/bin/python \
-            .mcp-dist/paperseek-0.3.0-py3-none-any.whl \
-            .mcp-dist/paperseek_mcp-0.3.0-py3-none-any.whl
+            .mcp-dist/paperseek-1.0.0b1-py3-none-any.whl \
+            .mcp-dist/paperseek_mcp-1.0.0b1-py3-none-any.whl
           gate=$(env -u PYTHONPATH \
             PAPERSEEK_CLI_EXECUTABLE="$PWD/.mcp-installed/bin/paperseek" \
             PAPERSEEK_ISOLATED_PREFIX="$PWD/.mcp-installed" \

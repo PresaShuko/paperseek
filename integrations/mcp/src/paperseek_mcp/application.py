@@ -95,7 +95,6 @@ class CommunityMCPApplication:
         field_ids: list[str] | None = None,
         field_hint: str = "",
         citation_enabled: bool | None = None,
-        fetch_abstracts: bool = False,
         idempotency_key: str = "",
     ) -> dict[str, object]:
         prepared = prepare_run_submission(
@@ -106,8 +105,7 @@ class CommunityMCPApplication:
                 field_ids=field_ids or [],
                 field_hint=field_hint,
                 citation_enabled=citation_enabled,
-                fetch_abstracts=fetch_abstracts,
-            ),
+                            ),
             self.settings,
         )
         key = idempotency_key.strip() or str(uuid4())
@@ -174,7 +172,6 @@ class CommunityMCPApplication:
                 "results": [
                     {
                         **item.record.model_dump(mode="json"),
-                        "metadata_status": item.metadata_status,
                     }
                     for item in page.results
                 ],

@@ -81,10 +81,8 @@ class M4MCPToolRegistryContract(unittest.TestCase):
 
         self.assertEqual([tool.name for tool in tools], EXPECTED_TOOLS)
         self.assertEqual(server.name, "paperseek")
-        self.assertEqual(server.version, "0.3.0")
-        abstract_option = tools[0].input_schema["properties"]["fetch_abstracts"]
-        self.assertEqual(abstract_option["type"], "boolean")
-        self.assertFalse(abstract_option["default"])
+        self.assertEqual(server.version, "1.0.0b1")
+        self.assertNotIn("fetch_abstracts", tools[0].input_schema["properties"])
 
     def test_start_returns_run_id_without_waiting_for_completion(self):
         from paperseek_mcp.server import create_server
@@ -94,7 +92,7 @@ class M4MCPToolRegistryContract(unittest.TestCase):
         result = asyncio.run(
             server.call_tool(
                 "start_search",
-                {"question": "Durable literature search", "source": "openalex", "fetch_abstracts": True},
+                {"question": "Durable literature search", "source": "openalex"},
             )
         )
 
@@ -102,7 +100,66 @@ class M4MCPToolRegistryContract(unittest.TestCase):
             _payload(result),
             {"run_id": "00000000-0000-0000-0000-000000000001", "status": "queued"},
         )
-        self.assertTrue(application.calls[0][1]["fetch_abstracts"])
+        self.assertNotIn("fetch_abstracts", application.calls[0][1])
+
+    def test_invalid_pagination_is_a_tool_error_before_application_access(self):
+        from mcp import Client
+        from paperseek_mcp.server import create_server
+
+        application = RecordingApplication()
+
+        async def exercise():
+            async with Client(create_server(application)) as client:
+                for name, arguments in [
+                    ("get_search_events", {"run_id": "run-1", "after_sequence": -1}),
+                    ("get_search_events", {"run_id": "run-1", "limit": 201}),
+                    ("get_search_results", {"run_id": "run-1", "page_size": 0}),
+                    ("export_results", {"run_id": "run-1", "format": "html"}),
+                ]:
+                    result = await client.call_tool(name, arguments)
+                    self.assertTrue(result.is_error, name)
+
+        asyncio.run(exercise())
+        self.assertEqual(application.calls, [])
+
+    def test_unexpected_errors_do_not_expose_internal_details(self):
+        from mcp import Client
+        from paperseek_mcp.server import create_server
+
+        class BrokenApplication(RecordingApplication):
+            def list_sources(self):
+                raise RuntimeError("private-database-path-and-credential-sentinel")
+
+        async def exercise():
+            async with Client(create_server(BrokenApplication())) as client:
+                result = await client.call_tool("list_sources")
+                self.assertTrue(result.is_error)
+                self.assertNotIn("credential-sentinel", str(result.content))
+                self.assertIn("server log", str(result.content))
+
+        with self.assertLogs("paperseek_mcp.tools", level="ERROR"):
+            asyncio.run(exercise())
+
+    def test_unknown_tools_are_protocol_errors_and_missing_runs_are_tool_errors(self):
+        from mcp import Client, MCPError
+        from mcp.types import INVALID_PARAMS
+        from paperseek_app.errors import RunNotFound
+        from paperseek_mcp.server import create_server
+
+        class MissingRunApplication(RecordingApplication):
+            def get_search_status(self, **values):
+                raise RunNotFound("Run was not found. Check the run_id.")
+
+        async def exercise():
+            async with Client(create_server(MissingRunApplication())) as client:
+                with self.assertRaises(MCPError) as error:
+                    await client.call_tool("unknown_tool")
+                self.assertEqual(error.exception.error.code, INVALID_PARAMS)
+                missing = await client.call_tool("get_search_status", {"run_id": "missing"})
+                self.assertTrue(missing.is_error)
+                self.assertIn("Check the run_id", str(missing.content))
+
+        asyncio.run(exercise())
 
     def test_cursor_cancel_export_and_capability_arguments_reach_one_application(self):
         from paperseek_mcp.server import create_server

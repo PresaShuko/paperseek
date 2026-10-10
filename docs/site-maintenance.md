@@ -1,96 +1,18 @@
-# 文档站维护说明
+---
+layout: doc
+sidebar: false
+outline: false
+search: false
+head:
+  - - meta
+    - name: robots
+      content: noindex
+---
 
-PaperSeek 文档站使用 VitePress 构建。文档源码和发布产物分开管理：
+# 文档已更新
 
-| 分支 | 用途 |
-| --- | --- |
-| `main` | 社区开发分支。保存源码、Python 包、测试、README、`docs/` 文档源码和 VitePress 配置。 |
-| `gh-pages` | GitHub Pages 静态发布分支。只保存构建后的站点产物，不作为开发分支。 |
+此入口已整理到新的 1.0.0-beta 文档中。
 
-## 贡献路径
+[阅读新版文档 →](/zh/contributing)
 
-社区贡献应提交到 `main`：
-
-- 修改 `README.md`、`README.en.md`。
-- 修改 `docs/` 下的用户手册、在线体验说明、部署指南和文档站配置。
-- 通过 Pull Request 触发 Python CI 和文档构建检查。
-
-不要直接向 `gh-pages` 提交社区文档源码。`gh-pages` 的内容由 GitHub Actions 生成。
-
-## 发布规则
-
-`.github/workflows/docs.yml` 在以下文件变化时运行：
-
-- `docs/**`
-- `README.md`
-- `README.en.md`
-- `package.json`
-- `package-lock.json`
-- `.github/workflows/docs.yml`
-
-Pull Request 只构建文档站，不发布。推送到 `main` 后，工作流会把 `docs/.vitepress/dist` 发布到 `gh-pages`。
-
-## PyPI 发布
-
-PaperSeek 的唯一 Python distribution 定义位于 `backend/pyproject.toml`，通过 `.github/workflows/publish-pypi.yml` 发布到 PyPI。该工作流会：
-
-1. 在 Python 3.12 上构建 wheel 和 sdist。
-2. 使用 `twine check` 校验发布产物。
-3. 通过 `pypa/gh-action-pypi-publish` 上传到 PyPI。
-
-触发方式：
-
-- 发布 GitHub Release 时自动触发。
-- 在 GitHub Actions 页面手动运行 `Publish Python package to PyPI`。
-
-仓库需要配置 secret：
-
-```text
-PYPI_API_TOKEN
-```
-
-该值应使用 PyPI project-scoped API token，格式通常以 `pypi-` 开头。不要把 PyPI token 写入 `.env.example`、README、文档或 issue。
-
-发布前需要先更新：
-
-- `backend/pyproject.toml` 中的 `project.version`
-- `backend/src/paperseek_app/build_info.py` 中的版本与构建信息
-- `backend/src/paperseek_core/__init__.py` 和 `backend/src/paperseek_community/__init__.py` 的版本边界
-- 新架构的 packaging contract
-- `README.md`、`README.en.md` 和对应版本更新说明
-
-版本提交合并后，先确认 Python CI、文档构建、wheel/sdist 构建和 `twine check` 全部通过，再创建与包版本一致的 GitHub Release 和 tag。GitHub Release 会触发 PyPI 工作流；同一版本的上传产物不能覆盖。
-
-PyPI 不允许覆盖同一版本号。若上传失败提示文件已存在，应升高版本号后重新构建发布。
-
-## gh-pages 分支约束
-
-`gh-pages` 分支应满足：
-
-- 只存静态发布产物。
-- 根目录包含生成分支说明 `README.md`。
-- 不发 Python 包，不运行 Python 发布流程。
-- 不保存任何 secret、token、API Key 或本地配置。
-- 默认不接受人工 PR，除非需要紧急修复发布产物。
-
-如果仓库启用了分支保护，需要允许 `github-actions[bot]` 或 GitHub Actions 使用 `GITHUB_TOKEN` 写入 `gh-pages`，否则自动部署会被规则拦截。
-
-## 本地预览
-
-安装依赖：
-
-```bash
-npm install
-```
-
-启动本地文档站：
-
-```bash
-npm run docs:dev
-```
-
-构建静态站点：
-
-```bash
-npm run docs:build
-```
+[English documentation](/guide/) · [中文文档](/zh/guide/)

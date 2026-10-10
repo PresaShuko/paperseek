@@ -24,6 +24,8 @@ CLI_TEST_RUNBOOK.md
 .pytest-final-*/
 .pytest-*/
 .mypy_cache/
+.cutover-*/
+.uv-cache/
 .ruff_cache/
 .coverage
 htmlcov/

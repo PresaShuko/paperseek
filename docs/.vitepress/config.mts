@@ -1,86 +1,81 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig, type DefaultTheme } from 'vitepress'
 
 const base = process.env.DOCS_BASE || '/'
+const groups = [
+  ['Start here', '开始使用', [['Introduction', '认识 PaperSeek', 'guide/'], ['Quick start', '快速开始', 'guide/quick-start']]],
+  ['Using PaperSeek', '使用 PaperSeek', [['Workspace & history', '工作区与历史', 'guide/workspace'], ['Search', '文献检索', 'guide/search'], ['Bibliometrics', '文献计量', 'guide/bibliometrics'], ['Data sources', '数据源', 'guide/sources'], ['Models & ranking', '模型与排序', 'guide/models'], ['Results & history', '结果与历史', 'guide/results'], ['Citation maps', '引用图谱', 'guide/citation-map'], ['Reviews · Experimental', '综述 · 实验性', 'guide/reviews']]],
+  ['PaperSeek online', '在线版', [['Service & BYOK', 'PaperSeek 服务与 BYOK', 'online/'], ['Your account', '账户与登录', 'online/account']]],
+  ['Run it yourself', '自托管与集成', [['Local & Docker', '本地与 Docker', 'self-hosting/'], ['Upgrade to 1.0.0-beta', '升级至 1.0.0-beta', 'self-hosting/upgrade'], ['Command line', '命令行', 'integrations/cli'], ['Agent Skill', 'Agent Skill', 'integrations/skill'], ['MCP', 'MCP', 'integrations/mcp'], ['HTTP API', 'HTTP API', 'integrations/api']]],
+  ['Reference', '参考', [['Configuration', '配置参考', 'reference/configuration'], ['Troubleshooting', '常见问题', 'reference/troubleshooting'], ['Contributing', '参与贡献', 'contributing']]],
+  ['Changelog', '更新日志', [['All releases', '版本记录', 'changelog']]]
+] as const
+
+function navigation(zh = false): DefaultTheme.Config {
+  const prefix = zh ? '/zh/' : '/'
+  return {
+    nav: [
+      { text: zh ? '文档' : 'Documentation', link: `${prefix}guide/`, activeMatch: `${prefix}(guide|self-hosting|integrations|reference|contributing)` },
+      { text: zh ? '在线版' : 'Online guide', link: `${prefix}online/`, activeMatch: `${prefix}online/` },
+      { text: 'v1.0.0-beta', link: `${prefix}changelog` },
+      { text: zh ? '打开 PaperSeek' : 'Open PaperSeek', link: 'https://paperseek.app/' }
+    ],
+    sidebar: groups.map(([en, cn, pages]) => ({
+      text: zh ? cn : en,
+      collapsed: false,
+      items: pages.map(([english, chinese, path]) => ({ text: zh ? chinese : english, link: prefix + path }))
+    })),
+    editLink: { pattern: 'https://github.com/MingfengHong/paperseek/edit/main/docs/:path', text: zh ? '在 GitHub 上编辑此页' : 'Edit this page on GitHub' },
+    outline: { label: zh ? '本页目录' : 'On this page', level: [2, 3] },
+    docFooter: { prev: zh ? '上一页' : 'Previous page', next: zh ? '下一页' : 'Next page' },
+    lastUpdated: { text: zh ? '最后更新' : 'Last updated' },
+    returnToTopLabel: zh ? '回到顶部' : 'Back to top',
+    sidebarMenuLabel: zh ? '目录' : 'Menu',
+    darkModeSwitchLabel: zh ? '外观' : 'Appearance',
+    lightModeSwitchTitle: zh ? '切换为浅色' : 'Switch to light theme',
+    darkModeSwitchTitle: zh ? '切换为深色' : 'Switch to dark theme',
+    langMenuLabel: zh ? '语言' : 'Language',
+    skipToContentLabel: zh ? '跳到正文' : 'Skip to content',
+    footer: { message: zh ? '开放源码，自由探索。Apache-2.0 许可。' : 'Open source. Open to exploration. Apache-2.0 licensed.', copyright: '© 2026 PaperSeek contributors' }
+  }
+}
 
 export default defineConfig({
-  lang: 'zh-CN',
   title: 'PaperSeek',
-  description: 'LLM based Literature Search Agent',
+  description: 'From a research question to a reading list. Open-source literature search, citation maps, and abstract-based reviews.',
   base,
   cleanUrls: true,
   lastUpdated: true,
-  markdown: {
-    lineNumbers: true
-  },
+  srcExclude: ['README.md', 'public/**/*.md'],
+  outDir: process.env.DOCS_OUT_DIR,
+  cacheDir: process.env.DOCS_CACHE_DIR,
+  sitemap: { hostname: 'https://docs.paperseek.app' },
+  markdown: { theme: { light: 'github-light', dark: 'github-dark' } },
   head: [
-    ['link', { rel: 'icon', href: '/paperseek-mark.png' }],
-    ['meta', { name: 'theme-color', content: '#0f172a' }],
-    ['meta', { property: 'og:title', content: 'PaperSeek Docs' }],
-    ['meta', { property: 'og:description', content: 'Natural language literature search with PaperSeek.' }]
+    ['link', { rel: 'icon', href: `${base}paperseek-mark.png` }],
+    ['meta', { name: 'theme-color', content: '#fafafa' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:site_name', content: 'PaperSeek' }]
   ],
+  transformHead({ pageData }) {
+    const path = pageData.relativePath.replace(/index\.md$/, '').replace(/\.md$/, '')
+    return [['link', { rel: 'canonical', href: `https://docs.paperseek.app/${path}` }]]
+  },
+  locales: {
+    root: { label: 'English', lang: 'en', themeConfig: navigation() },
+    zh: { label: '简体中文', lang: 'zh-CN', description: '从研究问题到阅读清单。开源文献检索、引用图谱与基于摘要的文献综述。', themeConfig: navigation(true) }
+  },
   themeConfig: {
-    siteTitle: 'PaperSeek Docs',
     logo: '/paperseek-mark.png',
-    search: {
-      provider: 'local'
-    },
-    nav: [
-      { text: '首页', link: '/' },
-      { text: 'v0.3.0', link: '/v0.3.0' },
-      { text: '开源版手册', link: '/user-manual' },
-      { text: '在线版手册', link: '/online-demo' },
-      { text: '部署', link: '/deployment' },
-      { text: 'GitHub', link: 'https://github.com/MingfengHong/paperseek' }
-    ],
-    sidebar: [
-      {
-        text: '开始',
-        items: [
-          { text: '文档站首页', link: '/' },
-          { text: 'v0.3.0 更新说明', link: '/v0.3.0' },
-          { text: '开源版完整用户手册', link: '/user-manual' },
-          { text: '在线体验版用户手册', link: '/online-demo' }
-        ]
-      },
-      {
-        text: '使用与部署',
-        items: [
-          { text: '部署指南', link: '/deployment' }
-        ]
-      },
-      {
-        text: '社区维护',
-        items: [
-          { text: '文档站维护说明', link: '/site-maintenance' }
-        ]
+    siteTitle: 'PaperSeek',
+    socialLinks: [{ icon: 'github', link: 'https://github.com/MingfengHong/paperseek' }],
+    search: { provider: 'local', options: { miniSearch: { options: {
+      tokenize(text) {
+        return Array.from(new Intl.Segmenter('zh', { granularity: 'word' }).segment(text))
+          .filter(part => part.isWordLike).map(part => part.segment)
       }
-    ],
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/MingfengHong/paperseek' }
-    ],
-    footer: {
-      message: 'Released under the Apache-2.0 License.',
-      copyright: 'Copyright © 2026 MingfengHong'
-    },
-    editLink: {
-      pattern: 'https://github.com/MingfengHong/paperseek/edit/main/docs/:path',
-      text: '在 GitHub 上编辑此页'
-    },
-    lastUpdated: {
-      text: '最后更新'
-    },
-    docFooter: {
-      prev: '上一页',
-      next: '下一页'
-    },
-    outline: {
-      label: '本页目录',
-      level: [2, 3]
-    },
-    returnToTopLabel: '回到顶部',
-    sidebarMenuLabel: '菜单',
-    darkModeSwitchLabel: '外观',
-    lightModeSwitchTitle: '切换到浅色模式',
-    darkModeSwitchTitle: '切换到深色模式'
+    } }, locales: { zh: { translations: {
+      button: { buttonText: '搜索文档', buttonAriaLabel: '搜索文档' },
+      modal: { displayDetails: '显示详情', resetButtonTitle: '清除', backButtonTitle: '返回', noResultsText: '未找到相关内容', footer: { selectText: '选择', navigateText: '切换', closeText: '关闭' } }
+    } } } } }
   }
 })

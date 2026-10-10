@@ -1,200 +1,255 @@
 <div align="center">
-  <img src="docs/assets/paperseek_logo_with_text.png" alt="PaperSeek" width="520">
-  <p>可停止、可恢复、可审计的学术论文检索工具。</p>
+  <img src="docs/public/paperseek-mark.png" width="64" alt="PaperSeek">
+  <h1>PaperSeek</h1>
+  <p><strong>Follow the question. Find the evidence.</strong></p>
+  <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
+  <p>
+    <a href="https://github.com/MingfengHong/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
+    <img alt="Version 1.0.0-beta" src="https://img.shields.io/badge/version-1.0.0--beta-171717?style=flat-square">
+    <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
+    <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
+  </p>
+  <p>
+    <a href="https://paperseek.app/">Try online</a> ·
+    <a href="https://docs.paperseek.app/">Documentation</a> ·
+    <a href="#quick-start">Quick start</a> ·
+    <a href="README.zh-CN.md">简体中文</a>
+  </p>
 </div>
 
-# PaperSeek Community
+---
 
-PaperSeek v0.3.0 把研究问题转换为结构化检索计划，在八个学术数据源上执行多路召回、引用扩展、摘要补全和排序，并将运行、事件、检查点、结果和 artifacts 持久化到本地 SQLite/文件系统。
+PaperSeek turns a research question into a reading list. It plans and refines queries, retrieves candidate papers from your chosen scholarly source, expands citations where supported, and ranks relevance to the question. You can inspect the process, explore connections, save results, and develop a cited review from selected abstracts.
 
-v0.3.0 是 breaking architecture release。正式产品只有新的 Vue + FastAPI + application/core 路径；旧 Python 内部 API、旧命令、旧运行时和已移除配置值不提供兼容 fallback。
+Run the Community edition on your own machine or server, or use [PaperSeek online](https://paperseek.app/). Bring your preferred model API; use the Web UI, CLI, HTTP API, or MCP integration.
 
-## 主要能力
+![PaperSeek 1.0.0-beta research workspace](docs/public/images/paperseek-workspace-beta.png)
 
-- 八数据源：OpenAlex、arXiv、Crossref、Semantic Scholar、PubMed、Google Scholar/Serper、PaperHub 计算机顶会、Web of Science Starter。
-- Query planning、检索式迭代和 Query Portfolio。
-- 多路召回、本地 hashing/BM25/RRF，以及可选外部 embedding/reranker。
-- OpenAlex 引用扩展与引用图谱。
-- 任意 selected source 的 DOI 通过独立 Crossref 服务补全摘要；可选 Crossref candidate metadata 补全默认关闭。
-- LLM 排序失败时保留本地顺序并记录降级事实。
-- durable run/events/checkpoint/lease/cancel/recovery。
-- Web、CLI、历史、结果、导出、图谱与中英文界面。
-- 独立 `paperseek-mcp` 发行和 Community Docker 镜像。
+*Community 1.0.0-beta with an offline demonstration record. Hosted shares the workspace and adds account and service controls.*
 
-## 快速开始
+## Contents
 
-需要 Python 3.12+。
+- [Why PaperSeek](#why-paperseek)
+- [What’s new in 1.0.0-beta](#whats-new-in-100-beta)
+- [How it works](#how-it-works)
+- [Data sources](#data-sources)
+- [Quick start](#quick-start)
+- [Models and ranking](#models-and-ranking)
+- [Reviews · Experimental](#reviews--experimental)
+- [Community and online](#community-and-online)
+- [CLI, MCP, and API](#cli-mcp-and-api)
+- [Agent Skill](#agent-skill)
+- [Documentation](#documentation)
+- [Architecture and contributing](#architecture-and-contributing)
+- [Acknowledgements and license](#acknowledgements-and-license)
 
-```bash
-python -m pip install "paperseek==0.3.0"
-export PAPERSEEK_LLM_API_KEY=your-key
-paperseek serve
-```
+## Why PaperSeek
 
-打开 `http://127.0.0.1:8765`。
+**Start with a question, not a perfect query.** Describe the relationship, method, population, or research gap you want to investigate. PaperSeek translates it into source-specific searches and refines them using retrieval feedback.
 
-从源码安装时，Python distribution 的项目目录是 `backend/`：
+**See how the reading list was formed.** Follow query iterations, source hits, candidate retrieval, and ranking. Search budgets bound the work, while saved runs keep results and events available for later inspection.
 
-```bash
-python -m pip install ./backend
-paperseek version
-```
+**Connect papers instead of reading a flat list.** OpenAlex citation expansion follows references and citing works. The interactive map provides another route through the literature around your results.
 
-## 正式 CLI
+**Choose your model stack.** Use OpenAI Responses, OpenAI-compatible Chat Completions, or Anthropic Messages. Start with local preliminary ranking or configure Embedding + Rerank or System One.
 
-安装后的 `paperseek` 只提供六个主命令：
+**Keep the next step close.** Filter and select papers, export complete results, reopen history, or turn a selected evidence set into an experimental review project.
 
-```text
-paperseek serve
-paperseek worker
-paperseek search
-paperseek doctor
-paperseek migrate
-paperseek version
-```
+## What’s new in 1.0.0-beta
 
-运行一次持久检索：
+**1.0.0-beta is a complete architectural refactor with breaking changes.** The runtime, frontend, persistence, and integrations now form a modular application with durable task execution.
 
-```bash
-paperseek search "responsible AI governance in public services" \
-  --source openalex \
-  --search-budget medium \
-  --citation-enabled \
-  --output json
-```
+- Search, Bibliometrics, and Review top tabs, each with a collapsible history sidebar; language and model controls in the settings menu.
+- Preliminary bibliometrics over the full retrieved deduplicated candidate corpus: distributions, keyword co-occurrence, bibliographic coupling, field coverage, and independent exports. LLM scoring remains a subset.
+- Separate research core, application services, and deployment adapters, shared across Community, Hosted, CLI, HTTP, and MCP.
+- Database-backed local runs with worker leases, checkpoint recovery, cancellation, saved history, and result artifacts.
+- Versioned `/api/v1` endpoints and generated frontend types; shared Python and Vue sources delivered to Hosted in a pinned Community wheel.
+- Query-history feedback, bounded candidate selection, and multiple preliminary-ranking paths.
+- Experimental reviews with editable outlines, section writing, versions, and cited exports.
+- Independent, version-matched `paperseek-mcp` packaging and an agent usage skill.
 
-CLI 与 Web API 共用 submission normalizer、按职责拆分的 application services、SQLite UoW、artifact store 和 executor。缺少 key 或 provider 失败会留下明确的失败/降级运行，不会切到 fixture 或第二条 pipeline。
+Read the [full changelog](https://docs.paperseek.app/changelog#v1-0-0-beta) for the architectural changes. Upgrading from 0.2 requires Python 3.12+ and the [migration guide](https://docs.paperseek.app/self-hosting/upgrade): user data has a migration path, while old internal imports, frontend endpoints, and retired commands/configuration are not retained.
 
-高级单机分进程部署：
+This beta follows 0.2.x directly. The public version is **1.0.0-beta**; Python packages use **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
 
-```bash
-paperseek serve --database /data/paperseek.db --no-worker
-paperseek worker --database /data/paperseek.db
-```
+## How it works
 
-WoS database selector 与 WoS Category 独立：
-
-```bash
-paperseek search "graph learning" \
-  --source wos \
-  --wos-db WOS \
-  --field-id "Computer Science, Artificial Intelligence"
-```
-
-## 配置
-
-`.env.example` 只列当前运行时支持的新名称：
-
-| 变量 | 用途 |
-| --- | --- |
-| `PAPERSEEK_DATABASE` | 可选 SQLite 路径。 |
-| `PAPERSEEK_LLM_API_TYPE` | `openai_chat`、`openai_responses` 或 `anthropic_messages`。 |
-| `PAPERSEEK_LLM_BASE_URL` | 模型 API base URL。 |
-| `PAPERSEEK_LLM_MODEL` | 模型名。 |
-| `PAPERSEEK_LLM_API_KEY` | LLM API key。 |
-| `PAPERSEEK_OPENALEX_API_KEY` | OpenAlex，可选但推荐。 |
-| `PAPERSEEK_SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar，可选。 |
-| `PAPERSEEK_PUBMED_API_KEY` | PubMed，可选。 |
-| `PAPERSEEK_WOS_API_KEY` | WoS 必需。 |
-| `PAPERSEEK_WOS_DB` | WoS database，默认 `WOS`。 |
-| `PAPERSEEK_GOOGLE_SCHOLAR_API_KEY` | Serper API key。 |
-
-模型路由、embedding、reranker、数据源筛选、预算、引用和 enrichment 是每次运行的受校验选项，不是内部环境开关。
-
-### 一次性迁移旧 `.env`
-
-运行时不会双读旧变量。使用迁移边界生成新的 `.env`：
-
-```bash
-paperseek migrate \
-  --legacy-env /path/to/old.env \
-  --output-env /path/to/paperseek-v0.3.env
-```
-
-只有仍具有相同语义的常用名称会映射。源文件中的其它键只按名称列入 `ignored_settings` 并忽略；迁移不会回显密钥、不会覆盖冲突目标，重复运行返回 `already_migrated`。目标文件含未知键、目标冲突或输入文件无效时，迁移会拒绝继续。`paperseek doctor --json` 只按变量名报告当前进程中可迁移的旧配置。
-
-### 迁移 v0.2 SQLite
-
-```bash
-paperseek migrate --from-v0.2 /path/to/paperseek-v0.2.db
-```
-
-迁移前建立一致性备份，并支持可测试的重复执行语义。详见[用户手册](docs/user-manual.md)。
-
-## Web UI
-
-![PaperSeek web interface](docs/assets/paperseek-web.png)
-
-主导航始终包含 Search、Results、Citation Map 和 History。运行使用可恢复 URL：
-
-```text
-/search
-/runs/{run_id}
-/runs/{run_id}/results
-/runs/{run_id}/citation-map
-/history
-```
-
-刷新时按 snapshot → 持久事件回放 → Last-Event-ID SSE 重连恢复。Stop 使用 `running → cancelling → cancelled`，迟到响应不能复活运行或写入结果。
-
-## 数据源
-
-| 数据源 | Key | 说明 |
+| Step | What happens | What you can inspect |
 | --- | --- | --- |
-| OpenAlex | 推荐 | 多路召回、语义通道、引用扩展与图谱。 |
-| arXiv | 不需要 | 原生 category、摘要和 PDF。 |
-| Crossref | 不需要 | DOI/出版元数据及跨源补全。 |
-| Semantic Scholar | 可选 | 学术图谱、引用数和开放 PDF 线索。 |
-| PubMed | 可选 | 生物医学与生命科学。 |
-| Google Scholar | 必需 | 通过 Serper 请求。 |
-| 计算机顶会 | 不需要 | PaperHub 顶会数据。 |
-| Web of Science Starter | 必需 | WoS database 与 Category。 |
+| 1. Understand | Interpret the question and plan source-specific queries | Research scope and search strategy |
+| 2. Refine | Test queries and adapt them using source feedback | Query history and source hit counts |
+| 3. Retrieve & rank | Collect candidates, optionally expand citations, and score relevance | Retrieval progress and ranking |
+| 4. Explore | Present papers, connections, and exports | Results, citation map, and saved history |
 
-`GET /api/v1/sources` 是 capability 的正式机器契约。原生筛选、文本提示、引用扩展等字段由选定 source 的能力校验。
+A run starts with **one selected data source**. Complementary retrieval paths do not mean that every database is searched at once. Source hit counts, downloaded candidates, and final results describe different sets.
 
-## API 与持久化
+PaperSeek is a discovery and organization tool. It does not guarantee an exhaustive systematic search, and a relevance score is not a study-quality assessment. Read original papers before relying on generated claims.
 
-正式 API 前缀是 `/api/v1`，OpenAPI 位于 `/openapi.json`。主要动作包括 run 提交/读取/取消、事件、结果、图谱、审计、artifact、导出、历史和删除。
+## Data sources
 
-Community 默认 SQLite 位于 `~/.paperseek/paperseek.db`，artifact 位于同一数据目录。浏览器 session key 保存在加密 transient credential store，终态后删除，不进入历史、事件、URL、checkpoint 或 artifact。
+| Source | Useful for | Access |
+| --- | --- | --- |
+| OpenAlex | Broad scholarly discovery and citation connections | API key recommended |
+| arXiv | Scientific preprints | No key required |
+| Crossref | DOI and publication metadata | No key required |
+| Semantic Scholar | Papers and scholarly graph metadata | Optional API key |
+| PubMed | Biomedical and life-science literature | Optional NCBI API key |
+| Google Scholar via Serper | Scholar results through a supported API | Serper key required |
+| PaperHub | Top computer-science conference collections | No key required |
+| Web of Science Starter | WoS collection search | Clarivate key required |
 
-## MCP
+OpenAlex and Serper support multi-key rotation. Metadata coverage and field filters vary by source. See the [source guide](https://docs.paperseek.app/guide/sources) for configuration and credential links.
 
-MCP 是独立且同版本的发行：
+## Quick start
 
-```bash
-python -m pip install "paperseek==0.3.0" "paperseek-mcp==0.3.0"
-paperseek-mcp --transport stdio
+### Python package
+
+Requires **Python 3.12+**. The release package includes the built Web UI.
+
+```sh
+python -m pip install "paperseek==1.0.0b1"
+paperseek serve
 ```
 
-stdio、Streamable HTTP 和标记为 legacy 的 SSE transport 共享一套九工具 registry。非 loopback HTTP 必须配置服务 token、Host/Origin allowlist；TLS 交给反向代理。详见 [`integrations/mcp/README.md`](integrations/mcp/README.md)。
+Open [localhost:8765](http://127.0.0.1:8765), configure a model connection and source, then enter your research question. You do not need a PaperSeek account for Community.
 
-## Agent Skill
+### Docker
 
-仓库中的 [`skills/paperseek/SKILL.md`](skills/paperseek/SKILL.md) 是薄路由说明：它调用已安装的正式 CLI/API/MCP，不复制检索 pipeline，不要求用户在对话中粘贴密钥。
-
-## Docker
-
-```bash
+```sh
+git clone https://github.com/MingfengHong/paperseek.git
+cd paperseek
+cp .env.example .env
 docker compose up -d
 ```
 
-正式 Community Compose 是单服务，使用 `ghcr.io/mingfenghong/paperseek` 与 `paperseek-data` named volume。健康检查为 `/health` 和 `/ready`。部署细节见[部署指南](docs/deployment.md)。
+Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta` in the Compose environment to pin the image.
 
-## 文档
+### From source
 
-- [完整用户手册](docs/user-manual.md)
-- [部署指南](docs/deployment.md)
-- [v0.3.0 说明](docs/v0.3.0.md)
-- [独立 MCP](integrations/mcp/README.md)
+```sh
+git clone https://github.com/MingfengHong/paperseek.git
+cd paperseek
+python -m pip install ./backend
+```
 
-## 安全边界
+The Python project lives in `backend/`. Frontend development and building a checkout without prebuilt assets are covered in [Contributing](CONTRIBUTING.md).
 
-- 不在仓库、日志、历史或 artifacts 中存储 API key。
-- 默认服务只绑定 loopback；公开部署应使用反向代理和访问控制。
-- 不自动下载付费全文；链接和元数据仍受来源网站条款约束。
-- 发布前以最终 wheel、浏览器、MCP、Docker 与持久化门禁为准，不用 fixture-only smoke 冒充产品验证。
+### Configuration and data
 
-## License
+The Web UI exposes model and search configuration. For deployment defaults, see [.env.example](.env.example) and the [configuration reference](https://docs.paperseek.app/reference/configuration).
 
-Apache License 2.0。第三方数据与 API 仍遵循各自条款。
+Direct CLI execution reads process environment variables; it does not automatically load `.env`. Docker Compose explicitly loads that file.
+
+Local history defaults to `~/.paperseek/paperseek.db`. Keep its surrounding data directory, artifacts, and encryption key together when backing up. See [self-hosting](https://docs.paperseek.app/self-hosting/) for storage and process management.
+
+## Models and ranking
+
+The main model handles query planning and relevance evaluation. Select a protocol your provider actually supports:
+
+| Protocol | Configuration value |
+| --- | --- |
+| OpenAI Responses | `openai_responses` |
+| OpenAI-compatible Chat Completions | `openai_chat` |
+| Anthropic Messages | `anthropic_messages` |
+
+Preliminary ranking has three paths:
+
+- **Local fusion:** combines local lexical and semantic signals; no separate ranking service to configure.
+- **Embedding + Rerank:** uses external vector and reranking services.
+- **System One:** uses a configured decision service for preliminary selection.
+
+Local fusion is the default preliminary-ranking path; it does not remove the main language-model requirement. See [Models & ranking](https://docs.paperseek.app/guide/models).
+
+## Reviews · Experimental
+
+Select papers with useful abstracts, create a review project, generate and edit an outline, then write and revise sections. The workspace supports versions, linked citations, and **Markdown, Word, and BibTeX** exports.
+
+Reviews are based on available abstracts and metadata. They do not imply that the model has read full-text PDFs. Check the evidence and citations against the original research before using a draft.
+
+[Read the review guide →](https://docs.paperseek.app/guide/reviews)
+
+## Community and online
+
+| | Community | PaperSeek online |
+| --- | --- | --- |
+| Run location | Your machine or server | Managed website |
+| Research data | Local SQLite and files | Account-scoped storage for signed-in work |
+| Models | Your configuration | PaperSeek Service or Bring Your Own Key |
+| Account | Not required | Required for saved history and reviews |
+| Anonymous use | Local workspace | Temporary BYOK search |
+| Local model endpoints | Supported when reachable | Non-public destinations blocked |
+
+The online edition uses the shared Community search implementation and pages. Its user guides live in this repository as well; production deployment manuals belong to the Hosted repository.
+
+[Online guide →](https://docs.paperseek.app/online/)
+
+## CLI, MCP, and API
+
+### Command line
+
+```sh
+paperseek search "How does open-source funding affect maintenance?" --source openalex --search-budget medium --output json
+```
+
+Configure credentials in the process environment first. The six commands are `serve`, `worker`, `search`, `doctor`, `migrate`, and `version`.
+
+### Model Context Protocol
+
+```sh
+python -m pip install "paperseek-mcp==1.0.0b1"
+paperseek-mcp --transport stdio
+```
+
+MCP tools start a run, follow its status, read results and citation graphs, cancel work, and export results. Streamable HTTP is available for compatible clients.
+
+### HTTP API
+
+The local API is under `/api/v1`, with its installed schema at `/openapi.json`.
+
+[CLI guide](https://docs.paperseek.app/integrations/cli) · [MCP setup](https://docs.paperseek.app/integrations/mcp) · [HTTP API](https://docs.paperseek.app/integrations/api)
+
+## Agent Skill
+
+Add the [PaperSeek Skill](integrations/skills/paperseek) to a compatible agent for local literature research. It guides installation checks, isolated Community installation when missing, configuration, searches, and saved results. CLI use does not require MCP.
+
+[Install and use the Skill →](https://docs.paperseek.app/integrations/skill)
+
+## Documentation
+
+| Start here | Go deeper |
+| --- | --- |
+| [Quick start](https://docs.paperseek.app/guide/quick-start) | [Models & ranking](https://docs.paperseek.app/guide/models) |
+| [Search workflow](https://docs.paperseek.app/guide/search) | [Citation maps](https://docs.paperseek.app/guide/citation-map) |
+| [Results & history](https://docs.paperseek.app/guide/results) | [Reviews · Experimental](https://docs.paperseek.app/guide/reviews) |
+| [Online accounts](https://docs.paperseek.app/online/account) | [Self-hosting & upgrades](https://docs.paperseek.app/self-hosting/) |
+| [Configuration](https://docs.paperseek.app/reference/configuration) | [Troubleshooting](https://docs.paperseek.app/reference/troubleshooting) |
+
+[English documentation](https://docs.paperseek.app/) · [中文文档](https://docs.paperseek.app/zh/)
+
+## Architecture and contributing
+
+PaperSeek uses a **modular monolith with a persistent task executor**. Its layers separate research logic from task management and deployment:
+
+```text
+Web / CLI / HTTP / MCP
+          │
+    paperseek_app ────→ paperseek_core
+          │            Retrieval, ranking, source and model clients
+          ▼
+  Community adapters   SQLite and local artifacts
+```
+
+- **`paperseek_core`** implements the research workflow and source/model protocols, independently of FastAPI, authentication, SQLite, or Supabase.
+- **`paperseek_app`** owns submission, execution, cancellation, checkpoints, and result access through storage ports.
+- **`paperseek_community`** supplies SQLite, local artifacts, FastAPI, and CLI. A single `paperseek` wheel includes these three packages and the built Web UI.
+- **Hosted** consumes a pinned Community wheel, including shared Vue sources, and supplies its own authentication, PostgreSQL, and Storage adapters. Shared fixes belong in Community.
+
+Community can run its API and embedded worker as one service. Hosted separates the API and worker processes while reusing the application layer. See the [architecture and contribution notes](https://docs.paperseek.app/contributing#architecture) for execution and dependency boundaries.
+
+Contributions are welcome: improve docs, add a reproducible issue, test a source integration, or propose a focused change. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
+## Acknowledgements and license
+
+PaperSeek is built with Python, FastAPI, httpx, Vue, Vite, and the work of the scholarly data providers listed above. The documentation uses VitePress; the interface takes design inspiration from [shadcn/ui](https://ui.shadcn.com/). See [third-party notices](THIRD_PARTY_NOTICES.md) for bundled components.
+
+Licensed under [Apache-2.0](LICENSE). External data and APIs remain subject to their respective providers' terms.

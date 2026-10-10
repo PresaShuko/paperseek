@@ -40,9 +40,9 @@ jobs:
           python -m twine check dist/*
           uv venv .release-check --python 3.12
           uv pip install --python .release-check/bin/python \
-            dist/paperseek-0.3.0-py3-none-any.whl \
-            dist/paperseek_mcp-0.3.0-py3-none-any.whl
-          .release-check/bin/python -c "import importlib.metadata as m; assert m.version('paperseek') == m.version('paperseek-mcp') == '0.3.0'; assert 'paperseek==0.3.0' in (m.requires('paperseek-mcp') or [])"
+            dist/paperseek-1.0.0b1-py3-none-any.whl \
+            dist/paperseek_mcp-1.0.0b1-py3-none-any.whl
+          .release-check/bin/python -c "import importlib.metadata as m; assert m.version('paperseek') == m.version('paperseek-mcp') == '1.0.0b1'; assert 'paperseek==1.0.0b1' in (m.requires('paperseek-mcp') or [])"
           .release-check/bin/python -c "from paperseek_app import build_info as b; assert b.COMMUNITY_COMMIT == '${GITHUB_SHA}'; assert b.SOURCE_TREE_DIRTY is False"
           .release-check/bin/paperseek version
           .release-check/bin/paperseek-mcp --help

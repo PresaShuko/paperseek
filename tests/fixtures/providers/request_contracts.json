@@ -38,7 +38,7 @@
   },
   "arxiv": {
     "method": "GET",
-    "url": "http://export.arxiv.org/api/query",
+    "url": "https://export.arxiv.org/api/query",
     "params": {
       "search_query": "all:\"graph retrieval\"",
       "start": 1,

@@ -11,6 +11,33 @@ sys.path.insert(0, str(MCP_ROOT / "src"))
 
 
 class M4MCPTransportSecurityContract(unittest.TestCase):
+    def test_private_token_auth_does_not_advertise_a_nonexistent_oauth_issuer(self):
+        import httpx
+        from paperseek_mcp.cli import parse_config
+        from paperseek_mcp.transports import create_runtime
+
+        async def exercise():
+            runtime = create_runtime(parse_config(
+                ["--transport", "streamable-http"],
+                environment={"PAPERSEEK_MCP_SERVICE_TOKEN": "private-test-token"},
+            ), object())
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=runtime.http_application),
+                base_url="http://127.0.0.1:8766",
+            ) as client:
+                missing = await client.post("/mcp", json={})
+                wrong = await client.post("/mcp", json={}, headers={"Authorization": "Bearer wrong"})
+                self.assertEqual(missing.status_code, 401)
+                self.assertEqual(wrong.status_code, 401)
+                self.assertNotIn("resource_metadata", missing.headers["www-authenticate"])
+                metadata = await client.get(
+                    "/.well-known/oauth-protected-resource/mcp",
+                    headers={"Authorization": "Bearer private-test-token"},
+                )
+                self.assertEqual(metadata.status_code, 404)
+
+        asyncio.run(exercise())
+
     def test_http_rate_boundary_rejects_the_first_excess_request(self):
         from paperseek_mcp.transports import BoundedHTTPApplication
 

@@ -36,7 +36,7 @@ EXPECTED_TOOLS = [
     "list_sources",
     "get_source_capabilities",
 ]
-CLIENT_INFO = Implementation(name="paperseek-m4-gate", version="0.3.0")
+CLIENT_INFO = Implementation(name="paperseek-m4-gate", version="1.0.0b1")
 SERVICE_TOKEN = "m4-official-client-token"
 CLIENT_ORIGIN = "https://client.example.test"
 
@@ -77,7 +77,7 @@ class _HangingLLMHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
     def log_message(self, _format: str, *_args: object) -> None:
@@ -122,6 +122,7 @@ class InstalledMCPGate:
         self.database = Path(_required_environment("PAPERSEEK_MCP_DATABASE")).resolve()
         self.completed_run_id = _required_environment("PAPERSEEK_COMPLETED_RUN_ID")
         self.stdio_stderr: list[str] = []
+        self.http_logs: list[Any] = []
         if not self.executable.is_file() or not self.paperseek_executable.is_file():
             raise AssertionError("The installed console scripts are missing.")
 
@@ -156,6 +157,11 @@ class InstalledMCPGate:
         self.llm_server.shutdown()
         self.llm_server.server_close()
         self.llm_thread.join(timeout=5)
+        for log in self.http_logs:
+            if sys.exc_info()[0] is not None:
+                log.seek(0)
+                print(log.read(), file=sys.stderr)
+            log.close()
 
     @asynccontextmanager
     async def stdio_session(self):
@@ -170,7 +176,7 @@ class InstalledMCPGate:
         with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr:
             try:
                 async with stdio_client(parameters, errlog=stderr) as streams:
-                    async with ClientSession(*streams, client_info=CLIENT_INFO) as session:
+                    async with ClientSession(*streams, client_info=CLIENT_INFO, read_timeout_seconds=30) as session:
                         initialize = await session.initialize()
                         yield session, initialize
             finally:
@@ -187,6 +193,10 @@ class InstalledMCPGate:
                 "PAPERSEEK_MCP_ALLOWED_ORIGINS": CLIENT_ORIGIN,
             }
         )
+        # A Windows pipe can fill before this polling-heavy test stops the
+        # server. File-backed logs cannot block its event loop on access logs.
+        log = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        self.http_logs.append(log)
         process = subprocess.Popen(
             [
                 str(self.executable),
@@ -203,8 +213,8 @@ class InstalledMCPGate:
             env=environment,
             text=True,
             encoding="utf-8",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=log,
+            stderr=subprocess.STDOUT,
         )
         _wait_for_port(port, process)
         return process
@@ -230,12 +240,12 @@ class InstalledMCPGate:
         headers = {"Authorization": f"Bearer {token}", "Origin": origin}
         if host is not None:
             headers["Host"] = host
-        async with httpx2.AsyncClient(headers=headers, timeout=5.0) as client:
+        async with httpx2.AsyncClient(headers=headers, timeout=5.0, trust_env=False) as client:
             async with streamable_http_client(
                 f"http://127.0.0.1:{port}/mcp",
                 http_client=client,
             ) as streams:
-                async with ClientSession(*streams, client_info=CLIENT_INFO) as session:
+                async with ClientSession(*streams, client_info=CLIENT_INFO, read_timeout_seconds=30) as session:
                     initialize = await session.initialize()
                     yield session, initialize
 
@@ -248,13 +258,14 @@ class InstalledMCPGate:
         async with sse_client(
             f"http://127.0.0.1:{port}/sse",
             headers=headers,
+            httpx_client_factory=lambda **kwargs: httpx2.AsyncClient(**kwargs, trust_env=False),
         ) as streams:
-            async with ClientSession(*streams, client_info=CLIENT_INFO) as session:
+            async with ClientSession(*streams, client_info=CLIENT_INFO, read_timeout_seconds=30) as session:
                 initialize = await session.initialize()
                 yield session, initialize
 
     async def verify_session(self, session: ClientSession, initialize: Any) -> list[dict[str, Any]]:
-        if initialize.server_info.name != "paperseek" or initialize.server_info.version != "0.3.0":
+        if initialize.server_info.name != "paperseek" or initialize.server_info.version != "1.0.0b1":
             raise AssertionError(initialize)
         tools = await session.list_tools()
         schemas = [tool.model_dump(mode="json", by_alias=True) for tool in tools.tools]
@@ -352,7 +363,7 @@ class InstalledMCPGate:
             "Origin": CLIENT_ORIGIN,
         }
         url = f"http://127.0.0.1:{port}/mcp"
-        async with httpx2.AsyncClient(headers=headers, timeout=5.0) as client:
+        async with httpx2.AsyncClient(headers=headers, timeout=5.0, trust_env=False) as client:
             oversized = await client.post(
                 url,
                 headers={"Content-Type": "application/json"},
@@ -369,11 +380,11 @@ class M4OfficialClientIntegration(unittest.TestCase):
     async def _run_gate(self) -> None:
         gate = InstalledMCPGate()
         try:
-            self.assertEqual(importlib.metadata.version("paperseek"), "0.3.0")
-            self.assertEqual(importlib.metadata.version("paperseek-mcp"), "0.3.0")
+            self.assertEqual(importlib.metadata.version("paperseek"), "1.0.0b1")
+            self.assertEqual(importlib.metadata.version("paperseek-mcp"), "1.0.0b1")
             self.assertEqual(importlib.metadata.version("mcp"), "2.0.0")
             requirements = importlib.metadata.requires("paperseek-mcp") or []
-            self.assertIn("paperseek==0.3.0", requirements)
+            self.assertIn("paperseek==1.0.0b1", requirements)
             self.assertIn("mcp==2.0.0", requirements)
             registry_metadata = json.loads(
                 (
@@ -384,7 +395,7 @@ class M4OfficialClientIntegration(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
             self.assertEqual(registry_metadata["name"], "io.github.MingfengHong/paperseek")
-            self.assertEqual(registry_metadata["version"], "0.3.0")
+            self.assertEqual(registry_metadata["version"], "1.0.0-beta")
             import paperseek_app
             import paperseek_mcp
 

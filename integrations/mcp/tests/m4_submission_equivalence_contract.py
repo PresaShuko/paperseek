@@ -54,14 +54,13 @@ class M4SubmissionEquivalenceContract(unittest.TestCase):
             self.assertEqual(api_detail["config_snapshot"], mcp_detail["config_snapshot"])
             self.assertEqual(api_detail["config_snapshot"]["search_budget"], "fast")
             self.assertTrue(api_detail["config_snapshot"]["citation_enabled"])
-            self.assertFalse(api_detail["config_snapshot"]["fetch_abstracts"])
             self.assertEqual(
                 api_detail["config_snapshot"]["llm"],
                 {
                     "provider": "openai",
                     "api_type": "openai_responses",
                     "base_url": "https://api.openai.com/v1",
-                    "model": "gpt-5.4-mini",
+                    "model": "gpt-5.6-luna",
                 },
             )
             self.assertEqual(
@@ -84,7 +83,6 @@ class M4SubmissionEquivalenceContract(unittest.TestCase):
             "field_ids": [field_id, field_id],
             "field_hint": "",
             "citation_enabled": True,
-            "fetch_abstracts": True,
         }
         with tempfile.TemporaryDirectory() as directory:
             api_database = Path(directory) / "api.db"
@@ -110,7 +108,6 @@ class M4SubmissionEquivalenceContract(unittest.TestCase):
             self.assertEqual(mcp_detail["question"], api_detail["question"])
             self.assertEqual(mcp_detail["source"], api_detail["source"])
             self.assertEqual(mcp_detail["config_snapshot"], api_detail["config_snapshot"])
-            self.assertTrue(mcp_detail["config_snapshot"]["fetch_abstracts"])
             self.assertEqual(
                 _submission_digest(mcp_database),
                 _submission_digest(api_database),
