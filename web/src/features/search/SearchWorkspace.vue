@@ -9,6 +9,7 @@ withDefaults(defineProps<{ mode: "edit" | "run"; submissionEnabled?: boolean; ex
 <template>
   <SearchCreate v-if="mode === 'edit'" :submission-enabled="submissionEnabled">
     <template v-if="$slots.notice" #notice><slot name="notice" /></template>
+    <template v-if="$slots.setup" #setup="scope"><slot name="setup" v-bind="scope" /></template>
     <template v-if="$slots.service" #service="scope"><slot name="service" v-bind="scope" /></template>
     <template v-if="$slots.cost" #cost><slot name="cost" /></template>
   </SearchCreate>
