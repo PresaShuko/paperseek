@@ -24,7 +24,7 @@ It combines language models with scholarly data sources. You can inspect the sea
 4. **Explore connections.** With OpenAlex citation expansion, look beyond the initial results.
 5. **Develop a review.** Select papers, approve an outline, and draft from their abstract evidence.
 
-The top tabs are **Search, Bibliometrics, and Review**. Each has its own collapsible history sidebar. Settings and the account menu live at the bottom of the sidebar. See [workspace and history](workspace.md) and [bibliometrics](bibliometrics.md).
+Open **Search, Bibliometrics, or Reviews** from the left sidebar. The history section shows records for the current module; click **All** beside its heading for the full list. The header button hides or shows the entire sidebar, with a drawer on small screens. Settings and the account menu live at the bottom of the sidebar. See [workspace and history](workspace.md) and [bibliometrics](bibliometrics.md).
 
 ## What to expect
 

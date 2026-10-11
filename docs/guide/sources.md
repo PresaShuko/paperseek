@@ -17,6 +17,12 @@ Choose an index that fits your research. Coverage, metadata, access, and filters
 
 PaperSeek Service manages source access for you. Community permits anonymous access or optional keys as shown above. Online BYOK has a separate access policy: add and save source keys in Settings for every source that takes a key, including OpenAlex, PubMed, and Semantic Scholar. arXiv, Crossref, and PaperHub need no key. A model key is not a data-source key.
 
+## Configure and test a source
+
+Open **Settings → Data sources** and choose **Configure** or **Configure key** on the source row. Enter the key and options, then click **Save**.
+
+**Test connection** inside this dialog also saves the current key and options before testing. If saving fails, the test does not start. Once saving succeeds, a failed test or subsequently cancelling the dialog does not undo it; reopen the source configuration to change or clear the saved key. The table's **Test** and **Test all** use the configured credentials without saving a form draft. Model connection draft tests do not save; see [models and ranking](models.md).
+
 ## Obtain credentials
 
 - [OpenAlex API settings](https://openalex.org/settings/api).

@@ -4,7 +4,9 @@ Use a language model for search planning and relevance assessment. Optional prel
 
 ## Connect a model
 
-In Community, or online with your own key, choose a provider and model, then verify the key, base URL, and protocol. Presets are starting values; the provider must offer that model.
+In Community, or online with your own key, open **Settings → Model APIs → Add connection**. Choose the connection type, provider, and model, then verify the key, base URL, and protocol. Presets are starting values; the provider must offer that model.
+
+**Test connection** in the model dialog checks the current draft without saving it. Click **Save** to create or update the connection, then select it for search or writing. Data-source dialog tests behave differently: they save before testing; see [data sources](sources.md).
 
 | Protocol | Operation |
 | --- | --- |

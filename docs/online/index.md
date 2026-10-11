@@ -4,7 +4,7 @@
 
 ## Two ways to run a task
 
-Switch at any time from the account menu at the bottom of the sidebar, or in **Settings › Model service**.
+Switch at any time from the account menu at the bottom of the sidebar, or in **Settings › Model APIs**.
 
 | | PaperSeek Service | Your own key |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ Model keys and data-source keys are separate. A model API key does not grant acc
 2. Describe your question, choose a data source and a search budget.
 3. Start the search. The form shows how many credits the task uses and how many are left today.
 
-Searching and writing use **Auto**, which picks a suitable built-in model for each task; there are no other choices for now. Preliminary ranking is set in **Settings › Model service**. Available sources are shown in the application.
+Searching and writing use **Auto**, which picks a suitable built-in model for each task; there are no other choices for now. Preliminary ranking is set in **Settings › Model APIs**. Available sources are shown in the application.
 
 ## Credits
 
@@ -40,8 +40,8 @@ Your remaining credits appear in the sidebar and in **Settings › User**, toget
 ## Use your own key
 
 1. Select **Your own key** from the account menu.
-2. In **Settings › Model service**, add a model connection under **My model connections** (see [Models & ranking](../guide/models.md)).
-3. Under **Data-source keys**, add keys for the sources you use. With your own key, every source that takes a key requires one, including OpenAlex, PubMed, and Semantic Scholar; arXiv, Crossref, and PaperHub work without one.
+2. In **Settings › Model APIs**, choose **Add connection**, fill in the model details and key, then click **Save** (see [Models & ranking](../guide/models.md)).
+3. In **Settings › Data sources**, choose **Configure** (or **Configure key**) for a source and save its key. With your own key, every source that takes a key requires one, including OpenAlex, PubMed, and Semantic Scholar; arXiv, Crossref, and PaperHub work without one.
 
 Keys are encrypted on the PaperSeek server, used only for your own tasks, and never shown again; the page displays only their last four characters. Tasks with your own key use no credits. Provider charges and rate limits belong to your own provider account.
 

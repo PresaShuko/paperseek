@@ -35,25 +35,27 @@ The package includes the web interface; Node.js is not required to run it.
 
 ## 3. Connect a model
 
-Open **Settings → Models and ranking** at the bottom of the sidebar, select a provider and model, then enter your key. For a custom service, check the base URL and protocol as well. Choose **Done** to return to the search draft.
+Open **Settings → Model APIs** at the bottom of the sidebar and choose **Add connection**. Select **LLM**, a provider and a model, then enter your key. For a custom service, check the base URL and protocol as well. You can use **Test connection** to check the model draft, then click **Save** to keep it. Under **Defaults**, select the saved connection for **Search and scoring**. Return through **Search** in the sidebar.
 
 OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages are distinct protocols. A model name alone does not identify the right one.
 
-Use **Check configuration** before the first run. To supply deployment defaults instead, see [configuration](../reference/configuration.md).
+Model draft testing does not save the connection. Data-source testing has different save behavior, described below. To supply deployment defaults instead, see [configuration](../reference/configuration.md).
 
 ## 4. Ask a question
 
 > How does open-source software obtain funding for long-term maintenance?
 
-Choose **OpenAlex**, supply a source key if available, and only restrict the research field when needed. Leave the budget on **Auto** for a first run, or choose a budget to match the breadth of your question.
+If you have an OpenAlex key, open **Settings → Data sources → OpenAlex → Configure**, enter it, and click **Save**. **Test connection** in this data-source dialog also saves the current key and options before testing; a failed test or subsequently cancelling the dialog does not undo the save.
 
-Select the arrow button, or press **Ctrl+Enter / ⌘+Enter**. Follow the stages while PaperSeek searches and ranks.
+Return to **Search** in the sidebar and choose **OpenAlex**. Only restrict the research field under **More options** when needed. Leave the budget on **Auto** for a first run, or choose a budget to match the breadth of your question.
+
+Select **Start search**, or press **Ctrl+Enter / ⌘+Enter**. Follow the stages while PaperSeek searches and ranks.
 
 ## 5. Read the results
 
 Open **Results**, inspect abstracts and relevance explanations, and export CSV or JSON. Community saves history locally.
 
-Use the search history sidebar to reopen a run, **Citation evidence** to explore available citation data, or select papers for an [experimental review](reviews.md). The [Bibliometrics](bibliometrics.md) tab analyzes the full retrieved candidate corpus.
+Reopen a run from **Search history** in the sidebar, or click **All** beside that heading for the full list. Use **Citation evidence** to explore available citation data, or select papers for an [experimental review](reviews.md). Open [Bibliometrics](bibliometrics.md) from the sidebar to analyze the full retrieved candidate corpus.
 
 ## If something fails
 

@@ -4,7 +4,7 @@ Inspect your reading list, select what matters, and export it into your own rese
 
 ## Three independent histories
 
-Each top-level module has its own collapsible history sidebar. Search runs, analyses, and reviews are saved separately, with search, rename, export, and delete actions. Use the sidebar menu to open full history management. See [workspace and history](workspace.md).
+Choose a module in the left sidebar to see its **Search history**, **Analyses**, or **Reviews**. Search runs, analyses, and reviews are saved separately. Use the magnifying glass beside the history heading to search records, or **All** to open the full list and its record menus for rename, export, and delete. See [workspace and history](workspace.md).
 
 ## Read a paper card
 
@@ -40,4 +40,4 @@ You can delete finished history items after exporting anything you need. Active 
 
 ## Start a review
 
-Select at least two papers with useful abstracts, or create a review through **Review**. Follow the [outline and writing guide](reviews.md).
+Select at least two papers with useful abstracts, or create a review through **Reviews**. Follow the [outline and writing guide](reviews.md).

@@ -10,7 +10,7 @@ Review contains Papers, Outline, Draft, and Citation evidence. Expand the model 
 
 ## 1. Select evidence
 
-Start from selected results, or choose **Review → New review** and an existing search.
+Start from selected results, or choose **Reviews → New review** and an existing search.
 
 Choose **2–100 papers** with informative abstracts and a coherent relationship to the topic. More papers do not automatically mean better evidence. Records without meaningful research content may not contribute to the draft.
 

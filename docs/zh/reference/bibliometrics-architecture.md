@@ -31,6 +31,6 @@
 
 `web/src/features/workspace/WorkspaceShell.vue` 负责顶部栏、完全收起的侧栏、移动端抽屉和主滚动区。`Sidebar.vue` 负责模块导航与历史，`WorkspaceSettingsMenu.vue` 负责账户菜单。`WorkspacePreferences.vue` 提供模型 API、数据源、通用和用户四个设置页。
 
-`web/src/features/settings/` 下的 `SettingsModels.vue`、`ConnectionSheet.vue`、`SettingsSources.vue`、`SettingsUser.vue` 实现连接、数据源和数据管理。连接与来源编辑需保存；默认项选择即时保存。检索草稿选择已保存连接的 ID，全局默认值不替换历史综述自身的模型设置。
+`web/src/features/settings/` 下的 `SettingsModels.vue`、`ConnectionSheet.vue`、`SettingsSources.vue`、`SettingsUser.vue` 实现连接、数据源和数据管理。模型连接草稿可在不保存的情况下测试；数据源弹窗测试则先调用 `saveSource(false)` 保存密钥和选项，测试失败或取消弹窗不会回滚。两类弹窗也都提供显式保存操作；默认项选择即时保存。检索草稿选择已保存连接的 ID，全局默认值不替换历史综述自身的模型设置。
 
 `web/src/styles/ui.css` 负责变量和基础控件，`web/src/styles/app.css` 负责外壳与浮层。在线版通过共享外壳的账户和历史插槽扩展，不复制外壳。

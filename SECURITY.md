@@ -16,7 +16,8 @@ Do not open a public issue for leaked credentials, account access problems, or v
 
 ## Secrets Handling
 
-- Unsaved Web form inputs live in browser memory and are lost on reload. Testing a connection sends those inputs to the server; it does not save a connection.
+- Unsaved Web form inputs live in browser memory and are lost on reload. In the model connection dialog, **Test connection** sends the draft to the server without saving the connection; **Save** persists it.
+- In the data-source configuration dialog, **Test connection** first saves the current key and options, then tests the saved configuration. A failed test or subsequently cancelling the dialog does not undo that save. The source table's **Test** and **Test all** use the configured credentials without saving a form draft.
 - Saving a model connection or data-source key persists it in the Community database. Secret values are encrypted with AES-GCM using `credentials.master.key` beside the database; connection metadata is also stored. Saved secrets survive page reloads and server restarts. Settings responses expose only key status and a masked suffix, not the saved plaintext key.
 - Submitted tasks may receive a separate encrypted credential copy for execution and recovery, including credentials submitted directly through the API. These per-run copies expire after 25 hours; clearing saved connections does not revoke credentials already copied to submitted tasks.
 - PaperSeek does not store API keys in browser `localStorage` or `sessionStorage`. Browser storage keeps preferences such as language and sidebar visibility; result caches and unsaved drafts are in memory. Clearing browser storage does not delete server-side saved secrets.

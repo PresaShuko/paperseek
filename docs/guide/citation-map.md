@@ -6,7 +6,7 @@ See the research neighborhood around a search, rather than isolated papers.
 
 Choose **OpenAlex** and enable citation expansion before searching. References and citing papers are explored within the chosen budget.
 
-Open **Citation evidence** from the results, or **Review → Citation evidence → Paper relations**. An empty map is expected when no citation data was collected; changing tabs does not retroactively run expansion.
+Open **Citation evidence** from the results, or **Reviews → Citation evidence → Paper relations**. An empty map is expected when no citation data was collected; changing tabs does not retroactively run expansion.
 
 ## Read the graph
 

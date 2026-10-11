@@ -31,7 +31,7 @@ Networks display at most **300 nodes and 2,000 edges**. Sparse computation also 
 
 ## History and export
 
-The collapsible sidebar shows this module's analyses. Search, rename, reopen, export, or delete an analysis; use **More actions → Manage history** for the full list. Renaming changes the display title, not the source query.
+Choose **Bibliometrics** in the left sidebar to see **Analyses**. Click a record to reopen it, use the magnifying glass beside the heading to search, or choose **All** for the full list. Each row in that list has a record menu for rename, export, and delete. Renaming changes the display title, not the source query.
 
 CSV exports one row per corpus paper. JSON includes the corpus and scope metadata. These exports differ from search exports, which contain the final result set. Analysis deletion removes its snapshots and cached networks while leaving the source search and reviews intact.
 
