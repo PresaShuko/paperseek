@@ -14,7 +14,7 @@ In Community, or online with your own key, choose a provider and model, then ver
 
 Use the base URL expected by the protocol, without duplicating the operation path. Chat Completions compatibility does not imply Responses compatibility.
 
-PaperSeek Service provides a model dropdown. Its operator manages endpoint and key configuration.
+PaperSeek Service provides a model dropdown; PaperSeek manages the endpoints and keys.
 
 ## Preliminary ranking
 

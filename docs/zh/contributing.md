@@ -14,7 +14,7 @@
 | `integrations/skills` | Agent 使用说明 |
 | `docs` | 中英文公共文档，包含在线版使用指南 |
 
-Hosted 使用固定的 Community 分发包。公共行为应在此修复，不在 Hosted 维护第二份实现。
+在线版基于同一份社区版发行包，公共行为请在本仓库修复。
 
 ## 架构 {#architecture}
 
@@ -22,7 +22,7 @@ Hosted 使用固定的 Community 分发包。公共行为应在此修复，不�
 
 ### 依赖边界
 
-检索核心实现查询迭代、召回、候选选择、引用扩展、排序与数据源／模型协议。它可以使用 Pydantic 和 httpx，但不依赖网页路由、账户身份或数据库。应用服务负责提交、取消、执行与查询，通过明确的端口访问存储。Community 与 Hosted 提供具体的存储、凭据、网络和部署策略。
+检索核心实现查询迭代、召回、候选选择、引用扩展、排序与数据源／模型协议。它可以使用 Pydantic 和 httpx，但不依赖网页路由、账户身份或数据库。应用服务负责提交、取消、执行与查询，通过明确的端口访问存储。社区版与在线版各自提供具体的存储、凭据、网络和部署策略。
 
 `paperseek` 发行包包含 `paperseek_core`、`paperseek_app`、`paperseek_community` 和已构建的网页；核心与应用层不单独发布。`paperseek-mcp` 是可独立安装、版本匹配的协议适配器，调用同一应用服务。
 
@@ -37,8 +37,6 @@ Hosted 使用固定的 Community 分发包。公共行为应在此修复，不�
 ### 共享前端与发行
 
 Vue 3 + TypeScript 页面通过 `/api/v1` 工作；OpenAPI 生成脚本同时产生 API 类型和模型预设。修改后端契约时，需要同步生成前端表示。
-
-Hosted 使用经过源码身份和校验和验证的固定 Community wheel，从同一 wheel 提取共享 Vue 源码，再加入账户和服务界面。公共改动在重新构建并更新锁定发行物后才会进入 Hosted，修改相邻源码目录不会自动更新已安装版本。
 
 本次变化见 [1.0.0-beta1 更新日志](changelog.md#v1-0-0-beta)，已有本地安装请按[升级指南](self-hosting/upgrade.md)迁移。新模块的文件职责和验证入口见[工作区维护说明（英文）](../reference/bibliometrics-architecture.md)。
 
@@ -81,15 +79,9 @@ npm run docs:build
 
 公共指南介绍稳定产品行为。生产密钥、特定服务器清单、测试长日志和一次性发布记录不属于公共文档。产物不提交到源码；本地构建可通过 `DOCS_OUT_DIR` 和 `DOCS_CACHE_DIR` 指定外部目录。
 
-## 发布文档站
-
-文档工作流验证 Pull Request，并将 `main` 分支的推送构建到生成的 `gh-pages` 分支。
-请修改源码文档，不要直接编辑生成分支。`docs/public/CNAME` 保持为
-`docs.paperseek.app`，自定义子域名通过仅 DNS 的 CNAME 指向
-`mingfenghong.github.io`，由 GitHub Pages 提供 HTTPS。本地构建只验证网站，不会发布。
+Pull Request 会自动构建文档站检查错误，合并后网站自动更新。请只修改 `docs/` 下的源文件。
 
 ## 提交改动
-
 
 说明具体问题、改动后的行为、受影响的界面与验证结果。界面修改请附前后截图，需要时补充行为测试，避免只检查临时文件布局。
 

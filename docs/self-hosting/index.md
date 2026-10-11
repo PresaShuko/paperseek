@@ -68,7 +68,7 @@ Do not start an additional worker unintentionally by omitting `--no-worker`.
 
 ## Network access
 
-The default server binds to loopback. Community is designed for a trusted local environment. Binding `--host 0.0.0.0` or publishing the Docker port exposes it beyond your machine; add appropriate authentication and network controls before sharing access. Community does not become the multi-user Hosted edition by changing its listen address.
+The default server binds to loopback. Community is designed for a trusted local environment. Binding `--host 0.0.0.0` or publishing the Docker port exposes it beyond your machine; add appropriate authentication and network controls before sharing access. Changing the listen address does not turn Community into a multi-user service.
 
 ## Back up
 

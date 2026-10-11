@@ -1,4 +1,4 @@
-/* Self-hosted fonts, the design-canvas stylesheet, then app-only additions. */
+/* Self-hosted fonts, the shared tokens and primitives, then app-only additions. */
 @import "./fonts.css";
 @import "./ui.css";
 @import "./app.css";

@@ -29,7 +29,7 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 
 ![PaperSeek 1.0.0-beta1 research workspace](docs/public/images/workspace-results-en.png)
 
-*Community 1.0.0-beta1 with an offline demonstration record. Hosted shares the workspace and adds account and service controls.*
+*Community 1.0.0-beta1 with a demonstration record. PaperSeek online shares the same workspace and adds an account and service options.*
 
 ## Contents
 
@@ -63,18 +63,18 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 
 **1.0.0-beta1 is a complete architectural refactor with breaking changes.** The runtime, frontend, persistence, and integrations now form a modular application with durable task execution.
 
-- Search, Bibliometrics, and Review top tabs, each with a collapsible history sidebar; language and model controls in the settings menu.
+- Search, Bibliometrics, and Reviews in a collapsible sidebar, each with its own history; models, sources, and preferences in Settings.
 - Preliminary bibliometrics over the full retrieved deduplicated candidate corpus: distributions, keyword co-occurrence, bibliographic coupling, field coverage, and independent exports. LLM scoring remains a subset.
-- Separate research core, application services, and deployment adapters, shared across Community, Hosted, CLI, HTTP, and MCP.
+- Separate research core, application services, and deployment adapters, shared across Community, PaperSeek online, CLI, HTTP, and MCP.
 - Database-backed local runs with worker leases, checkpoint recovery, cancellation, saved history, and result artifacts.
-- Versioned `/api/v1` endpoints and generated frontend types; shared Python and Vue sources delivered to Hosted in a pinned Community wheel.
+- Versioned `/api/v1` endpoints and generated frontend types.
 - Query-history feedback, bounded candidate selection, and multiple preliminary-ranking paths.
 - Experimental reviews with editable outlines, section writing, versions, and cited exports.
 - Independent, version-matched `paperseek-mcp` packaging and an agent usage skill.
 
 Read the [full changelog](https://docs.paperseek.app/changelog#v1-0-0-beta) for the architectural changes. Upgrading from 0.2 requires Python 3.12+ and the [migration guide](https://docs.paperseek.app/self-hosting/upgrade): user data has a migration path, while old internal imports, frontend endpoints, and retired commands/configuration are not retained.
 
-This beta follows 0.2.x directly. The public version is **1.0.0-beta1**; Python packages use **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
+Install it from pip as **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
 
 ## How it works
 
@@ -183,7 +183,7 @@ Reviews are based on available abstracts and metadata. They do not imply that th
 | Anonymous use | Local workspace | Temporary BYOK search |
 | Local model endpoints | Supported when reachable | Non-public destinations blocked |
 
-The online edition uses the shared Community search implementation and pages. Its user guides live in this repository as well; production deployment manuals belong to the Hosted repository.
+The online edition uses the same search implementation and pages as Community, and its user guide is part of this documentation.
 
 [Online guide →](https://docs.paperseek.app/online/)
 
@@ -246,9 +246,9 @@ Web / CLI / HTTP / MCP
 - **`paperseek_core`** implements the research workflow and source/model protocols, independently of FastAPI, authentication, SQLite, or Supabase.
 - **`paperseek_app`** owns submission, execution, cancellation, checkpoints, and result access through storage ports.
 - **`paperseek_community`** supplies SQLite, local artifacts, FastAPI, and CLI. A single `paperseek` wheel includes these three packages and the built Web UI.
-- **Hosted** consumes a pinned Community wheel, including shared Vue sources, and supplies its own authentication, PostgreSQL, and Storage adapters. Shared fixes belong in Community.
+- **PaperSeek online** builds on the same packages and Vue sources, adding its own authentication and storage adapters. Shared fixes belong in Community.
 
-Community can run its API and embedded worker as one service. Hosted separates the API and worker processes while reusing the application layer. See the [architecture and contribution notes](https://docs.paperseek.app/contributing#architecture) for execution and dependency boundaries.
+Community can run its API and embedded worker as one service. The online edition runs them as separate processes on the same application layer. See the [architecture and contribution notes](https://docs.paperseek.app/contributing#architecture) for execution and dependency boundaries.
 
 Contributions are welcome: improve docs, add a reproducible issue, test a source integration, or propose a focused change. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 

@@ -14,7 +14,7 @@
 
 基础地址应符合协议要求，不要重复拼接请求路径。兼容 Chat Completions 不等于兼容 Responses。
 
-PaperSeek 服务只提供模型下拉菜单，地址和密钥由维护者配置。
+PaperSeek 服务只提供模型下拉菜单，地址和密钥由 PaperSeek 管理。
 
 ## 初排序方式
 

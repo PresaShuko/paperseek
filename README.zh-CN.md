@@ -24,7 +24,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 ![PaperSeek 1.0.0-beta1 研究工作区](docs/public/images/workspace-results-zh.png)
 
-*社区版 1.0.0-beta1，含离线演示记录。在线版共用工作区，并增加账户和服务模式控制。*
+*社区版 1.0.0-beta1，含演示记录。在线版共用同一工作区，并增加账户和服务模式。*
 
 ## 目录
 
@@ -58,18 +58,18 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 **1.0.0-beta1 是一次包含不兼容变更的完整架构重构。** 运行时、前端、持久化和集成统一为按职责划分、支持持久任务执行的模块化应用。
 
-- 文献检索、文献计量、文献综述三个顶部模块，各自拥有可折叠历史侧栏；中英文和模型配置集中到右上角设置。
+- 文献检索、文献计量、文献综述位于可折叠侧栏，各自保留历史；模型、数据源和通用偏好集中在设置页。
 - 对实际获取的完整去重候选集做初步计量：年份与来源分布、关键词共现、文献耦合、数据覆盖率与独立导出；LLM 仍只评分原子集。
-- 分离检索核心、应用服务与部署适配，Community、Hosted、CLI、HTTP 和 MCP 共用业务实现。
+- 分离检索核心、应用服务与部署适配，社区版、在线版、CLI、HTTP 和 MCP 共用业务实现。
 - 数据库管理的本地任务，支持 worker 租约、检查点恢复、取消、历史与结果产物。
-- 版本化 `/api/v1` 接口与自动生成的前端类型；Hosted 通过固定 Community wheel 获取共享 Python 与 Vue 源码。
+- 版本化 `/api/v1` 接口与自动生成的前端类型。
 - 检索式历史反馈、有边界的候选选择及多种初排序方式。
 - 可编辑大纲、分节写作、版本和引用导出的实验性综述。
 - 独立且同版本匹配的 `paperseek-mcp`，以及 Agent 使用 Skill。
 
 架构变化详见[完整更新日志](https://docs.paperseek.app/zh/changelog#v1-0-0-beta)。从 0.2 升级需要 Python 3.12+，请先阅读[迁移指南](https://docs.paperseek.app/zh/self-hosting/upgrade)：用户数据有明确迁移路径，旧内部导入、前端接口及废弃命令／配置不再保留。
 
-此版本直接接续 0.2.x；公开版本为 **1.0.0-beta1**，Python 包版本为 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
+通过 pip 安装时版本号写作 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
 
 ## 工作流程
 
@@ -178,7 +178,7 @@ Python 项目位于 `backend/`。前端开发以及缺少预构建页面时的�
 | 匿名使用 | 本地工作区 | 临时 BYOK 检索 |
 | 本机模型地址 | 网络可达即可配置 | 拒绝非公开目标 |
 
-在线版复用 Community 的检索实现与页面。面向用户的在线版说明也保存在本仓库；生产部署维护文档保存在 Hosted 仓库。
+在线版与社区版使用同一套检索实现与页面，在线版使用说明也在本文档中。
 
 [在线版指南 →](https://docs.paperseek.app/zh/online/)
 
@@ -241,7 +241,7 @@ Web / CLI / HTTP / MCP
 - **`paperseek_core`**：研究工作流与数据源／模型协议，不依赖 FastAPI、账户认证、SQLite 或 Supabase。
 - **`paperseek_app`**：通过存储端口管理提交、执行、取消、检查点与结果查询。
 - **`paperseek_community`**：提供 SQLite、本地产物、FastAPI 与 CLI。一个 `paperseek` wheel 包含这三个 Python 包和已构建的网页。
-- **Hosted**：消费固定的 Community wheel 及其中的共享 Vue 源码，另行装配账户、PostgreSQL 与 Storage。公共功能修复统一进入 Community。
+- **在线版**：基于同一套包和 Vue 源码，另行提供账户认证与存储适配。公共功能修复统一进入社区版。
 
 社区版的 API 与内嵌 worker 可以作为一个服务运行；在线版将 API 和 worker 分进程部署，继续复用同一应用层。执行流程与依赖边界见[架构与贡献说明](https://docs.paperseek.app/zh/contributing#architecture)。
 

@@ -1,6 +1,5 @@
-/* PaperSeek UI — tokens and primitives transcribed from the PaperSeek Design System
-   (shadcn/ui new-york-v4, neutral base). Kept identical to the design canvas ui.css;
-   app-only additions live in app.css. */
+/* PaperSeek UI — tokens and primitives in a shadcn/ui-style neutral palette
+   (new-york, neutral base). App-only additions live in app.css. */
 :root{
   --background:#ffffff;--foreground:#000000;
   --card:#ffffff;--card-foreground:#000000;

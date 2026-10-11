@@ -14,7 +14,7 @@ PaperSeek welcomes documentation fixes, source-adapter improvements, reproducibl
 | `integrations/skills` | Agent usage instructions |
 | `docs` | Public English/Chinese docs, including online usage |
 
-Hosted consumes a pinned Community distribution. Fix shared behavior here instead of maintaining a second copy in Hosted.
+PaperSeek online is built from the same Community distribution, so fix shared behavior in this repository.
 
 ## Architecture {#architecture}
 
@@ -22,7 +22,7 @@ Version 1.0.0-beta1 completes an architectural refactor into a modular monolith 
 
 ### Dependency boundaries
 
-The research core implements query iteration, retrieval, candidate selection, citations, ranking, and source/model protocols. It can use Pydantic and httpx, but does not depend on web routing, account identity, or a database. Application services own run submission, cancellation, execution, and queries; storage is accessed through explicit ports. Community and Hosted supply the concrete storage, credential, network, and deployment policies.
+The research core implements query iteration, retrieval, candidate selection, citations, ranking, and source/model protocols. It can use Pydantic and httpx, but does not depend on web routing, account identity, or a database. Application services own run submission, cancellation, execution, and queries; storage is accessed through explicit ports. Community and the online edition supply the concrete storage, credential, network, and deployment policies.
 
 The `paperseek` distribution contains `paperseek_core`, `paperseek_app`, and `paperseek_community`, plus the built Web UI. The core and application layer do not have separate package releases. `paperseek-mcp` is an independently installable, version-matched protocol adapter that calls the same application services.
 
@@ -32,13 +32,11 @@ For a saved search, submission records the effective configuration and creates a
 
 The frontend loads the run snapshot and follows sequenced events over SSE. Community recovery uses compatible committed checkpoints, so completed steps or batches can be reused. Cancellation and lease checks prevent outdated execution from committing late results. A checkpoint from an incompatible workflow is rejected rather than interpreted as current state.
 
-Community stores these records in SQLite, with Alembic-managed migrations and local artifact files. Hosted provides PostgreSQL and Storage adapters, account isolation, and its own task-recovery policy. Anonymous online BYOK keeps research content in memory and does not create a durable research run. Keep these differences in the adapters and application policies, outside the search algorithm.
+Community stores these records in SQLite, with Alembic-managed migrations and local artifact files. The online edition provides PostgreSQL and Storage adapters, account isolation, and its own task-recovery policy. Anonymous online BYOK keeps research content in memory and does not create a durable research run. Keep these differences in the adapters and application policies, outside the search algorithm.
 
 ### Shared frontend and releases
 
 Vue 3 + TypeScript pages consume `/api/v1`; the OpenAPI generation script produces API types and model presets. Change the backend contract and regenerate its frontend representation together.
-
-Hosted consumes a pinned Community wheel with a verified source identity and checksum. It extracts the shared Vue sources from that same wheel and adds account and service UI. A shared change takes effect there when the pinned artifact is rebuilt and updated, not merely when a neighboring checkout is edited.
 
 For the changes introduced by this release, see the [1.0.0-beta1 changelog](changelog.md#v1-0-0-beta). For existing local installations, follow the [upgrade guide](self-hosting/upgrade.md). The [workspace maintenance guide](reference/bibliometrics-architecture.md) maps the new modules to their source responsibilities and verification points.
 
@@ -81,13 +79,7 @@ English pages live at `docs/`; Chinese equivalents at `docs/zh/`. Keep the infor
 
 Public guides should explain stable product behavior. Production keys, host-specific checklists, test transcripts, and one-off release records do not belong in public docs. Keep generated output outside source control; local builds may use `DOCS_OUT_DIR` and `DOCS_CACHE_DIR`.
 
-## Publish the documentation
-
-The documentation workflow builds pull requests and publishes pushes to
-`main` into the generated `gh-pages` branch. Edit source pages rather than that
-generated branch. Keep `docs/public/CNAME` set to `docs.paperseek.app`; the
-custom subdomain uses a DNS-only CNAME to `mingfenghong.github.io`. GitHub Pages
-serves the site over HTTPS. A local build verifies the site, but does not publish it.
+Pull requests build the site to catch errors, and the site updates after a merge. Edit the source pages under `docs/` only.
 
 ## Submit a change
 

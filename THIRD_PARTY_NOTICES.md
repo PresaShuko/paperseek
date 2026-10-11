@@ -25,4 +25,4 @@ These packages are installed as separate Python distributions and retain their o
 
 ## Community interface assets
 
-The bundled Vue interface uses [Lucide](https://lucide.dev/) icons (ISC) and self-hosted [Geist / Geist Mono](https://github.com/vercel/geist-font) fonts (SIL Open Font License 1.1). Their license and copyright notices are distributed alongside the static assets in `static/third-party-notices.txt`. The user-supplied shadcn component template is a visual reference; its React runtime is not bundled.
+The bundled Vue interface uses [Lucide](https://lucide.dev/) icons (ISC) and self-hosted [Geist / Geist Mono](https://github.com/vercel/geist-font) fonts (SIL Open Font License 1.1). Their license and copyright notices are distributed alongside the static assets in `static/third-party-notices.txt`. The styling follows shadcn/ui conventions; no shadcn/ui or React code is bundled.

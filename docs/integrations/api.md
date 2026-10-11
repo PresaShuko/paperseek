@@ -39,4 +39,4 @@ SSE is a progress channel. If it disconnects, fetch the run snapshot and reconne
 - Render safe error codes and human-readable messages; do not expose secrets or raw upstream response bodies.
 - Treat result content and model-generated text as data, not executable markup.
 
-Hosted shares the search contract but adds authentication, ownership, mode policy, and quotas. Its anonymous BYOK flow is not a general unauthenticated replacement for saved-run endpoints. Build against the deployment's own schema and auth flow.
+PaperSeek online shares the search contract but adds authentication, ownership, service modes, and credits. Its anonymous BYOK flow is not a general unauthenticated replacement for saved-run endpoints. Build against the deployment's own schema and auth flow.

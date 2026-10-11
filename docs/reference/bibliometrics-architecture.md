@@ -1,8 +1,8 @@
 # Maintaining the research workspace
 
-The Community package is the source of shared Python and Vue implementation. Hosted consumes a pinned wheel containing both; deployment adapters must not copy algorithms or pages.
+The Community package is the source of shared Python and Vue implementation. PaperSeek online builds on the same sources; deployment adapters must not copy algorithms or pages.
 
-Shared UI tokens, layout rules, and stylesheet ownership are documented in the [design system maintenance guide](./design-system.md).
+Shared UI tokens, layout rules, and stylesheet ownership are documented in the [interface guidelines](./design-system.md).
 
 | Responsibility | Location |
 | --- | --- |
@@ -17,7 +17,7 @@ Shared UI tokens, layout rules, and stylesheet ownership are documented in the [
 | Search draft and reusable model inputs | `web/src/features/search/search-draft.ts`, `SearchModelSettings.vue` |
 | Review evidence and saved source graph | `web/src/features/review/ReviewEvidence.vue` |
 
-Retrieval keeps metadata for already-returned pages before lane/fusion selection. The ranking inputs retain their existing bounds. A completed run writes a separate `bibliometric_corpus` artifact; result APIs and event streams do not carry the corpus. Community recovery checkpoints preserve it. Hosted's policy can skip checkpoints while still retaining the final corpus artifact.
+Retrieval keeps metadata for already-returned pages before lane/fusion selection. The ranking inputs retain their existing bounds. A completed run writes a separate `bibliometric_corpus` artifact; result APIs and event streams do not carry the corpus. Community recovery checkpoints preserve it. The online edition's policy can skip checkpoints while still retaining the final corpus artifact.
 
 Creating an analysis copies a compact corpus and overview into independent compressed files. SQL stores summaries, descriptors, and bounded network-cache references. Detail requests read the overview only; network computation and corpus export load the corpus on demand. Deletion first marks the record, then deletes files, then retains a minimal idempotency tombstone so late retries cannot recreate it. Adapters enforce ownership before any file descriptor is exposed to a use case.
 
@@ -29,4 +29,4 @@ Run `bibliometrics_contract.py`, the retrieval-boundary/recovery contracts, impo
 
 ## Workspace surfaces
 
-`WorkspaceShell.vue` owns the sidebar, icon rail, mobile drawer and the one main scroll surface. `WorkspacePreferences.vue` is a routed settings page; `SettingsNavigation.vue` and `SourceSettings.vue` own category navigation and source options. Search model controls and their in-memory draft remain in the search feature. Global defaults do not replace a saved review's own model controls. `styles/features/workspace-shell.css`, `settings.css`, and `styles/dialog.css` own their respective surfaces; generic dialogs no longer depend on review styles. Hosted supplies menu identity, services and a stable application-level account dialog through the shell slot; it does not copy the shell.
+`WorkspaceShell.vue` owns the sidebar, icon rail, mobile drawer and the one main scroll surface. `WorkspacePreferences.vue` is a routed settings page; `SettingsNavigation.vue` and `SourceSettings.vue` own category navigation and source options. Search model controls and their in-memory draft remain in the search feature. Global defaults do not replace a saved review's own model controls. `styles/features/workspace-shell.css`, `settings.css`, and `styles/dialog.css` own their respective surfaces; generic dialogs no longer depend on review styles. The online edition supplies menu identity, services and a stable application-level account dialog through the shell slot; it does not copy the shell.

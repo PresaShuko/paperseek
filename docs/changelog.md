@@ -4,7 +4,7 @@ outline: 2
 
 # Changelog
 
-Features, improvements, and upgrade notes, from the first demo to PaperSeek 1.0.0-beta.
+Features, improvements, and upgrade notes, from the first demo to PaperSeek 1.0.0-beta1.
 
 ## 1.0.0-beta1 {#v1-0-0-beta}
 
@@ -12,13 +12,13 @@ PaperSeek 1.0.0-beta1 is a **complete architectural refactor with breaking chang
 
 ### Three modules and independent histories
 
-- A redesigned workspace in the shadcn visual style: Search, Bibliometrics, and Reviews in a collapsible sidebar with each module's history, and the account at the bottom.
+- A redesigned workspace: Search, Bibliometrics, and Reviews in a collapsible sidebar with each module's history, and the account at the bottom.
 - Settings pages for model APIs, data sources, general preferences, and the user's data: clear saved keys or all history, each after typing a confirmation phrase. Running tasks are stopped before history is cleared.
 - Preliminary bibliometrics over the actually retrieved deduplicated candidate corpus; native-field coverage, keyword co-occurrence, bounded bibliographic coupling, cached networks, and independent exports. LLM scoring remains a subset.
 - Review citation evidence alongside papers, outline, and draft; new reviews preserve available source graph snapshots.
-- Rename records without changing original queries or execution settings.
+- Rename history records; the original question and settings stay unchanged.
 
-This beta follows 0.2.x directly. Python packages use the normalized version `1.0.0b1`; the public release and container tag are `1.0.0-beta1`. The documentation describes this target release; deployment status is reported separately.
+Install it from pip as `1.0.0b1`; the Docker image tag is `1.0.0-beta1`.
 
 ### PaperSeek online
 
@@ -28,11 +28,11 @@ This beta follows 0.2.x directly. Python packages use the normalized version `1.
 
 ### Architecture rebuilt around clear responsibilities
 
-- Separate `paperseek_core` for retrieval, query iteration, citation expansion, ranking, and source/model protocols; `paperseek_app` for run submission, execution, persistence, and queries; and deployment adapters for Community and Hosted.
+- Separate `paperseek_core` for retrieval, query iteration, citation expansion, ranking, and source/model protocols; `paperseek_app` for run submission, execution, persistence, and queries; and deployment adapters for Community and the online edition.
 - Use one application layer across Web, CLI, HTTP API, and MCP. The search core is independent of FastAPI, authentication, SQLite, and Supabase.
-- Replace cross-repository copies with a pinned Community wheel. Hosted consumes the shared Python implementation and Vue sources from the same artifact, adding its own account, storage, and service policies.
+- The online edition and Community share one search implementation and the same research pages.
 - Rebuild the frontend with Vue 3, TypeScript, and Vite. Shared research pages use the versioned `/api/v1` contract; generated API types keep frontend and backend interfaces aligned.
-- Use explicit asynchronous workflows and httpx clients, with Pydantic models at the boundaries. Retire the experimental harness and obsolete runtime entry points.
+- Use explicit asynchronous workflows and httpx clients, with Pydantic models at the boundaries. Retire obsolete runtime entry points.
 
 ### Persistent tasks, cancellation, and recovery
 
@@ -40,9 +40,9 @@ This beta follows 0.2.x directly. Python packages use the normalized version `1.
 - Restore saved pages from a run snapshot and replayed events, then follow updates through SSE. Reconnecting the browser does not submit a new search.
 - Coordinate cancellation and lease ownership so an obsolete worker or a late provider response cannot commit results after cancellation.
 - Separate source/model failures from persistence failures: optional retrieval or ranking stages can report warnings and fall back, while a failed result commit cannot be presented as success.
-- Introduce versioned SQLite migrations through Alembic and explicit migration commands. Community uses SQLite and local files; Hosted uses its own PostgreSQL and Storage adapters. Anonymous online BYOK remains temporary and does not create saved research history.
+- Introduce versioned SQLite migrations through Alembic and explicit migration commands. Community uses SQLite and local files. A signed-out online search is temporary and is not added to history.
 
-Community supports a single local service with an embedded worker, or an explicitly separate worker. Hosted runs its API and worker on the server and serves the Vue frontend separately. Recovery follows each edition’s policy; browser reconnection is distinct from restarting an interrupted server task.
+Community can run the API and an embedded worker as one local service, or run them separately. Reconnecting the browser restores the page; an interrupted task resumes from its checkpoint.
 
 ### A complete research workspace
 

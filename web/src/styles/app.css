@@ -1,6 +1,6 @@
 /* App-only additions on top of ui.css: the live shell (scrolling, collapse, mobile
-   sheet), the per-board helper classes, and the overlays the canvas only implies
-   (dialog, sheet, menus, listbox, toast, skeleton). Same tokens, same scale. */
+   sheet), page helper classes, and overlays (dialog, sheet, menus, listbox, toast,
+   skeleton). Same tokens, same scale. */
 
 /* ---------- live shell ---------- */
 html,body,#app{height:100%}

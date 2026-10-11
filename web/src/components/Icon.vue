@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Exact lucide geometry used on the design canvas (16px, stroke 2). Status
+// Lucide icon geometry (16px, stroke 2). Status
 // variants ("ok", "warn", "fail") draw the filled 16px state icons.
 import { computed } from "vue";
 
