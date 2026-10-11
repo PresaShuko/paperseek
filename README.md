@@ -9,7 +9,7 @@
   <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
   <p>
     <a href="https://github.com/MingfengHong/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
-    <img alt="Version 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta-171717?style=flat-square">
+    <img alt="Version 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta1-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
     <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
   </p>
