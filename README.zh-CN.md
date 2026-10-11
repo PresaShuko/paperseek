@@ -125,6 +125,14 @@ PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 
 启动前编辑 `.env`。PowerShell 使用 `Copy-Item` 替代 `cp`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。Compose 默认使用 8765 端口，并通过 `paperseek-data` 卷持久化数据。以上命令已固定 beta 镜像；预发布不会更新 `latest`。随附的 Compose 与 `.env.example` 也默认使用 `1.0.0-beta1`。
 
+### ModelScope 创空间
+
+可以先在魔搭体验 [PaperSeek 创空间](https://modelscope.cn/studios/HongMingfeng/PaperSeek)，也可以一键复制这个 Docker 创空间，部署自己的副本：
+
+<a href="https://modelscope.cn/studios/fork?target=HongMingfeng/PaperSeek"><img src="docs/public/deploy-modelscope.svg" alt="部署到 ModelScope" height="32"></a>
+
+社区版按单用户、可信环境设计，没有登录。复制后的创空间请设为私有：公开访问时，所有访客会共用同一套设置、已保存的密钥和历史。
+
 ### 从源码安装
 
 ```sh

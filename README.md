@@ -130,6 +130,14 @@ PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 
 Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`, then `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. These commands pin the beta image; prereleases do not update `latest`. The supplied Compose file and `.env.example` also default to `1.0.0-beta1`.
 
+### ModelScope Studio
+
+Try the [PaperSeek Studio](https://modelscope.cn/studios/HongMingfeng/PaperSeek) on ModelScope, or fork it to run your own copy as a Docker Studio:
+
+<a href="https://modelscope.cn/studios/fork?target=HongMingfeng/PaperSeek"><img src="docs/public/deploy-modelscope.svg" alt="Deploy to ModelScope" height="32"></a>
+
+Community is built for one user in a trusted environment and has no sign-in. Keep your copy private: everyone who can open a public Studio shares its settings, saved keys, and history.
+
 ### From source
 
 ```sh
