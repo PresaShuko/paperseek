@@ -95,8 +95,8 @@ a, button { -webkit-tap-highlight-color: transparent; }
 .ps-hero-body { display: flex; justify-content: space-between; align-items: flex-end; gap: 48px; padding: 44px 0 48px; }
 .ps-release { display: inline-flex; align-items: center; gap: 9px; padding: 3px 10px; margin-bottom: 22px; border-radius: 20px; background: var(--vp-c-bg-soft); font-size: 12px; font-weight: 500; }
 .ps-release-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.ps-hero h1 { font-family: var(--ps-font-display); font-size: clamp(40px, 4.6vw, 66px); line-height: 1.16; letter-spacing: -.025em; font-weight: 480; }
-:lang(zh) .ps-hero h1 { font-size: clamp(38px, 4.2vw, 60px); line-height: 1.3; letter-spacing: .02em; font-weight: 450; }
+.ps-hero h1 { font-family: var(--ps-font-display); font-size: clamp(40px, 4.6vw, 66px); line-height: 1.16; letter-spacing: -.025em; font-weight: 560; }
+:lang(zh) .ps-hero h1 { font-size: clamp(38px, 4.2vw, 60px); line-height: 1.3; letter-spacing: .02em; font-weight: 600; }
 .ps-hero-side { flex: 0 1 390px; padding-bottom: 6px; }
 .ps-hero-description { font-size: 15px; line-height: 1.75; letter-spacing: .01em; color: var(--vp-c-text-2); text-wrap: pretty; }
 .ps-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
