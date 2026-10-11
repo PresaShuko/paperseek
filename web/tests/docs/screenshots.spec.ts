@@ -1,17 +1,11 @@
-// Regenerates the documentation screenshots from the real UI against the in-memory API:
+// Regenerates the README screenshots from the real UI against the in-memory API:
 //   node tests/browser/run.mjs --config playwright.docs.config.ts
 // The papers below are illustrative, not real publications.
 import { test } from "@playwright/test";
-import { analysis, createState, ids, paper, reviewDetail, withDocument } from "../browser/mock-backend";
+import { createState, ids, paper } from "../browser/mock-backend";
 import { open } from "../browser/workspace-helpers";
 
 const out = "../docs/public/images";
-const pages = [
-  ["search", "/search"],
-  ["results", `/runs/${ids.done}/results`],
-  ["bibliometrics", `/bibliometrics/${ids.analysis}`],
-  ["review", `/reviews/${ids.review}?tab=document`],
-] as const;
 const questions = {
   en: ["LLM screening for systematic reviews", "Long-term stability of perovskite solar cells", "Gut microbiome and depression"],
   zh: ["大语言模型辅助系统综述的文献筛选", "钙钛矿太阳能电池的长期稳定性", "肠道菌群与抑郁症的关联机制"],
@@ -29,25 +23,12 @@ const papers = [
 test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 
 for (const language of ["en", "zh"] as const) {
-  test(`workspace screenshots (${language})`, async ({ page }) => {
+  test(`results screenshot (${language})`, async ({ page }) => {
     const state = createState();
     state.results[ids.done] = papers;
     [ids.done, ids.small, ids.failed].forEach((id, index) => { state.runs[id].question = questions[language][index]; });
-    state.analyses = [analysis(state, ids.done)];
-    const review = withDocument(reviewDetail(state, { source_run_id: ids.done, paper_uids: ["uid-1", "uid-2", "uid-3"],
-      topic: questions[language][0], language, length: "standard", section_count: 2 }));
-    const cite = (number: number) => ({ citation: { number, label: `[${number}]`, paper_id: `p${number}`, evidence_ids: [`e-p${number}`] } });
-    review.document.sections[0].paragraphs = [{ citation_warnings: [], spans: [
-      { text: "Across the included evaluations, model-assisted screening reached recall comparable to a single human reviewer while reducing the abstracts that needed manual reading " }, cite(1), { text: ". Savings were largest when the model ranked abstracts before human review " }, cite(3), { text: "." }] }];
-    review.document.sections[1].paragraphs = [{ citation_warnings: [], spans: [
-      { text: "Performance varied with prompt design and topic; studies that calibrated on a held-out set reported more stable decisions " }, cite(2), { text: "." }] }];
-    review.document.references = papers.slice(0, 3).map((item, index) => ({ number: index + 1, text: `${item.authors[0]}, ${item.authors[1]}. ${item.title}. ${item.venue}. ${item.publish_year}.`, url: "", doi: "" }));
-    state.reviews = [review];
-    for (const [name, path] of pages) {
-      await open(page, path, state, language);
-      await page.waitForLoadState("networkidle");
-      if (name === "search") await page.locator("textarea").first().fill(questions[language][0]);
-      await page.screenshot({ path: `${out}/workspace-${name}-${language}.png` });
-    }
+    await open(page, `/runs/${ids.done}/results`, state, language);
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: `${out}/workspace-results-${language}.png` });
   });
 }

@@ -1,6 +1,10 @@
 <div align="center">
-  <img src="docs/public/paperseek-mark.png" width="64" alt="PaperSeek">
-  <h1>PaperSeek</h1>
+  <h1>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/public/paperseek-lockup-dark.svg">
+      <img src="docs/public/paperseek-lockup.svg" width="320" alt="PaperSeek">
+    </picture>
+  </h1>
   <p><strong>从问题出发，找到研究的线索。</strong></p>
   <p>开源文献检索、初步文献计量与基于摘要的文献综述。</p>
   <p>

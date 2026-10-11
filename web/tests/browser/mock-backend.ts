@@ -121,7 +121,7 @@ function historyItems(state: MockState) {
     result_count: run.result_count, created_at: run.created_at, warnings: run.warnings, error_code: run.error_code,
   }));
 }
-export function analysis(state: MockState, sourceRunId: string): Json {
+function analysis(state: MockState, sourceRunId: string): Json {
   const bucket = (label: string, count: number) => ({ label, count });
   return {
     id: ids.analysis, title: state.runs[sourceRunId]?.question || "Analysis", source_run_id: sourceRunId, paper_count: 642, scope: "corpus",
@@ -139,7 +139,7 @@ export function analysis(state: MockState, sourceRunId: string): Json {
     },
   };
 }
-export function reviewDetail(state: MockState, body: Json): Json {
+function reviewDetail(state: MockState, body: Json): Json {
   const papers = (body.paper_uids as string[]).map((uid, index) => {
     const source = (state.results[body.source_run_id] || []).find((item) => item.uid === uid) || paper(index + 1);
     return { id: `p${index + 1}`, title: source.title, authors: source.authors, year: source.publish_year, has_abstract: Boolean(source.abstract),

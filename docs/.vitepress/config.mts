@@ -51,7 +51,7 @@ export default defineConfig({
   sitemap: { hostname: 'https://docs.paperseek.app' },
   markdown: { theme: { light: 'github-light', dark: 'github-dark' } },
   head: [
-    ['link', { rel: 'icon', href: `${base}paperseek-mark.png` }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}paperseek-mark.svg` }],
     ['meta', { name: 'theme-color', content: '#fafafa' }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'PaperSeek' }]

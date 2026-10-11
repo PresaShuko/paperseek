@@ -29,7 +29,7 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
     <section class="ps-section ps-container" aria-labelledby="tour-heading">
       <h2 id="tour-heading" class="ps-sr-only">{{ t("Explore the research workspace", "探索文献研究工作区") }}</h2>
       <ProductTour :zh="zh" />
-      <p class="ps-tour-caption">{{ t('Real screens with illustrative papers. Your results depend on the question, source, and model you choose.', '真实界面，文献为示例。实际结果取决于研究问题、数据源和所选模型。') }}</p>
+      <p class="ps-tour-caption">{{ t('An illustrative look at the workflow. Your results depend on the question, source, and model you choose.', '流程示意。实际结果取决于研究问题、数据源和所选模型。') }}</p>
       <div class="ps-principles">
         <article><span class="ps-step-number">01 / {{ t('SEARCH', '检索') }}</span><h3>{{ t('Go beyond a single query.', '不止于一次关键词检索。') }}</h3><p>{{ t('PaperSeek plans queries, refines the search, and combines complementary retrieval paths before ranking the candidates.', '从问题理解到检索式迭代，综合不同召回路径，再对候选文献排序。你可以查看每一步进展。') }}</p><a :href="link('guide/search')">{{ t('How search works', '了解检索流程') }} →</a></article>
         <article><span class="ps-step-number">02 / {{ t('ANALYZE', '计量') }}</span><h3>{{ t('Explore the whole retrieved corpus.', '观察完整候选集。') }}</h3><p>{{ t('Inspect distributions, keyword co-occurrence, and shared references using the full retrieved corpus. Keep model scoring focused on its subset.', '用实际获取的候选集分析分布、关键词共现和共同参考文献，模型评分仍只针对原子集。') }}</p><a :href="link('guide/bibliometrics')">{{ t('Explore bibliometrics', '了解文献计量') }} →</a></article>

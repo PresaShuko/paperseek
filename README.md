@@ -1,6 +1,10 @@
 <div align="center">
-  <img src="docs/public/paperseek-mark.png" width="64" alt="PaperSeek">
-  <h1>PaperSeek</h1>
+  <h1>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/public/paperseek-lockup-dark.svg">
+      <img src="docs/public/paperseek-lockup.svg" width="320" alt="PaperSeek">
+    </picture>
+  </h1>
   <p><strong>Follow the question. Find the evidence.</strong></p>
   <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
   <p>
