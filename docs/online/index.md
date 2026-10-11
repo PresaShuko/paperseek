@@ -21,7 +21,7 @@ Model keys and data-source keys are separate. A model API key does not grant acc
 2. Describe your question, choose a data source and a search budget.
 3. Start the search. The form shows how many credits the task uses and how many are left today.
 
-Searching and writing use **Auto**, which picks a suitable built-in model for each task; there are no other choices for now. Preliminary ranking is set in **Settings › Model APIs**. Available sources are shown in the application.
+Searching uses **Auto**, a built-in model chosen by PaperSeek. For reviews, choose **Fast** (the default, quicker) or **Deep Research** (more thorough, slower) as the writing model. Preliminary ranking is set in **Settings › Model APIs**. Available sources are shown in the application.
 
 ## Credits
 
