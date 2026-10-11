@@ -1,5 +1,6 @@
 :root {
   --vp-font-family-base: 'Geist Variable', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --ps-font-display: 'Geist Variable', 'Noto Sans SC Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --vp-font-family-mono: 'Geist Mono Variable', ui-monospace, Consolas, monospace;
   --vp-c-brand-1: #171717;
   --vp-c-brand-2: #404040;
@@ -94,9 +95,10 @@ a, button { -webkit-tap-highlight-color: transparent; }
 .ps-hero-body { display: flex; justify-content: space-between; align-items: flex-end; gap: 48px; padding: 44px 0 48px; }
 .ps-release { display: inline-flex; align-items: center; gap: 9px; padding: 3px 10px; margin-bottom: 22px; border-radius: 20px; background: var(--vp-c-bg-soft); font-size: 12px; font-weight: 500; }
 .ps-release-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.ps-hero h1 { font-size: clamp(40px, 4.7vw, 68px); line-height: 1.08; letter-spacing: -.045em; font-weight: 500; }
-.ps-hero-side { flex: 0 1 340px; padding-bottom: 6px; }
-.ps-hero-description { font-size: 15px; line-height: 1.65; color: var(--vp-c-text-2); text-wrap: pretty; }
+.ps-hero h1 { font-family: var(--ps-font-display); font-size: clamp(40px, 4.6vw, 66px); line-height: 1.16; letter-spacing: -.025em; font-weight: 480; }
+:lang(zh) .ps-hero h1 { font-size: clamp(38px, 4.2vw, 60px); line-height: 1.3; letter-spacing: .02em; font-weight: 450; }
+.ps-hero-side { flex: 0 1 390px; padding-bottom: 6px; }
+.ps-hero-description { font-size: 15px; line-height: 1.75; letter-spacing: .01em; color: var(--vp-c-text-2); text-wrap: pretty; }
 .ps-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
 .ps-sources { display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 14px 28px; padding: 26px 40px; border-block: 1px solid var(--vp-c-divider); font-size: 17px; font-weight: 600; letter-spacing: -.02em; color: var(--vp-c-text-3); transition: color .16s; }
 .ps-sources:hover { color: var(--vp-c-text-2); }
@@ -202,7 +204,7 @@ a, button { -webkit-tap-highlight-color: transparent; }
   .ps-hero-art { flex: 0 0 auto; min-height: 0; height: 34svh; }
   .ps-hero-art img { object-position: 24% 50%; }
   .ps-hero-body { flex-direction: column; align-items: flex-start; gap: 22px; padding: 30px 0 34px; }
-  .ps-hero h1 { font-size: 36px; }
+  .ps-hero h1, :lang(zh) .ps-hero h1 { font-size: 36px; }
   .ps-hero-side { flex-basis: auto; }
   .ps-release { font-size: 11px; margin-bottom: 18px; }
   .ps-sources { justify-content: center; padding: 20px 18px; gap: 10px 20px; font-size: 13px; }
