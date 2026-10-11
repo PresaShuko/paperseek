@@ -49,11 +49,11 @@ For separate processes, confirm both API and worker use the same database.
 
 ## Report a reproducible issue
 
-Open a [GitHub issue](https://github.com/MingfengHong/paperseek/issues) with:
+Open a [GitHub issue](https://github.com/paperseek/paperseek/issues) with:
 
 - Installed version or online mode, browser/OS, and steps to reproduce.
 - Source, protocol, ranking method, and budget.
 - Expected behavior, observed error, task ID if appropriate, and approximate time.
 - A minimal non-sensitive example and a cropped screenshot if helpful.
 
-Remove API keys, passwords, verification codes, cookies, private queries, and identifying data. Security reports belong in the repository's [security process](https://github.com/MingfengHong/paperseek/blob/main/SECURITY.md).
+Remove API keys, passwords, verification codes, cookies, private queries, and identifying data. Security reports belong in the repository's [security process](https://github.com/paperseek/paperseek/blob/main/SECURITY.md).

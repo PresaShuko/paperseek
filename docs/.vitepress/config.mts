@@ -24,7 +24,7 @@ function navigation(zh = false): DefaultTheme.Config {
       collapsed: false,
       items: pages.map(([english, chinese, path]) => ({ text: zh ? chinese : english, link: prefix + path }))
     })),
-    editLink: { pattern: 'https://github.com/MingfengHong/paperseek/edit/main/docs/:path', text: zh ? '在 GitHub 上编辑此页' : 'Edit this page on GitHub' },
+    editLink: { pattern: 'https://github.com/paperseek/paperseek/edit/main/docs/:path', text: zh ? '在 GitHub 上编辑此页' : 'Edit this page on GitHub' },
     outline: { label: zh ? '本页目录' : 'On this page', level: [2, 3] },
     docFooter: { prev: zh ? '上一页' : 'Previous page', next: zh ? '下一页' : 'Next page' },
     lastUpdated: { text: zh ? '最后更新' : 'Last updated' },
@@ -67,7 +67,7 @@ export default defineConfig({
   themeConfig: {
     logo: { light: '/paperseek-lockup.svg', dark: '/paperseek-lockup-dark.svg', alt: 'PaperSeek' },
     siteTitle: false,
-    socialLinks: [{ icon: 'github', link: 'https://github.com/MingfengHong/paperseek' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/paperseek/paperseek' }],
     search: { provider: 'local', options: { miniSearch: { options: {
       tokenize(text) {
         return Array.from(new Intl.Segmenter('zh', { granularity: 'word' }).segment(text))

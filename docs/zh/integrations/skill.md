@@ -6,7 +6,7 @@
 
 ## 添加 Skill
 
-Skill 位于仓库的 [integrations/skills/paperseek](https://github.com/MingfengHong/paperseek/tree/main/integrations/skills/paperseek)。
+Skill 位于仓库的 [integrations/skills/paperseek](https://github.com/paperseek/paperseek/tree/main/integrations/skills/paperseek)。
 
 1. 通过 Agent 的 Skill 安装功能添加该目录，或将完整的 `paperseek` 文件夹复制到客户端规定的项目级或用户级 Skill 目录。
 2. 保持 `SKILL.md` 与 `references/` 目录在一起。参考文件包含安装步骤、受支持的命令和数据源选项。

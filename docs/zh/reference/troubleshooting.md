@@ -49,11 +49,11 @@ PaperSeek 服务积分与上游服务商余额是两套限制，调整其中一�
 
 ## 如何反馈问题
 
-在 [GitHub Issues](https://github.com/MingfengHong/paperseek/issues) 提供：
+在 [GitHub Issues](https://github.com/paperseek/paperseek/issues) 提供：
 
 - 安装版本或在线模式、浏览器及系统、复现步骤。
 - 数据源、模型协议、排序方式与预算。
 - 期望行为、实际错误、适当的任务 ID 和大致时间。
 - 不含敏感信息的最小示例，必要时附裁剪后的截图。
 
-删除 Key、密码、验证码、Cookie、私人研究问题和身份信息。安全漏洞请按仓库[安全反馈流程](https://github.com/MingfengHong/paperseek/blob/main/SECURITY.md)处理。
+删除 Key、密码、验证码、Cookie、私人研究问题和身份信息。安全漏洞请按仓库[安全反馈流程](https://github.com/paperseek/paperseek/blob/main/SECURITY.md)处理。

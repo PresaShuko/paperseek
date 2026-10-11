@@ -6,7 +6,7 @@
 
 - Locate `paperseek` with `command -v paperseek` on macOS/Linux or `Get-Command paperseek -ErrorAction SilentlyContinue` in PowerShell, then run `paperseek version`.
 - Reuse the user's selected virtual environment or configured executable path. A command missing from PATH does not prove the package is absent.
-- This Skill targets 1.0.0-beta. Do not silently upgrade an existing installation or migrate its data; use the installed command help and the [upgrade guide](https://docs.paperseek.app/self-hosting/upgrade) when a version change is needed.
+- This Skill targets 1.0.0-beta1. Do not silently upgrade an existing installation or migrate its data; use the installed command help and the [upgrade guide](https://docs.paperseek.app/self-hosting/upgrade) when a version change is needed.
 
 ### Install when missing
 
@@ -35,7 +35,7 @@ py -3.12 -m venv $paperseekVenv
 
 Use that environment's executable for subsequent commands. Activation, global PATH changes, and PowerShell execution-policy changes are not required. A published Community wheel includes the Web UI; Node.js is not needed to use it.
 
-If the requested release is unavailable, report the installation failure instead of silently installing an older version. With a user-selected 1.0.0-beta source checkout, run `python -m pip install ./backend` from its root using the selected environment's Python. For source frontend builds, follow that checkout's `CONTRIBUTING.md`.
+If the requested release is unavailable, report the installation failure instead of silently installing an older version. With a user-selected 1.0.0-beta1 source checkout, run `python -m pip install ./backend` from its root using the selected environment's Python. For source frontend builds, follow that checkout's `CONTRIBUTING.md`.
 
 The Skill contains no fallback search runtime. Do not run its reference files as application code. After installation, distinguish successful package setup from missing model/source configuration; `doctor` checks the latter without making a paid search.
 

@@ -6,7 +6,7 @@ Searches run in your local Community installation. History and artifacts stay in
 
 ## Add the Skill
 
-The Skill lives at [integrations/skills/paperseek](https://github.com/MingfengHong/paperseek/tree/main/integrations/skills/paperseek) in the repository.
+The Skill lives at [integrations/skills/paperseek](https://github.com/paperseek/paperseek/tree/main/integrations/skills/paperseek) in the repository.
 
 1. Use your agent's Skill installer to add that directory, or copy the complete `paperseek` folder into the project or user Skill directory documented by your client.
 2. Keep `SKILL.md` and the `references/` directory together. The references contain installation steps and the supported command and source options.

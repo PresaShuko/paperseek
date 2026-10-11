@@ -115,7 +115,7 @@ paperseek serve
 ### Docker
 
 ```sh
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
 docker compose up -d
@@ -126,7 +126,7 @@ docker compose up -d
 ### 从源码安装
 
 ```sh
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 python -m pip install ./backend
 ```

@@ -6,7 +6,7 @@
   "version": "1.0.0-beta1",
   "repository": {
     "source": "github",
-    "url": "https://github.com/MingfengHong/paperseek"
+    "url": "https://github.com/paperseek/paperseek"
   },
   "packages": [
     {

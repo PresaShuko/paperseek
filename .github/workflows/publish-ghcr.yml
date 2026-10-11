@@ -9,7 +9,7 @@ permissions:
   packages: write
 
 env:
-  PAPERSEEK_VERSION: "1.0.0-beta"
+  PAPERSEEK_VERSION: "1.0.0-beta1"
   COMMUNITY_IMAGE: ghcr.io/mingfenghong/paperseek
   MCP_IMAGE: ghcr.io/mingfenghong/paperseek-mcp
 

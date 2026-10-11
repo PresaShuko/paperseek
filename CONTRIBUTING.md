@@ -9,7 +9,7 @@ See the [English development guide](https://docs.paperseek.app/contributing) or
 shared frontend build, and documentation workflow.
 
 ```bash
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 python -m venv .venv
 source .venv/bin/activate

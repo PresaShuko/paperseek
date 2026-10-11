@@ -85,4 +85,4 @@ Pull requests build the site to catch errors, and the site updates after a merge
 
 Explain the problem, resulting behavior, affected surfaces, and validation. Include before/after screenshots for visible UI changes. Add behavior tests where needed; avoid tests tied only to a temporary file arrangement.
 
-Follow the [Code of Conduct](https://github.com/MingfengHong/paperseek/blob/main/CODE_OF_CONDUCT.md), preserve attribution, and keep contributions compatible with [Apache-2.0](https://github.com/MingfengHong/paperseek/blob/main/LICENSE).
+Follow the [Code of Conduct](https://github.com/paperseek/paperseek/blob/main/CODE_OF_CONDUCT.md), preserve attribution, and keep contributions compatible with [Apache-2.0](https://github.com/paperseek/paperseek/blob/main/LICENSE).

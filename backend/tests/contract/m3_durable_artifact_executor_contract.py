@@ -309,12 +309,19 @@ class M3DurableArtifactExecutorContractTest(unittest.TestCase):
             self.assertEqual(connection.execute(text("PRAGMA busy_timeout")).scalar_one(), 10000)
 
     def test_file_store_supports_long_checkpoint_paths(self) -> None:
-        store = FileArtifactStore(self.data_dir / ("deep-" + "a" * 40) / ("nested-" + "b" * 40))
         draft = ArtifactWrite(
             run_id=str(uuid4()), kind="checkpoint", role=ArtifactRole.RECOVERY,
             visibility=ArtifactVisibility.INTERNAL, filename="state-" + "c" * 64 + ".json",
             media_type="application/json", schema_version=1, content=b'{"checkpoint": true}',
         )
+
+        def store_with(padding):
+            return FileArtifactStore(self.data_dir / ("deep-" + "a" * 40) / ("nested-" + "b" * padding))
+
+        # Exceed Windows MAX_PATH for the file whatever the temp root's length, without
+        # making the directory itself too long to clean up.
+        store = store_with(40)
+        store = store_with(40 + max(0, 266 - len(str(store._target(draft)))))
         self.assertGreater(len(str(store._target(draft))), 260)
         stored = store.put(draft)
         self.assertEqual(store.put(draft), stored)

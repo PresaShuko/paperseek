@@ -83,7 +83,7 @@ July 5, 2026 · Provider routing and hosted service updates
 
 - Expanded PaperSeek Service documentation, including hosted data-source credentials and release notes.
 
-[Original release notes](https://github.com/MingfengHong/paperseek/releases/tag/v0.2.1)
+[Original release notes](https://github.com/paperseek/paperseek/releases/tag/v0.2.1)
 
 ## 0.2.0 {#v0-2-0}
 
@@ -101,7 +101,7 @@ July 4, 2026 · More sources and multi-lane retrieval
 - Updated email registration and sign-in, with GitHub and ModelScope OAuth.
 - Introduced a daily allowance of 20 successful searches for signed-in users at that release.
 
-[Original release notes](https://github.com/MingfengHong/paperseek/releases/tag/v0.2.0)
+[Original release notes](https://github.com/paperseek/paperseek/releases/tag/v0.2.0)
 
 ## 0.1.1 {#v0-1-1}
 
@@ -119,7 +119,7 @@ June 6, 2026 · Discipline filters and bilingual use
 - Reorganized the community package around its self-contained core.
 - Included Docker/runtime packaging fixes, history improvements, and provider updates.
 
-[Original release notes](https://github.com/MingfengHong/paperseek/releases/tag/v0.1.1)
+[Original release notes](https://github.com/paperseek/paperseek/releases/tag/v0.1.1)
 
 ## 0.1.0 {#v0-1-0}
 
@@ -134,6 +134,6 @@ The first release established the literature-discovery workflow:
 - Local Web UI, command-line use, Docker deployment, and an optional Agent Skill.
 - Support for hosted model providers, compatible endpoints, and local Ollama.
 
-The demo release linked to its commit history without a separate feature list. This summary follows the [README at the 0.1.0 tag](https://github.com/MingfengHong/paperseek/blob/v0.1.0/README.md).
+The demo release linked to its commit history without a separate feature list. This summary follows the [README at the 0.1.0 tag](https://github.com/paperseek/paperseek/blob/v0.1.0/README.md).
 
-[Original release](https://github.com/MingfengHong/paperseek/releases/tag/v0.1.0) · [Code history](https://github.com/MingfengHong/paperseek/commits/v0.1.0/)
+[Original release](https://github.com/paperseek/paperseek/releases/tag/v0.1.0) · [Code history](https://github.com/paperseek/paperseek/commits/v0.1.0/)

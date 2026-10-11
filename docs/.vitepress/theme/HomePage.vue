@@ -56,7 +56,7 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
     </section>
 
     <section class="ps-section ps-container ps-resources" aria-labelledby="resources-heading">
-      <div><p class="ps-eyebrow">{{ t('A GOOD PLACE TO START', '从这里继续') }}</p><h2 id="resources-heading">{{ t('A little guidance.', '一点指引，') }}<br><span>{{ t('A lot to discover.', '更多发现。') }}</span></h2><p>{{ t('Learn the workflow at your own pace, then make it part of your research practice.', '按自己的节奏了解工作流程，再把 PaperSeek 融入日常研究。') }}</p><a class="ps-text-link" href="https://github.com/MingfengHong/paperseek">{{ t('Built in the open. Join us on GitHub.', '在开放中成长。欢迎在 GitHub 参与贡献。') }} ↗</a></div>
+      <div><p class="ps-eyebrow">{{ t('A GOOD PLACE TO START', '从这里继续') }}</p><h2 id="resources-heading">{{ t('A little guidance.', '一点指引，') }}<br><span>{{ t('A lot to discover.', '更多发现。') }}</span></h2><p>{{ t('Learn the workflow at your own pace, then make it part of your research practice.', '按自己的节奏了解工作流程，再把 PaperSeek 融入日常研究。') }}</p><a class="ps-text-link" href="https://github.com/paperseek/paperseek">{{ t('Built in the open. Join us on GitHub.', '在开放中成长。欢迎在 GitHub 参与贡献。') }} ↗</a></div>
       <div class="ps-resource-links">
         <a :href="link('guide/quick-start')"><span><small>01</small><strong>{{ t('Your first search', '开始第一次检索') }}</strong><em>{{ t('Installation, configuration, and your first question.', '安装、配置，提出你的第一个问题。') }}</em></span><b aria-hidden="true">↗</b></a>
         <a :href="link('guide/models')"><span><small>02</small><strong>{{ t('Find your model setup', '选择模型与排序方式') }}</strong><em>{{ t('Local fusion, embedding, reranking, and decision models.', '理解本地融合、Embedding、Rerank 与决策模型。') }}</em></span><b aria-hidden="true">↗</b></a>

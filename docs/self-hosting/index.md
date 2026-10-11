@@ -16,7 +16,7 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765). Configure a model and data 
 To install a checkout instead:
 
 ```sh
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 python -m pip install ./backend
 paperseek serve
@@ -29,7 +29,7 @@ For a checkout without built Web assets, follow the [development setup](../contr
 Use the repository's `compose.yaml`:
 
 ```sh
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
 docker compose up -d

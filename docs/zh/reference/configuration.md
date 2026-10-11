@@ -4,7 +4,7 @@
 
 ## 社区版环境变量
 
-部署模板见仓库的 [.env.example](https://github.com/MingfengHong/paperseek/blob/main/.env.example)。
+部署模板见仓库的 [.env.example](https://github.com/paperseek/paperseek/blob/main/.env.example)。
 
 | 变量 | 用途 |
 | --- | --- |

@@ -83,7 +83,7 @@ Web、六命令 CLI、版本化 HTTP API 和独立的同版本 MCP 适配器共�
 
 - 完善 PaperSeek 服务说明，补充在线版数据源密钥配置与发布说明。
 
-[原始发布记录](https://github.com/MingfengHong/paperseek/releases/tag/v0.2.1)
+[原始发布记录](https://github.com/paperseek/paperseek/releases/tag/v0.2.1)
 
 ## 0.2.0 {#v0-2-0}
 
@@ -101,7 +101,7 @@ Web、六命令 CLI、版本化 HTTP API 和独立的同版本 MCP 适配器共�
 - 更新邮箱注册与登录流程，支持 GitHub、ModelScope OAuth。
 - 该版本为登录用户提供每日 20 次成功检索额度。
 
-[原始发布记录](https://github.com/MingfengHong/paperseek/releases/tag/v0.2.0)
+[原始发布记录](https://github.com/paperseek/paperseek/releases/tag/v0.2.0)
 
 ## 0.1.1 {#v0-1-1}
 
@@ -119,7 +119,7 @@ Web、六命令 CLI、版本化 HTTP API 和独立的同版本 MCP 适配器共�
 - 围绕独立核心整理社区版软件包。
 - 修复 Docker 与运行时打包问题，改善历史记录和模型服务适配。
 
-[原始发布记录](https://github.com/MingfengHong/paperseek/releases/tag/v0.1.1)
+[原始发布记录](https://github.com/paperseek/paperseek/releases/tag/v0.1.1)
 
 ## 0.1.0 {#v0-1-0}
 
@@ -134,6 +134,6 @@ Web、六命令 CLI、版本化 HTTP API 和独立的同版本 MCP 适配器共�
 - 提供本地网页、命令行、Docker 部署和可选 Agent Skill。
 - 支持模型服务商、兼容接口与本地 Ollama。
 
-该版本的发布页仅提供提交历史，没有单独列出功能；以上按 [0.1.0 标签下的 README](https://github.com/MingfengHong/paperseek/blob/v0.1.0/README.md) 整理。
+该版本的发布页仅提供提交历史，没有单独列出功能；以上按 [0.1.0 标签下的 README](https://github.com/paperseek/paperseek/blob/v0.1.0/README.md) 整理。
 
-[原始发布记录](https://github.com/MingfengHong/paperseek/releases/tag/v0.1.0) · [代码历史](https://github.com/MingfengHong/paperseek/commits/v0.1.0/)
+[原始发布记录](https://github.com/paperseek/paperseek/releases/tag/v0.1.0) · [代码历史](https://github.com/paperseek/paperseek/commits/v0.1.0/)

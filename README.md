@@ -8,7 +8,7 @@
   <p><strong>Follow the question. Find the evidence.</strong></p>
   <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
   <p>
-    <a href="https://github.com/MingfengHong/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
+    <a href="https://github.com/paperseek/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
     <img alt="Version 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta1-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
     <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
@@ -120,7 +120,7 @@ Open [localhost:8765](http://127.0.0.1:8765), configure a model connection and s
 ### Docker
 
 ```sh
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
 docker compose up -d
@@ -131,7 +131,7 @@ Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`. The
 ### From source
 
 ```sh
-git clone https://github.com/MingfengHong/paperseek.git
+git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 python -m pip install ./backend
 ```

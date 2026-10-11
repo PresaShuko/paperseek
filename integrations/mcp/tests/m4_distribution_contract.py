@@ -9,7 +9,7 @@ import unittest
 MCP_ROOT = Path(__file__).resolve().parents[1]
 COMMUNITY_ROOT = MCP_ROOT.parents[1]
 VERSION = "1.0.0b1"
-RELEASE = "1.0.0-beta"
+RELEASE = "1.0.0-beta1"
 SERVER_NAME = "io.github.MingfengHong/paperseek"
 
 
@@ -47,7 +47,7 @@ class M4MCPDistributionContract(unittest.TestCase):
         self.assertEqual(metadata["version"], RELEASE)
         self.assertEqual(metadata["repository"], {
             "source": "github",
-            "url": "https://github.com/MingfengHong/paperseek",
+            "url": "https://github.com/paperseek/paperseek",
         })
         packages = {item["registryType"]: item for item in metadata["packages"]}
         self.assertEqual(packages["pypi"]["identifier"], "paperseek-mcp")

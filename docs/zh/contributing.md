@@ -85,4 +85,4 @@ Pull Request 会自动构建文档站检查错误，合并后网站自动更新�
 
 说明具体问题、改动后的行为、受影响的界面与验证结果。界面修改请附前后截图，需要时补充行为测试，避免只检查临时文件布局。
 
-请遵守[行为准则](https://github.com/MingfengHong/paperseek/blob/main/CODE_OF_CONDUCT.md)，保留署名，使贡献兼容 [Apache-2.0](https://github.com/MingfengHong/paperseek/blob/main/LICENSE) 许可。
+请遵守[行为准则](https://github.com/paperseek/paperseek/blob/main/CODE_OF_CONDUCT.md)，保留署名，使贡献兼容 [Apache-2.0](https://github.com/paperseek/paperseek/blob/main/LICENSE) 许可。

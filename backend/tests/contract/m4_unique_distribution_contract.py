@@ -148,8 +148,8 @@ class M4UniqueDistributionContract(unittest.TestCase):
         )
         expected_urls = {
             "Homepage": "https://paperseek.app/",
-            "Repository": "https://github.com/MingfengHong/paperseek",
-            "Issues": "https://github.com/MingfengHong/paperseek/issues",
+            "Repository": "https://github.com/paperseek/paperseek",
+            "Issues": "https://github.com/paperseek/paperseek/issues",
             "Documentation": "https://docs.paperseek.app/",
             "Online-Demo": "https://paperseek.app/",
         }

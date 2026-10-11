@@ -4,7 +4,7 @@ There are three configuration layers: deployment defaults, the search form, and 
 
 ## Community environment variables
 
-The repository's [.env.example](https://github.com/MingfengHong/paperseek/blob/main/.env.example) is the deployment template.
+The repository's [.env.example](https://github.com/paperseek/paperseek/blob/main/.env.example) is the deployment template.
 
 | Variable | Use |
 | --- | --- |
