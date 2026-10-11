@@ -32,12 +32,12 @@ Use the repository's `compose.yaml`:
 git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
-docker compose up -d
+PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 ```
 
-On PowerShell, replace `cp` with `Copy-Item`. Edit `.env` with your deployment defaults before starting.
+On PowerShell, replace `cp` with `Copy-Item`, then run `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. Edit `.env` with your deployment defaults before starting.
 
-The service listens on port **8765** and stores data in the `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta1` in the Compose environment to pin the release; otherwise the supplied Compose file uses `latest`.
+The service listens on port **8765** and stores data in the `paperseek-data` volume. The command explicitly pins `1.0.0-beta1`, also the default in the supplied Compose file and `.env.example`. Prereleases do not update `latest`; change `PAPERSEEK_VERSION` deliberately when upgrading.
 
 ```sh
 docker compose logs -f paperseek

@@ -84,7 +84,7 @@ Avoid or disable it when:
 CLI flag:
 
 ```bash
-paperseek search "QUERY" --source openalex --no-expand-citations
+paperseek search "QUERY" --source openalex --no-citation-enabled
 ```
 
 ## Query Guidance
@@ -92,7 +92,7 @@ paperseek search "QUERY" --source openalex --no-expand-citations
 - Natural-language questions may be Chinese or English; PaperSeek asks the LLM to generate source-appropriate search queries.
 - For Chinese user questions, preserve the original question but expect English scholarly query terms.
 - Prefer concise research questions over very long pasted text.
-- Use `--field` only when the user has a clear discipline constraint; it can over-narrow results.
+- Add a field constraint only when the user requests one; it can over-narrow results. For OpenAlex, arXiv, and WoS, use repeated `--field-id` values from the source’s supported fields or categories (for example, `--source arxiv --field-id cs.CL`). For Semantic Scholar, PubMed, Google Scholar, PaperHub, and Crossref, use `--field-hint "TEXT"` instead. Do not abbreviate either option to `--field`, which is ambiguous.
 - If results are weak, rerun with a shorter question, fewer concepts, or broader terms.
 
 ## Result Interpretation

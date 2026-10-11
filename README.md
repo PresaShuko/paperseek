@@ -34,7 +34,7 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 ## Contents
 
 - [Why PaperSeek](#why-paperseek)
-- [What’s new in 1.0.0-beta1](#whats-new-in-100-beta)
+- [What’s new in 1.0.0-beta1](#whats-new-in-100-beta1)
 - [How it works](#how-it-works)
 - [Data sources](#data-sources)
 - [Quick start](#quick-start)
@@ -123,10 +123,10 @@ Open [localhost:8765](http://127.0.0.1:8765), configure a model connection and s
 git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
-docker compose up -d
+PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 ```
 
-Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. Set `PAPERSEEK_VERSION=1.0.0-beta1` in the Compose environment to pin the image.
+Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`, then `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. These commands pin the beta image; prereleases do not update `latest`. The supplied Compose file and `.env.example` also default to `1.0.0-beta1`.
 
 ### From source
 

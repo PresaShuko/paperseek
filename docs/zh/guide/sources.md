@@ -4,20 +4,18 @@
 
 ## 数据源目录
 
-| 数据源 | 社区版 / 自带密钥访问要求 | 侧重 |
-| --- | --- | --- |
-| [OpenAlex](https://openalex.org/) | 建议配置 Key | 广泛学术发现与引用扩展 |
-| [arXiv](https://arxiv.org/) | 无需 Key | 科学预印本 |
-| [Crossref](https://www.crossref.org/) | 无需 Key | DOI 与出版元数据 |
-| [Semantic Scholar](https://www.semanticscholar.org/) | Key 可选 | 论文与学术图谱元数据 |
-| [PubMed](https://pubmed.ncbi.nlm.nih.gov/) | NCBI Key 可选 | 生物医学与生命科学 |
-| Google Scholar / [Serper](https://serper.dev/) | 必须配置 Serper Key | 通过受支持 API 检索 Scholar |
-| PaperHub 计算机顶会 | 无需 Key | PaperHub 提供的顶会集合 |
-| [Web of Science Starter](https://developer.clarivate.com/apis/wos-starter) | 需要 Clarivate Key | 受支持的 WoS 集合 |
+| 数据源 | 社区版 | 在线版 BYOK | 侧重 |
+| --- | --- | --- | --- |
+| [OpenAlex](https://openalex.org/) | 建议配置 Key | 必须配置 Key | 广泛学术发现与引用扩展 |
+| [arXiv](https://arxiv.org/) | 无需 Key | 无需 Key | 科学预印本 |
+| [Crossref](https://www.crossref.org/) | 无需 Key | 无需 Key | DOI 与出版元数据 |
+| [Semantic Scholar](https://www.semanticscholar.org/) | Key 可选 | 必须配置 Key | 论文与学术图谱元数据 |
+| [PubMed](https://pubmed.ncbi.nlm.nih.gov/) | NCBI Key 可选 | 必须配置 Key | 生物医学与生命科学 |
+| Google Scholar / [Serper](https://serper.dev/) | 必须配置 Serper Key | 必须配置 Key | 通过受支持 API 检索 Scholar |
+| PaperHub 计算机顶会 | 无需 Key | 无需 Key | PaperHub 提供的顶会集合 |
+| [Web of Science Starter](https://developer.clarivate.com/apis/wos-starter) | 需要 Clarivate Key | 必须配置 Key | 受支持的 WoS 集合 |
 
-
-
-PaperSeek 服务的数据源访问由 PaperSeek 管理。自带密钥模式下在设置中填写数据源密钥；除 arXiv、Crossref、PaperHub 等无需密钥的数据源外，其余数据源（包括 OpenAlex、PubMed、Semantic Scholar）都必须提供密钥。模型 Key 与数据源 Key 并不通用。
+PaperSeek 服务的数据源访问由 PaperSeek 管理。社区版按上表允许匿名访问或使用可选密钥；在线版 BYOK 是单独的访问策略，在设置中填写并保存数据源密钥；除 arXiv、Crossref、PaperHub 等无需密钥的数据源外，其余数据源（包括 OpenAlex、PubMed、Semantic Scholar）都必须提供密钥。模型 Key 与数据源 Key 并不通用。
 
 ## 申请凭据
 

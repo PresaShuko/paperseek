@@ -4,20 +4,18 @@ Choose an index that fits your research. Coverage, metadata, access, and filters
 
 ## Source directory
 
-| Source | Community / your own key | Focus |
-| --- | --- | --- |
-| [OpenAlex](https://openalex.org/) | Key recommended | Broad discovery and citation expansion |
-| [arXiv](https://arxiv.org/) | No key | Scientific preprints |
-| [Crossref](https://www.crossref.org/) | No key | DOI and publication metadata |
-| [Semantic Scholar](https://www.semanticscholar.org/) | Optional key | Papers and scholarly graph metadata |
-| [PubMed](https://pubmed.ncbi.nlm.nih.gov/) | Optional NCBI key | Biomedical and life-science research |
-| Google Scholar via [Serper](https://serper.dev/) | Serper key required | Scholar results through the supported API |
-| PaperHub top CS conferences | No key | PaperHub's conference collection |
-| [Web of Science Starter](https://developer.clarivate.com/apis/wos-starter) | Clarivate key required | Supported WoS collection when enabled |
+| Source | Community | Online BYOK | Focus |
+| --- | --- | --- | --- |
+| [OpenAlex](https://openalex.org/) | Key recommended | Key required | Broad discovery and citation expansion |
+| [arXiv](https://arxiv.org/) | No key | No key | Scientific preprints |
+| [Crossref](https://www.crossref.org/) | No key | No key | DOI and publication metadata |
+| [Semantic Scholar](https://www.semanticscholar.org/) | Optional key | Key required | Papers and scholarly graph metadata |
+| [PubMed](https://pubmed.ncbi.nlm.nih.gov/) | Optional NCBI key | Key required | Biomedical and life-science research |
+| Google Scholar via [Serper](https://serper.dev/) | Serper key required | Key required | Scholar results through the supported API |
+| PaperHub top CS conferences | No key | No key | PaperHub's conference collection |
+| [Web of Science Starter](https://developer.clarivate.com/apis/wos-starter) | Clarivate key required | Key required | Supported WoS collection when enabled |
 
-
-
-PaperSeek Service manages source access for you. With your own key, add source keys in Settings; every source that takes a key requires one; arXiv, Crossref, and PaperHub work without. A model key is not a data-source key.
+PaperSeek Service manages source access for you. Community permits anonymous access or optional keys as shown above. Online BYOK has a separate access policy: add and save source keys in Settings for every source that takes a key, including OpenAlex, PubMed, and Semantic Scholar. arXiv, Crossref, and PaperHub need no key. A model key is not a data-source key.
 
 ## Obtain credentials
 

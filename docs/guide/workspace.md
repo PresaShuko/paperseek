@@ -1,6 +1,6 @@
 # Workspace and history
 
-Use the three top-level tabs: **Search**, **Bibliometrics**, and **Review**. Switching modules returns to the last page visited in that module during the current session.
+Open **Search**, **Bibliometrics**, or **Review** from the left sidebar. Use the module’s history to reopen a saved search, analysis, or review.
 
 | Module | Subfunctions | Saved object |
 | --- | --- | --- |
@@ -8,11 +8,20 @@ Use the three top-level tabs: **Search**, **Bibliometrics**, and **Review**. Swi
 | Bibliometrics | Overview, Keywords, Paper relations, Data quality | One independent corpus analysis |
 | Review | Papers, Outline, Draft, Citation evidence | One editable review |
 
-The left sidebar belongs to the current module. Collapse it into an icon rail that keeps New, History, Settings, and the account menu available; on small screens it opens as a dismissible drawer. Use **New**, search, record actions, and **Manage history** without leaving the current module. A new draft is not a history record until it is saved or submitted.
+The sidebar lists the current module’s history. The header button hides or shows the entire sidebar; on small screens it opens as a dismissible drawer. Use **New**, search, record actions, and **Manage history** without leaving the current module. A new draft is not a history record until it is saved or submitted.
 
 Record actions include rename, export, and delete. A title change does not rewrite the research question, review topic, or original execution settings. Deletion has a confirmation dialog. Active tasks cannot be deleted while they are running.
 
-The sidebar footer contains **Settings** and the account menu. Standalone settings have **Models and ranking**, **Data sources**, and **General** sections at `/settings/models`, `/settings/sources`, and `/settings/general`. The content scrolls independently, with advanced parameters disclosed on demand. **Done** or **Back to workspace** returns to the previous page and retains the search draft. Edits apply immediately to new searches; there is no separate save step. Reloading clears in-memory drafts and keys. The account menu groups language, help, and—online—account, service defaults, and session actions. Submenus show the selected option. Model and source defaults apply to new search drafts. A saved run keeps its own settings. Review model settings apply to the current review and are disabled during generation. Keys remain in memory rather than browser storage.
+The sidebar footer contains **Settings**, documentation, and the account menu. Settings has four sections: **Model APIs**, **Data sources**, **General**, and **User**, at `/settings/models`, `/settings/sources`, `/settings/general`, and `/settings/user`. Return to a module through the sidebar or browser Back button.
+
+Add or edit a model connection in its dialog and click **Save**; data-source configuration also requires **Save**. Default model and ranking selections save when changed. They apply to new drafts; saved runs keep their execution settings. Review model settings apply to the current review and cannot change during generation. The **User** page shows the local data location and provides saved-key and history management. Language is available in General, the header, and the account menu; the online account menu also exposes account and service actions.
+
+## Inputs, saved keys, and browser state
+
+- Unsaved form inputs and drafts are temporary browser memory and disappear on reload. Testing a connection sends its inputs to the server without saving a connection.
+- Saved model connections and data-source keys persist on the server. Community encrypts secret values in its database using the adjacent `credentials.master.key`; refreshing or restarting does not clear them. Settings returns key status and masked suffixes, not saved plaintext keys.
+- Submitted tasks may retain a separate encrypted credential copy for execution and recovery. **Settings → User → Clear saved keys** deletes saved connections and source keys, but does not affect already-submitted tasks.
+- Browser storage contains preferences such as language and sidebar visibility, not API keys. Clearing browser storage or reloading does not delete server-side keys.
 
 Citation maps are available under the review's **Citation evidence → Paper relations**. Old direct map and history links remain usable.
 

@@ -32,12 +32,12 @@ paperseek serve
 git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
-docker compose up -d
+PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 ```
 
-PowerShell 中可将 `cp` 换成 `Copy-Item`。启动前编辑 `.env`，填写需要的默认配置。
+PowerShell 中将 `cp` 换成 `Copy-Item`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。启动前编辑 `.env`，填写需要的默认配置。
 
-服务端口为 **8765**，数据存入 `paperseek-data` 命名卷。可在 Compose 环境中设置 `PAPERSEEK_VERSION=1.0.0-beta1` 固定版本；未设置时，随仓库提供的 Compose 使用 `latest`。
+服务端口为 **8765**，数据存入 `paperseek-data` 命名卷。以上命令显式固定为 `1.0.0-beta1`，随附的 Compose 与 `.env.example` 也使用此默认版本。预发布不会更新 `latest`；升级时请明确调整 `PAPERSEEK_VERSION`。
 
 ```sh
 docker compose logs -f paperseek

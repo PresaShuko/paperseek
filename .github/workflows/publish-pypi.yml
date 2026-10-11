@@ -22,6 +22,21 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Validate release tag and package versions
+        id: version
+        env:
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$RELEASE_REF_TYPE" != "tag" ]; then
+            echo "Select a release tag when running this workflow manually." >&2
+            exit 1
+          fi
+          python -m pip install packaging
+          python -m unittest discover -s .github/scripts -p "test_*.py"
+          version=$(python .github/scripts/check_release_version.py --tag "$RELEASE_TAG")
+          echo "python_version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Check independent MCP lock
         run: |
           python -m pip install uv==0.9.24
@@ -36,13 +51,15 @@ jobs:
         run: uv build --wheel --out-dir dist integrations/mcp
 
       - name: Verify both release candidates
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.python_version }}
         run: |
           python -m twine check dist/*
           uv venv .release-check --python 3.12
           uv pip install --python .release-check/bin/python \
-            dist/paperseek-1.0.0b1-py3-none-any.whl \
-            dist/paperseek_mcp-1.0.0b1-py3-none-any.whl
-          .release-check/bin/python -c "import importlib.metadata as m; assert m.version('paperseek') == m.version('paperseek-mcp') == '1.0.0b1'; assert 'paperseek==1.0.0b1' in (m.requires('paperseek-mcp') or [])"
+            "dist/paperseek-${EXPECTED_VERSION}-py3-none-any.whl" \
+            "dist/paperseek_mcp-${EXPECTED_VERSION}-py3-none-any.whl"
+          .release-check/bin/python -c "import importlib.metadata as m, os; v = os.environ['EXPECTED_VERSION']; assert m.version('paperseek') == m.version('paperseek-mcp') == v; assert f'paperseek=={v}' in (m.requires('paperseek-mcp') or [])"
           .release-check/bin/python -c "from paperseek_app import build_info as b; assert b.COMMUNITY_COMMIT == '${GITHUB_SHA}'; assert b.SOURCE_TREE_DIRTY is False"
           .release-check/bin/paperseek version
           .release-check/bin/paperseek-mcp --help
@@ -71,5 +88,5 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
+          skip-existing: false
           attestations: false

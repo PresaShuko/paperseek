@@ -29,7 +29,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 ## 目录
 
 - [为什么使用 PaperSeek](#为什么使用-paperseek)
-- [1.0.0-beta1 的变化](#100-beta-的变化)
+- [1.0.0-beta1 的变化](#100-beta1-的变化)
 - [工作流程](#工作流程)
 - [数据源](#数据源)
 - [快速开始](#快速开始)
@@ -118,10 +118,10 @@ paperseek serve
 git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
-docker compose up -d
+PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 ```
 
-启动前编辑 `.env`。PowerShell 可以使用 `Copy-Item` 替代 `cp`。Compose 默认使用 8765 端口，并通过 `paperseek-data` 卷持久化数据。可在 Compose 环境中设置 `PAPERSEEK_VERSION=1.0.0-beta1` 固定镜像版本。
+启动前编辑 `.env`。PowerShell 使用 `Copy-Item` 替代 `cp`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。Compose 默认使用 8765 端口，并通过 `paperseek-data` 卷持久化数据。以上命令已固定 beta 镜像；预发布不会更新 `latest`。随附的 Compose 与 `.env.example` 也默认使用 `1.0.0-beta1`。
 
 ### 从源码安装
 
