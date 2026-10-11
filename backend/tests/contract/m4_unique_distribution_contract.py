@@ -202,7 +202,7 @@ class M4UniqueDistributionContract(unittest.TestCase):
 
         compose = (COMMUNITY_ROOT / "compose.yaml").read_text(encoding="utf-8")
         for expected in (
-            "ghcr.io/paperseek/paperseek:${PAPERSEEK_VERSION:-latest}",
+            "ghcr.io/paperseek/paperseek:${PAPERSEEK_VERSION:-1.0.0-beta1}",
             '"${PAPERSEEK_PORT:-8765}:8765"',
             "paperseek-data:/var/lib/paperseek",
         ):
