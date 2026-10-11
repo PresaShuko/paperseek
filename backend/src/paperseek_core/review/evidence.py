@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import hashlib
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from html import unescape
 from html.parser import HTMLParser
 import json
 import re
+import unicodedata
 
 from paperseek_core.models import FinalPaperResult
 from paperseek_core.review.models import (
@@ -19,6 +20,11 @@ PAPER_MENTION = re.compile(r"(?<![A-Za-z0-9_])p_\d+(?![A-Za-z0-9_])")
 _MISSING = {"", "n/a", "na", "none", "null", "no abstract", "no abstract available",
             "abstract not available", "how to cite", "暂无摘要", "无摘要", "摘要缺失"}
 _QUOTE_TYPOGRAPHY = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"'})
+# Words for loose quote matching: each CJK character, or a run of letters and digits
+# that keeps decimals together (0.05). Case, punctuation, hyphens and spacing are ignored.
+_WORD = re.compile(r"[㐀-鿿豈-﫿]|[^\W_]+(?:[.,]\d+)*")
+_FUZZY_MATCH = 0.8
+_SHORT_QUOTE = 4
 
 
 class _AbstractText(HTMLParser):
@@ -63,6 +69,39 @@ def snapshot(record: FinalPaperResult, run_id: str, rank: int) -> ReviewPaper:
     )
 
 
+def _words(text: str) -> list[tuple[str, int, int]]:
+    return [(unicodedata.normalize("NFKC", m.group()).casefold(), m.start(), m.end()) for m in _WORD.finditer(text)]
+
+
+def locate_quote(quote: str, abstract: str) -> tuple[int, int] | None:
+    """Find the abstract span a quote was taken from, tolerating small copying slips.
+
+    The prompt still asks for exact spans; small models change case, hyphenation,
+    spacing or punctuation (p<0.05 for p < 0.05), so this compares words and accepts
+    a span that is at least 80% similar. Quotes under four words must match exactly.
+    """
+    source, wanted = _words(abstract), [word for word, _, _ in _words(quote)]
+    if not source or not wanted:
+        return None
+    words = [word for word, _, _ in source]
+    anchor = SequenceMatcher(None, words, wanted, autojunk=False).find_longest_match(0, len(words), 0, len(wanted))
+    if anchor.size == 0:
+        return None
+    slack, best = max(2, len(wanted) // 4), (0.0, 0, 0)
+    first = anchor.a - anchor.b
+    for start in range(max(0, first - slack), min(len(words) - 1, first + slack) + 1):
+        for length in range(max(1, len(wanted) - slack), len(wanted) + slack + 1):
+            if start + length > len(words):
+                break
+            ratio = SequenceMatcher(None, words[start:start + length], wanted, autojunk=False).ratio()
+            if ratio > best[0]:
+                best = (ratio, start, length)
+    ratio, start, length = best
+    if ratio < (1.0 if len(wanted) < _SHORT_QUOTE else _FUZZY_MATCH):
+        return None
+    return source[start][1], source[start + length - 1][2]
+
+
 def validate_cards(batch: EvidenceBatch, papers: list[ReviewPaper], signature: str) -> list[EvidenceCard]:
     by_id = {paper.id: paper for paper in papers if paper.has_abstract}
     if {card.paper_id for card in batch.cards} != set(by_id) or len(batch.cards) != len(by_id):
@@ -78,10 +117,12 @@ def validate_cards(batch: EvidenceBatch, papers: list[ReviewPaper], signature: s
             # Match formatting whitespace in old snapshots too, retaining original offsets and text.
             words = re.split(r"(?:\s|\\r\\n|\\[rn])+", item.quote.strip().translate(_QUOTE_TYPOGRAPHY))
             match = re.search(r"(?:\s|\\r\\n|\\[rn])+".join(re.escape(word) for word in words), source)
-            if match is None:
+            span = (match.start(), match.end()) if match else locate_quote(item.quote, paper.abstract)
+            if span is None:
                 quote_errors.append(f"{paper.id}: {item.quote[:180]!r}")
                 continue
-            quote, start = paper.abstract[match.start():match.end()], match.start()
+            # Evidence always keeps the abstract's own text, never the model's copy.
+            quote, start = paper.abstract[span[0]:span[1]], span[0]
             evidence.append(ReviewEvidence(
                 **item.model_dump(exclude={"quote"}), quote=quote,
                 id="e_" + fingerprint([paper.id, paper.abstract_hash, quote])[:24],

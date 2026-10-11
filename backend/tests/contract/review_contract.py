@@ -52,17 +52,27 @@ class ReviewEvidenceTest(unittest.TestCase):
                 self.assertEqual(paper.abstract[actual.start:actual.end], source)
                 self.assertEqual(actual.abstract_hash, paper.abstract_hash)
 
-    def test_quote_matching_does_not_relax_facts_order_or_meaningful_punctuation(self):
-        source = "Users' scores did not increase; n = 659, p < 0.05. Context matters."
+    def test_near_copies_resolve_to_the_source_text_and_inventions_are_rejected(self):
+        source = ("We adapt a dynamic private-provision- of-public-goods model. In particular, instead of relying on "
+                  "extrinsic motives the model uses intrinsic ones. Scores did not increase (n = 659, p < 0.05).")
         paper = snapshot(FinalPaperResult(rank=1, uid="one", title="Paper", abstract=source), "run", 1)
-        for quote in (source.replace("not ", ""), source.replace("659", "65900"),
-                      source.replace("<", ">"), source.lower(), source.replace(";", "."),
-                      "Context matters. Users' scores did not increase;"):
+
+        def check(quote):
+            batch = EvidenceBatch(cards=[{"paper_id": paper.id, "evidence": [
+                {"category": "finding", "text": "Claim", "quote": quote}]}])
+            return validate_cards(batch, [paper], "test")[0].evidence[0]
+
+        # Small models change hyphenation, case and spacing; evidence keeps the abstract's own words.
+        for quote, original in (("We adapt a dynamic private-provision-of-public-goods model.", "private-provision- of-public-goods"),
+                                ("Instead of relying on extrinsic motives the model uses intrinsic ones.", "instead of relying"),
+                                ("Scores did not increase (n=659, p<0.05).", "(n = 659, p < 0.05")):
             with self.subTest(quote=quote):
-                batch = EvidenceBatch(cards=[{"paper_id": paper.id, "evidence": [
-                    {"category": "finding", "text": "Claim", "quote": quote}]}])
-                with self.assertRaisesRegex(ValueError, "Non-verbatim"):
-                    validate_cards(batch, [paper], "test")
+                item = check(quote)
+                self.assertIn(original, item.quote)
+                self.assertEqual(paper.abstract[item.start:item.end], item.quote)
+        for quote in ("Funding from large firms pays most open source programmers.", "Scores rose sharply"):
+            with self.subTest(quote=quote), self.assertRaisesRegex(ValueError, "Non-verbatim"):
+                check(quote)
 
     def test_escaped_linebreaks_match_old_snapshots_without_changing_source_offsets(self):
         raw = r"An association was observed\nin two settings."
@@ -75,7 +85,7 @@ class ReviewEvidenceTest(unittest.TestCase):
         item = validate_cards(batch, [old], "test")[0].evidence[0]
         self.assertEqual(old.abstract[item.start:item.end], item.quote)
         self.assertEqual(item.quote, raw)
-        batch.cards[0].evidence[0].quote = "An association was observed in three settings."
+        batch.cards[0].evidence[0].quote = "No association was found in any of the trials we reviewed."
         with self.assertRaisesRegex(ValueError, "Non-verbatim"):
             validate_cards(batch, [old], "test")
 

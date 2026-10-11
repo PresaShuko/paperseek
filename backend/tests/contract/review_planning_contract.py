@@ -155,7 +155,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
 
     def test_quote_repair_reports_all_affected_papers(self):
         batch = EvidenceBatch(cards=[{"paper_id": p.id, "evidence": [{"category": "finding", "text": "Observation",
-            "quote": p.abstract.lower()}]} for p in self.papers])
+            "quote": "Nothing in this sentence comes from the supplied abstract whatsoever."}]} for p in self.papers])
         with self.assertRaises(ValueError) as caught:
             validate_cards(batch, self.papers, "test")
         for paper in self.papers:
