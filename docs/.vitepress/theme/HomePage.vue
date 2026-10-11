@@ -12,19 +12,23 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
 
 <template>
   <main class="ps-home" id="main-content">
-    <section class="ps-hero ps-container" aria-labelledby="hero-heading">
-      <div class="ps-hero-copy">
-        <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta1', '认识 PaperSeek 1.0.0-beta1') }}<span aria-hidden="true">↗</span></a>
-        <h1 id="hero-heading">{{ t('Follow the question.', '从问题出发，') }}<br><span>{{ t('Find the evidence.', '找到研究的线索。') }}</span></h1>
-        <p class="ps-hero-description">{{ t('A thoughtful way through the literature. Turn your research question into a reading list, explore how papers connect, and bring the evidence together.', '把研究问题变成值得阅读的文献清单，沿着引用发现新的线索，再将分散的证据整理成综述。让文献探索更有条理。') }}</p>
-        <div class="ps-actions">
-          <a class="ps-button ps-button-primary" href="https://paperseek.app/">{{ t('Start researching', '开始研究') }}<span aria-hidden="true">↗</span></a>
-          <a class="ps-button" :href="link('guide/quick-start')">{{ t('Run it yourself', '在本地运行') }}<span aria-hidden="true">→</span></a>
+    <section class="ps-hero" aria-labelledby="hero-heading">
+      <div class="ps-hero-art"><img :src="withBase('/images/hero.webp')" alt="" width="2400" height="840" fetchpriority="high"></div>
+      <div class="ps-hero-body ps-container">
+        <div>
+          <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta1', '认识 PaperSeek 1.0.0-beta1') }}<span aria-hidden="true">↗</span></a>
+          <h1 id="hero-heading">{{ t('Follow the question.', '从问题出发，') }}<br>{{ t('Find the evidence.', '找到研究的线索。') }}</h1>
         </div>
-        <p class="ps-hero-note">{{ t('Open source · Your choice of models · Built for research', '开放源码 · 自由选择模型 · 为文献研究而设计') }}</p>
+        <div class="ps-hero-side">
+          <p class="ps-hero-description">{{ t('Turn your research question into a reading list, explore how papers connect, and bring the evidence together.', '把研究问题变成值得阅读的文献清单，沿着引用发现新的线索，再将分散的证据整理成综述。') }}</p>
+          <div class="ps-actions">
+            <a class="ps-button ps-button-primary" href="https://paperseek.app/">{{ t('Start researching', '开始研究') }}<span aria-hidden="true">↗</span></a>
+            <a class="ps-button" :href="link('guide/quick-start')">{{ t('Run it yourself', '在本地运行') }}<span aria-hidden="true">→</span></a>
+          </div>
+        </div>
       </div>
+      <a class="ps-sources" :href="link('guide/sources')" :aria-label="t('Supported scholarly sources', '支持的学术数据源')"><span v-for="source in sources" :key="source">{{ source }}</span></a>
     </section>
-
 
     <section class="ps-section ps-container" aria-labelledby="tour-heading">
       <h2 id="tour-heading" class="ps-sr-only">{{ t("Explore the research workspace", "探索文献研究工作区") }}</h2>
@@ -34,14 +38,6 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
         <article><span class="ps-step-number">01 / {{ t('SEARCH', '检索') }}</span><h3>{{ t('Go beyond a single query.', '不止于一次关键词检索。') }}</h3><p>{{ t('PaperSeek plans queries, refines the search, and combines complementary retrieval paths before ranking the candidates.', '从问题理解到检索式迭代，综合不同召回路径，再对候选文献排序。你可以查看每一步进展。') }}</p><a :href="link('guide/search')">{{ t('How search works', '了解检索流程') }} →</a></article>
         <article><span class="ps-step-number">02 / {{ t('ANALYZE', '计量') }}</span><h3>{{ t('Explore the whole retrieved corpus.', '观察完整候选集。') }}</h3><p>{{ t('Inspect distributions, keyword co-occurrence, and shared references using the full retrieved corpus. Keep model scoring focused on its subset.', '用实际获取的候选集分析分布、关键词共现和共同参考文献，模型评分仍只针对原子集。') }}</p><a :href="link('guide/bibliometrics')">{{ t('Explore bibliometrics', '了解文献计量') }} →</a></article>
         <article><span class="ps-step-number">03 / {{ t('SYNTHESIZE', '综合') }}</span><h3>{{ t('Write with the evidence.', '带着证据，开始写作。') }}</h3><p>{{ t('Select papers, shape an outline, and draft an abstract-based review with linked citations. Review writing is experimental.', '选择文献、调整大纲，再从摘要证据生成带引用的综述。综述功能目前为实验性。') }}</p><a :href="link('guide/reviews')">{{ t('Meet the review workflow', '了解综述流程') }} →</a></article>
-      </div>
-    </section>
-
-    <section class="ps-sources" :aria-label="t('Supported scholarly source integrations', '学术数据源集成')">
-      <div class="ps-container">
-        <p class="ps-eyebrow">{{ t('A wider view of the literature', '让文献视野更开阔') }}</p>
-        <div class="ps-source-list"><span v-for="source in sources" :key="source">{{ source }}</span></div>
-        <a :href="link('guide/sources')">{{ t('Explore the sources and availability', '了解数据源与可用性') }} <span aria-hidden="true">→</span></a>
       </div>
     </section>
 
