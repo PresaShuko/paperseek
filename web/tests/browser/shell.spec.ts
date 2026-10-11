@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ids } from "./mock-backend";
+import { createState, ids } from "./mock-backend";
 import { noHorizontalOverflow, open } from "./workspace-helpers";
 
 test("module entries open create pages and 'All' opens each record list", async ({ page }) => {
@@ -78,3 +78,19 @@ for (const width of [390, 1440]) {
     }
   });
 }
+
+test("a long sidebar history scrolls instead of squeezing its rows", async ({ page }) => {
+  const state = createState();
+  const template = state.runs[ids.done];
+  for (let index = 0; index < 40; index++) {
+    const id = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    state.runs[id] = { ...template, id, question: `Search ${index}`, display_title: `Search ${index}` };
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await open(page, "/search", state);
+  const rows = page.locator(".sb-scroll .sb-btn");
+  await expect(rows.nth(20)).toBeAttached();
+  const heights = await rows.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height));
+  expect(Math.min(...heights)).toBeGreaterThanOrEqual(28);
+  expect(await page.locator(".sb-scroll").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+});

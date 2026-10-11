@@ -13,6 +13,8 @@ html,body,#app{height:100%}
 .sb-search{padding:0 8px 4px}
 .sb-search .ig > input{height:30px;font-size:13px}
 .sb-empty{padding:6px 8px;font-size:12px;line-height:16px;color:var(--muted-foreground)}
+/* History rows keep their height; the list scrolls instead of squeezing them. */
+.sb-scroll > *{flex-shrink:0}
 .sb-btn.sb-more{color:var(--muted-foreground);font-size:12px;height:28px}
 .sb-btn .i-ok circle,.sb-btn .i-warn circle,.sb-btn .i-fail circle{stroke:none}
 .sb-sheet{position:fixed;inset:0;z-index:40;display:flex;background:rgb(0 0 0 / .5)}
