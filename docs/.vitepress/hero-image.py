@@ -4,7 +4,9 @@ A dusk coast printed from scholarly words: the lighthouse beam is the search,
 the stratified cliffs are stacked pages, and the lit constellation is the set
 of papers it finds. Requires Pillow and NumPy:
 
-    python docs/.vitepress/hero-image.py docs/public/images/hero.webp
+    python docs/.vitepress/hero-image.py docs/public/images/hero.webp docs/public/images/hero-front.webp
+
+The second file holds only the headland and lighthouse, layered above the headline.
 """
 import sys
 from pathlib import Path
@@ -112,6 +114,11 @@ d2.rectangle((lx - 13, tp - 38, lx + 13, tp - 6), fill=(255, 238, 196))
 d2.polygon([(lx - 9, tp - 31), (lx + 3, tp - 31), (lx + 7, tp - 25), (lx - 5, tp - 25)], fill=(59, 184, 195))
 d2.polygon([(lx - 10, tp - 20), (lx + 5, tp - 20), (lx + 9, tp - 13), (lx - 6, tp - 13)], fill=(59, 184, 195))
 d2.polygon([(lx - 17, tp - 38), (lx + 17, tp - 38), (lx, tp - 60)], fill=(44, 42, 52))
+# foreground mask: the headland and lighthouse sit in front of the page's headline
+front = Image.fromarray(((land & (y < HZ)) * 255).astype(np.uint8)); fd = ImageDraw.Draw(front)
+fd.polygon([(lx - 24, bt), (lx + 24, bt), (lx + 15, tp), (lx - 15, tp)], fill=255)
+fd.rectangle((lx - 21, tp - 38, lx + 21, tp), fill=255)
+fd.polygon([(lx - 17, tp - 38), (lx + 17, tp - 38), (lx, tp - 60)], fill=255)
 glow = Image.new('L', (W, H)); ImageDraw.Draw(glow).ellipse((lx - 60, tp - 80, lx + 60, tp + 40), fill=160)
 im = Image.composite(Image.new('RGBA', (W, H), (255, 240, 200, 255)), im, glow.filter(ImageFilter.GaussianBlur(30)))
 im = im.convert('RGB').filter(ImageFilter.GaussianBlur(.9))
@@ -131,3 +138,6 @@ for j in range(small.shape[0]):
     for i, letter in enumerate(line[:cols]):
         if letter != ' ': od.text((i * cw, j * ch - 1), letter, fill=tuple(int(v) for v in small[j, i] * .84), font=font)
 out.save(sys.argv[1], quality=80, method=6)
+if len(sys.argv) > 2:
+    out.putalpha(front.filter(ImageFilter.GaussianBlur(1.2)))
+    out.save(sys.argv[2], quality=80, alpha_quality=90, method=6)

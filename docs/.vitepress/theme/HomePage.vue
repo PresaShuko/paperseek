@@ -13,7 +13,11 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
 <template>
   <main class="ps-home" id="main-content">
     <section class="ps-hero" aria-labelledby="hero-heading">
-      <div class="ps-hero-art"><img :src="withBase('/images/hero.webp')" alt="" width="2400" height="840" fetchpriority="high"></div>
+      <div class="ps-hero-art">
+        <img :src="withBase('/images/hero.webp')" alt="" width="2400" height="840" fetchpriority="high">
+        <span class="ps-hero-word" aria-hidden="true">PaperSeek</span>
+        <img :src="withBase('/images/hero-front.webp')" alt="" width="2400" height="840">
+      </div>
       <div class="ps-hero-body ps-container">
         <div>
           <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta1', '认识 PaperSeek 1.0.0-beta1') }}<span aria-hidden="true">↗</span></a>
