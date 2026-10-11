@@ -34,7 +34,7 @@ The decision route assesses up to twice the final LLM candidate budget before ch
 
 **Community / your own key:** configure model routes and credentials. The writing model can differ from the search model.
 
-**PaperSeek Service:** choose allowed search and writing models. Preliminary-ranking choices remain visible, while endpoints and secrets stay on the server.
+**PaperSeek Service:** search and writing use Auto. Preliminary-ranking choices remain visible, while endpoints and secrets stay on the server.
 
 ## Local models
 

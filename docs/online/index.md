@@ -21,7 +21,7 @@ Model keys and data-source keys are separate. A model API key does not grant acc
 2. Describe your question, choose a data source and a search budget.
 3. Start the search. The form shows how many credits the task uses and how many are left today.
 
-Choose the built-in models for searching, writing, and preliminary ranking in **Settings › Model service**. Available models and sources are shown in the application and can change with the site's configuration.
+Searching and writing use **Auto**, which picks a suitable built-in model for each task; there are no other choices for now. Preliminary ranking is set in **Settings › Model service**. Available sources are shown in the application.
 
 ## Credits
 
