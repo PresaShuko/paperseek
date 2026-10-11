@@ -41,7 +41,7 @@ Your remaining credits appear in the sidebar and in **Settings › User**, toget
 
 1. Select **Your own key** from the account menu.
 2. In **Settings › Model service**, add a model connection under **My model connections** (see [Models & ranking](../guide/models.md)).
-3. Under **Data-source keys**, add keys for the sources you use. With your own key, sources that recommend a key require one; arXiv, Crossref, and other key-free sources work without one.
+3. Under **Data-source keys**, add keys for the sources you use. With your own key, every source that takes a key requires one, including OpenAlex, PubMed, and Semantic Scholar; arXiv, Crossref, and PaperHub work without one.
 
 Keys are encrypted on the PaperSeek server, used only for your own tasks, and never shown again; the page displays only their last four characters. Tasks with your own key use no credits. Provider charges and rate limits belong to your own provider account.
 

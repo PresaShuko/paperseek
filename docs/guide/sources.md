@@ -17,7 +17,7 @@ Choose an index that fits your research. Coverage, metadata, access, and filters
 
 
 
-PaperSeek Service uses operator-configured source access. With your own key, add source keys in Settings; sources that recommend a key require one. A model key is not a data-source key.
+PaperSeek Service uses operator-configured source access. With your own key, add source keys in Settings; every source that takes a key requires one; arXiv, Crossref, and PaperHub work without. A model key is not a data-source key.
 
 ## Obtain credentials
 

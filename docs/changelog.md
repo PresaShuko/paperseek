@@ -23,7 +23,7 @@ This beta follows 0.2.x directly. Python packages use the normalized version `1.
 ### PaperSeek online
 
 - Sign in for PaperSeek Service: built-in models, no keys, and free daily credits during the public beta (20 a day). A search or an analysis uses 1 credit and a review 5, deducted when the task starts; a failed or cancelled task returns them.
-- Your own key: save model connections and data-source keys to your account in Settings; tasks then use your API and no credits. Data sources that recommend a key require one in this mode.
+- Your own key: save model connections and data-source keys to your account in Settings; tasks then use your API and no credits. Every data source that takes a key (OpenAlex, PubMed, Semantic Scholar, Google Scholar, Web of Science) requires one in this mode; arXiv, Crossref, and PaperHub work without.
 - Without signing in, run one temporary search with your own key typed into the form. It is held in memory only and never saved.
 
 ### Architecture rebuilt around clear responsibilities

@@ -17,7 +17,7 @@
 
 
 
-PaperSeek 服务使用维护者配置的数据源访问方式。自带密钥模式下在设置中填写数据源密钥；建议提供密钥的数据源改为必须提供。模型 Key 与数据源 Key 并不通用。
+PaperSeek 服务使用维护者配置的数据源访问方式。自带密钥模式下在设置中填写数据源密钥；除 arXiv、Crossref、PaperHub 等无需密钥的数据源外，其余数据源（包括 OpenAlex、PubMed、Semantic Scholar）都必须提供密钥。模型 Key 与数据源 Key 并不通用。
 
 ## 申请凭据
 
