@@ -22,9 +22,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 可以在自己的电脑或服务器运行社区版，也可以直接打开 [PaperSeek 在线版](https://paperseek.app/)。自由选择模型 API，通过 Web、命令行、HTTP API 或 MCP 接入。
 
-![PaperSeek 1.0.0-beta1 研究工作区](docs/public/images/workspace-results-zh.png)
-
-*社区版 1.0.0-beta1，含演示记录。在线版共用同一工作区，并增加账户和服务模式。*
+[![PaperSeek：从问题出发，找到研究的线索](docs/public/images/readme-banner-zh.png)](https://paperseek.app/)
 
 ## 目录
 
@@ -72,6 +70,10 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 通过 pip 安装时版本号写作 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
 
 ## 工作流程
+
+![PaperSeek 1.0.0-beta1 研究工作区](docs/public/images/workspace-results-zh.png)
+
+*社区版 1.0.0-beta1，含演示记录。在线版共用同一工作区，并增加账户和服务模式。*
 
 | 阶段 | 做什么 | 可以查看什么 |
 | --- | --- | --- |

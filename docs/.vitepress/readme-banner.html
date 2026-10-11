@@ -1,0 +1,119 @@
+<!doctype html>
+<!--
+  README banner (docs/public/images/readme-banner-{en,zh}.png). Render with:
+    node docs/.vitepress/readme-banner.mjs
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/geist/index.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/noto-sans-sc/index.css">
+<style>
+  :root { --ink: #0a0a0a; --muted: #6b6b6b; --line: #e5e5e5; --soft: #f5f5f5; --teal: #3bb8c3; }
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1600px; height: 800px; overflow: hidden; background: #fff; color: var(--ink);
+    font-family: "Geist Variable", "Noto Sans SC Variable", sans-serif; -webkit-font-smoothing: antialiased; }
+  .frame { position: relative; width: 100%; height: 100%; overflow: hidden;
+    background: radial-gradient(1200px 700px at 88% 30%, #f3f6f7 0%, #fff 60%); }
+  .copy { position: absolute; left: 88px; top: 0; bottom: 0; width: 720px; display: flex; flex-direction: column; justify-content: center; }
+  h1 { font-size: 72px; line-height: 1.06; letter-spacing: -.045em; font-weight: 650; white-space: nowrap; }
+  :lang(zh) h1 { font-size: 70px; line-height: 1.2; letter-spacing: .01em; font-weight: 700; }
+  .lead { margin-top: 30px; font-size: 25px; line-height: 1.5; color: #2e2e2e; letter-spacing: -.01em; max-width: 580px; }
+  :lang(zh) .lead { font-size: 23px; line-height: 1.7; letter-spacing: .01em; }
+  .actions { margin-top: 48px; display: flex; align-items: center; gap: 24px; }
+  .cta { display: inline-flex; align-items: center; height: 60px; padding: 0 30px; border-radius: 14px; background: var(--ink); color: #fff;
+    font-size: 23px; font-weight: 550; box-shadow: 0 10px 24px rgb(0 0 0 / .14); }
+  .alt { font-size: 21px; color: var(--muted); }
+
+  .stage { position: absolute; left: 790px; top: -30px; width: 900px; height: 900px;
+    transform: perspective(1800px) rotateY(-14deg) rotateX(7deg) rotateZ(1.5deg) scale(.86); transform-origin: 0 50%; }
+  .sources { position: absolute; left: 40px; top: 110px; display: flex; gap: 14px; }
+  .src { height: 54px; padding: 0 20px; border-radius: 27px; display: flex; align-items: center; gap: 10px; background: #fff;
+    border: 1px solid var(--line); box-shadow: 0 6px 16px rgb(0 0 0 / .06); font-size: 19px; font-weight: 550; }
+  .src i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .src.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .col { position: absolute; top: 200px; }
+  .left { left: 40px; width: 410px; }
+  .right { left: 480px; width: 360px; }
+  .q { height: 62px; border-radius: 14px; background: var(--soft); border: 1px solid var(--line); display: flex; align-items: center;
+    justify-content: space-between; padding: 0 12px 0 20px; font-size: 20px; font-weight: 550; }
+  .q b { width: 38px; height: 38px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; font-size: 20px; }
+  .card { margin-top: 16px; padding: 18px 20px; border-radius: 14px; background: #fff; border: 1px solid var(--line);
+    box-shadow: 0 4px 14px rgb(0 0 0 / .05); }
+  .card .t { display: flex; gap: 14px; font-size: 20px; font-weight: 600; line-height: 1.3; }
+  .box { flex: 0 0 22px; height: 22px; margin-top: 2px; border-radius: 6px; border: 2px solid #c9c9c9; display: grid; place-items: center; }
+  .box.on { background: var(--ink); border-color: var(--ink); color: #fff; font-size: 14px; }
+  .meta { margin: 10px 0 0 36px; display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--muted); }
+  .score { margin-left: auto; padding: 3px 10px; border-radius: 8px; border: 1px solid var(--line); font-weight: 600; color: var(--ink); font-size: 15px; }
+  .dim { opacity: .55; }
+  .ghost { margin-top: 16px; height: 96px; border-radius: 14px; background: var(--soft); }
+  .drag { position: absolute; left: 250px; top: 520px; width: 410px; transform: rotate(-4deg);
+    box-shadow: 0 30px 60px rgb(0 0 0 / .16), 0 6px 14px rgb(0 0 0 / .08); }
+
+  .panel-title { font-size: 15px; font-weight: 600; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin: 0 0 14px 4px; }
+  .sec { margin-bottom: 16px; padding: 18px 22px; border-radius: 14px; background: #fff; border: 1px solid var(--line); box-shadow: 0 4px 14px rgb(0 0 0 / .05); }
+  .sec .n { font-size: 16px; color: var(--muted); font-weight: 550; }
+  .sec .h { margin-top: 6px; font-size: 25px; font-weight: 650; letter-spacing: -.01em; }
+  .sec.hi { background: #eef9fa; border-color: #bfe6ea; border-left: 6px solid var(--teal); }
+  .cites { margin-top: 12px; display: flex; gap: 8px; }
+  .cites span { padding: 2px 9px; border-radius: 7px; background: var(--soft); border: 1px solid var(--line); font-size: 15px; font-weight: 600; }
+  .slot { margin-bottom: 16px; height: 112px; border-radius: 14px; border: 2px dashed #cfe9ec; background: #f7fcfc; }
+  .cursor { position: absolute; right: 120px; bottom: -26px; width: 54px; filter: drop-shadow(0 4px 6px rgb(0 0 0 / .25)); }
+  .brand { position: absolute; left: 88px; bottom: 48px; height: 30px; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <section class="copy">
+    <h1 data-en="Follow the question.<br>Find the evidence." data-zh="从问题出发，<br>找到研究的线索。"></h1>
+    <p class="lead" data-en="Turn a research question into a ranked reading list, see how the papers connect, and draft a cited review in one open-source workspace."
+       data-zh="把研究问题变成排好序的阅读清单，看清文献之间的联系，再整理成带引用的综述。"></p>
+    <div class="actions">
+      <span class="cta" data-en="Try PaperSeek" data-zh="开始使用"></span>
+      <span class="alt">paperseek.app</span>
+    </div>
+  </section>
+
+  <div class="stage">
+    <div class="sources">
+      <span class="src on"><i style="background:#3bb8c3"></i>OpenAlex</span>
+      <span class="src"><i style="background:#b31b1b"></i>arXiv</span>
+      <span class="src"><i style="background:#2f6fb5"></i>PubMed</span>
+      <span class="src"><i style="background:#1857b6"></i>Semantic Scholar</span>
+    </div>
+
+    <div class="col left">
+      <div class="q"><span data-en="LLM screening for systematic reviews" data-zh="大语言模型辅助系统综述筛选"></span><b>↑</b></div>
+      <div class="card"><div class="t"><span class="box on">✓</span><span data-en="Large language models for title and abstract screening" data-zh="大语言模型用于题名与摘要筛选"></span></div>
+        <div class="meta">Lin A · 2025 · OpenAlex <span class="score">0.94</span></div></div>
+      <div class="card"><div class="t"><span class="box on">✓</span><span data-en="Prompt design for automated citation screening" data-zh="文献筛选中的提示词设计与校准"></span></div>
+        <div class="meta">Okafor A · 2024 · OpenAlex <span class="score">0.89</span></div></div>
+      <div class="ghost"></div>
+      <div class="card dim"><div class="t"><span class="box"></span><span data-en="Reproducibility of model-based eligibility decisions" data-zh="基于模型的纳入决策可复现性研究"></span></div>
+        <div class="meta">Silva A · 2023 · OpenAlex <span class="score">0.81</span></div></div>
+    </div>
+
+    <div class="col right">
+      <p class="panel-title" data-en="Review outline" data-zh="综述大纲"></p>
+      <div class="sec hi"><div class="n">01</div><div class="h" data-en="Background" data-zh="研究背景"></div></div>
+      <div class="sec"><div class="n">02</div><div class="h" data-en="Screening accuracy" data-zh="筛选准确性"></div>
+        <div class="cites"><span>[1]</span><span>[2]</span></div></div>
+      <div class="slot"></div>
+      <div class="sec"><div class="n">03</div><div class="h" data-en="Workload and reliability" data-zh="工作量与可靠性"></div></div>
+    </div>
+
+    <div class="card drag"><div class="t"><span class="box on">✓</span><span data-en="Workload reduction with machine-assisted screening" data-zh="机器辅助筛选带来的工作量下降"></span></div>
+      <div class="meta">Müller A · 2025 · OpenAlex <span class="score">0.86</span></div>
+      <svg class="cursor" viewBox="0 0 24 24"><path d="M9 11V4.5a1.5 1.5 0 0 1 3 0V10m0-.5V3.5a1.5 1.5 0 0 1 3 0V10m0-.5V5a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.7a6 6 0 0 1-4.3-1.8L3.2 15.4a1.5 1.5 0 0 1 2.1-2.1L9 16" fill="#fff" stroke="#0a0a0a" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg></div>
+  </div>
+
+  <img class="brand" src="../public/paperseek-lockup.svg" alt="PaperSeek">
+</div>
+<script>
+  const lang = new URLSearchParams(location.search).get("lang") === "zh" ? "zh" : "en";
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  for (const el of document.querySelectorAll("[data-en]")) el.innerHTML = el.dataset[lang];
+</script>
+</body>
+</html>

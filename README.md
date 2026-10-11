@@ -27,9 +27,7 @@ PaperSeek turns a research question into a reading list. It plans and refines qu
 
 Run the Community edition on your own machine or server, or use [PaperSeek online](https://paperseek.app/). Bring your preferred model API; use the Web UI, CLI, HTTP API, or MCP integration.
 
-![PaperSeek 1.0.0-beta1 research workspace](docs/public/images/workspace-results-en.png)
-
-*Community 1.0.0-beta1 with a demonstration record. PaperSeek online shares the same workspace and adds an account and service options.*
+[![PaperSeek: follow the question, find the evidence](docs/public/images/readme-banner-en.png)](https://paperseek.app/)
 
 ## Contents
 
@@ -77,6 +75,10 @@ Read the [full changelog](https://docs.paperseek.app/changelog#v1-0-0-beta) for 
 Install it from pip as **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
 
 ## How it works
+
+![PaperSeek 1.0.0-beta1 research workspace](docs/public/images/workspace-results-en.png)
+
+*Community 1.0.0-beta1 with a demonstration record. PaperSeek online shares the same workspace and adds an account and service options.*
 
 | Step | What happens | What you can inspect |
 | --- | --- | --- |
