@@ -11,10 +11,10 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [
-    { name = "MingfengHong", email = "hongmingfeng24@mails.ucas.ac.cn" },
+    { name = "PaperSeek Development Team", email = "support@paperseek.app" },
 ]
 maintainers = [
-    { name = "MingfengHong", email = "hongmingfeng24@mails.ucas.ac.cn" },
+    { name = "PaperSeek Development Team", email = "support@paperseek.app" },
 ]
 keywords = ["literature-search", "openalex", "crossref", "web-of-science", "llm"]
 classifiers = [

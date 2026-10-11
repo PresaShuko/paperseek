@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.MingfengHong/paperseek",
+  "name": "io.github.paperseek/paperseek",
   "title": "PaperSeek",
   "description": "Durable academic literature search through the PaperSeek application services.",
   "version": "1.0.0-beta1",
@@ -19,7 +19,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/mingfenghong/paperseek-mcp:1.0.0-beta1",
+      "identifier": "ghcr.io/paperseek/paperseek-mcp:1.0.0-beta1",
       "transport": {
         "type": "streamable-http",
         "url": "http://127.0.0.1:8766/mcp"

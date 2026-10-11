@@ -2,7 +2,7 @@
 
 `paperseek-mcp` is the independent Model Context Protocol integration for PaperSeek. It contains no search, provider, ranking, or persistence implementation; it calls the application services supplied by the exact same-version `paperseek` distribution.
 
-<!-- mcp-name: io.github.MingfengHong/paperseek -->
+<!-- mcp-name: io.github.paperseek/paperseek -->
 
 Install the matched release:
 

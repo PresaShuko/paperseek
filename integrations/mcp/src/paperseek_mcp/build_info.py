@@ -5,7 +5,7 @@ from paperseek_app.build_info import COMMUNITY_COMMIT
 
 DISTRIBUTION = "paperseek-mcp"
 VERSION = "1.0.0b1"
-SERVER_NAME = "io.github.MingfengHong/paperseek"
+SERVER_NAME = "io.github.paperseek/paperseek"
 
 
 def as_dict() -> dict[str, str]:

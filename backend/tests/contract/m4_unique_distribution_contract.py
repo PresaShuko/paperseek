@@ -202,7 +202,7 @@ class M4UniqueDistributionContract(unittest.TestCase):
 
         compose = (COMMUNITY_ROOT / "compose.yaml").read_text(encoding="utf-8")
         for expected in (
-            "ghcr.io/mingfenghong/paperseek:${PAPERSEEK_VERSION:-latest}",
+            "ghcr.io/paperseek/paperseek:${PAPERSEEK_VERSION:-latest}",
             '"${PAPERSEEK_PORT:-8765}:8765"',
             "paperseek-data:/var/lib/paperseek",
         ):
@@ -215,8 +215,8 @@ class M4UniqueDistributionContract(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for expected in (
             "platform linux/amd64",
-            "COMMUNITY_IMAGE: ghcr.io/mingfenghong/paperseek",
-            "MCP_IMAGE: ghcr.io/mingfenghong/paperseek-mcp",
+            "COMMUNITY_IMAGE: ghcr.io/paperseek/paperseek",
+            "MCP_IMAGE: ghcr.io/paperseek/paperseek-mcp",
             "paperseek-data",
             "m4_official_client_integration.py",
         ):

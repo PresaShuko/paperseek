@@ -23,7 +23,7 @@ PaperSeek is an open-source literature-search workflow for researchers and build
 For conduct concerns, contact the maintainer privately:
 
 ```text
-hongmingfeng24@mails.ucas.ac.cn
+support@paperseek.app
 ```
 
 For security vulnerabilities or leaked credentials, follow `SECURITY.md` instead of opening a public issue.

@@ -394,7 +394,7 @@ class M4OfficialClientIntegration(unittest.TestCase):
                     / "server.json"
                 ).read_text(encoding="utf-8")
             )
-            self.assertEqual(registry_metadata["name"], "io.github.MingfengHong/paperseek")
+            self.assertEqual(registry_metadata["name"], "io.github.paperseek/paperseek")
             self.assertEqual(registry_metadata["version"], "1.0.0-beta1")
             import paperseek_app
             import paperseek_mcp

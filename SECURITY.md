@@ -9,7 +9,7 @@ PaperSeek is currently in alpha. Security fixes target the latest `main` branch 
 Please report security issues privately to:
 
 ```text
-hongmingfeng24@mails.ucas.ac.cn
+support@paperseek.app
 ```
 
 Do not open a public issue for leaked credentials, account access problems, or vulnerabilities involving API keys.

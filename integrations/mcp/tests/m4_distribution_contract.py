@@ -10,7 +10,7 @@ MCP_ROOT = Path(__file__).resolve().parents[1]
 COMMUNITY_ROOT = MCP_ROOT.parents[1]
 VERSION = "1.0.0b1"
 RELEASE = "1.0.0-beta1"
-SERVER_NAME = "io.github.MingfengHong/paperseek"
+SERVER_NAME = "io.github.paperseek/paperseek"
 
 
 class M4MCPDistributionContract(unittest.TestCase):
@@ -55,7 +55,7 @@ class M4MCPDistributionContract(unittest.TestCase):
         self.assertEqual(packages["pypi"]["transport"], {"type": "stdio"})
         self.assertEqual(
             packages["oci"]["identifier"],
-            f"ghcr.io/mingfenghong/paperseek-mcp:{RELEASE}",
+            f"ghcr.io/paperseek/paperseek-mcp:{RELEASE}",
         )
         self.assertEqual(packages["oci"]["transport"], {
             "type": "streamable-http",
@@ -68,7 +68,7 @@ class M4MCPDistributionContract(unittest.TestCase):
         compose = (COMMUNITY_ROOT / "compose.yaml").read_text(encoding="utf-8")
         dockerignore = (COMMUNITY_ROOT / ".dockerignore").read_text(encoding="utf-8")
 
-        self.assertIn("ghcr.io/mingfenghong/paperseek-mcp", dockerfile)
+        self.assertIn("ghcr.io/paperseek/paperseek-mcp", dockerfile)
         self.assertIn(f'io.modelcontextprotocol.server.name="{SERVER_NAME}"', dockerfile)
         self.assertIn(f'org.opencontainers.image.version="{RELEASE}"', dockerfile)
         self.assertIn('ENTRYPOINT ["paperseek-mcp"]', dockerfile)

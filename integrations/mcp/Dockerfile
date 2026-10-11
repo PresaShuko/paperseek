@@ -21,11 +21,11 @@ RUN python -m pip wheel --wheel-dir /wheels ./backend \
 
 FROM python:3.12.13-slim AS runtime
 
-LABEL io.modelcontextprotocol.server.name="io.github.MingfengHong/paperseek" \
+LABEL io.modelcontextprotocol.server.name="io.github.paperseek/paperseek" \
       org.opencontainers.image.title="PaperSeek MCP Server" \
       org.opencontainers.image.version="1.0.0-beta1" \
       org.opencontainers.image.source="https://github.com/paperseek/paperseek" \
-      org.opencontainers.image.ref.name="ghcr.io/mingfenghong/paperseek-mcp:1.0.0-beta1"
+      org.opencontainers.image.ref.name="ghcr.io/paperseek/paperseek-mcp:1.0.0-beta1"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

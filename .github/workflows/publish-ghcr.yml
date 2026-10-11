@@ -10,8 +10,8 @@ permissions:
 
 env:
   PAPERSEEK_VERSION: "1.0.0-beta1"
-  COMMUNITY_IMAGE: ghcr.io/mingfenghong/paperseek
-  MCP_IMAGE: ghcr.io/mingfenghong/paperseek-mcp
+  COMMUNITY_IMAGE: ghcr.io/paperseek/paperseek
+  MCP_IMAGE: ghcr.io/paperseek/paperseek-mcp
 
 jobs:
   verify-and-publish:
