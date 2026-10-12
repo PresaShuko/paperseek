@@ -5,6 +5,7 @@
 .ps-features-intro > p:last-child { color: var(--vp-c-text-2); font-size: 15px; max-width: 560px; margin: 18px auto 0; line-height: 1.75; }
 .ps-feature { display: grid; grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr); align-items: center; gap: 64px; padding: 64px 0; }
 .ps-feature + .ps-feature { border-top: 1px solid var(--vp-c-divider); }
+.ps-feature.reverse { grid-template-columns: minmax(0, 1.22fr) minmax(0, 0.78fr); }
 .ps-feature.reverse .ps-feature-copy { order: 2; }
 .ps-feature-demo { min-width: 0; }
 .ps-feature-eyebrow { display: flex; align-items: center; gap: 10px; font-size: 11px; font-weight: 550; letter-spacing: .09em; color: var(--vp-c-text-2); margin-bottom: 18px !important; text-transform: uppercase; }

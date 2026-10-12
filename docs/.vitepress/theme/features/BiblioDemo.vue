@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Bibliometrics: the whole corpus settles into a year chart, then opens as a keyword network.
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useStage, glide, press, HAND } from './useStage'
 
 const props = defineProps<{ zh: boolean }>()
@@ -32,11 +32,14 @@ const nodes = words.map(([en, cn, count, group, x, y]) => ({ label: t(en, cn), r
 const edges: [number, number][] = [[0, 1], [0, 2], [1, 2], [0, 4], [2, 3], [1, 5], [1, 7], [2, 5], [4, 6], [3, 7], [6, 9], [8, 2], [8, 7], [0, 9], [5, 7]]
 const colors = ['var(--d-blue)', 'var(--d-ink)', 'var(--d-teal)']
 
-const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) => {
+const steps = [['overview', t('Overview', '概览')], ['keywords', t('Keyword topics', '关键词主题')]] as const
+
+const { scale, progress, seek, labelTime } = useStage(frame, stage, { width: W, height: H }, (gsap, root) => {
   const q = (s: string) => root.querySelector(s)!
   const qa = (s: string) => [...root.querySelectorAll(s)]
   const tl = gsap.timeline({ repeat: -1, repeatDelay: 0.2 })
   tl.set(q('.bd-all'), { opacity: 1 }, 0)
+  tl.addLabel('overview', 0)
   // Numbers count up.
   qa('.bd-stat').forEach((s, i) => {
     tl.fromTo(s, { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4, ease: 'power3.out' }, 0.1 + i * 0.1)
@@ -57,6 +60,7 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
   tl.fromTo(hand, { opacity: 0 }, { opacity: 1, duration: 0.15 }, 3.3)
   glide(tl, hand, [820, 560], [255, 33], 3.3, 0.8)
   press(tl, hand, null, 4.15)
+  tl.addLabel('keywords', 4.15)
   tl.fromTo(q('.bd-tab-on'), { x: 0 }, { x: 168, duration: 0.35, ease: 'expo.out' }, 4.2)
   tl.to(hand, { opacity: 0, duration: 0.2 }, 4.7)
   tl.fromTo(q('.bd-chart'), { opacity: 1 }, { opacity: 0, duration: 0.25 }, 4.2)
@@ -72,6 +76,11 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
   tl.addLabel('end', 5.9)
   tl.to(q('.bd-all'), { opacity: 0, duration: 0.4 }, 8.6)
   return tl
+})
+const current = computed(() => {
+  let index = 0
+  steps.forEach(([label], i) => { if (progress.value >= labelTime(label) - 0.01) index = i })
+  return index
 })
 </script>
 
@@ -102,6 +111,9 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
           <div class="psd-cursor" v-html="HAND" />
         </div>
       </div>
+    </div>
+    <div class="psd-steps" role="group" :aria-label="t('Analysis views', '分析视图')">
+      <button v-for="([label, text], i) in steps" :key="label" type="button" :aria-current="current === i ? 'step' : undefined" @click="seek(label)"><b>{{ i + 1 }}</b>{{ text }}</button>
     </div>
   </div>
 </template>

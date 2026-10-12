@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Literature search: ask → the four stages run → ranked papers with their reasons.
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useStage, glide, press, type, shimmer, HAND } from './useStage'
 
 const props = defineProps<{ zh: boolean }>()
@@ -23,11 +23,14 @@ const papers = [
   { title: 'Workload reduction in systematic reviews with machine-assisted screening', meta: 'Müller A, Reyes M · Research Synthesis Methods · 2024', why: t('Quantifies reviewer time saved in a prospective setting.', '在前瞻性研究中量化了节省的评审时间。'), score: 8, cites: 71 },
 ]
 
-const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) => {
+const steps = [['ask', t('Ask', '提问')], ['search', t('Search', '检索')], ['rank', t('Rank', '排序')]] as const
+
+const { scale, progress, seek, labelTime } = useStage(frame, stage, { width: W, height: H }, (gsap, root) => {
   const q = (s: string) => root.querySelector(s)!
   const qa = (s: string) => [...root.querySelectorAll(s)]
   const tl = gsap.timeline({ repeat: -1, repeatDelay: 0.2 })
   tl.set(q('.sd-all'), { opacity: 1 }, 0)
+  tl.addLabel('ask', 0)
 
   // A dot opens into the question card.
   const card = q('.sd-card')
@@ -47,6 +50,7 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
   glide(tl, hand, [820, 560], [652, 377], typed + 0.1, 0.7)
   press(tl, hand, q('.sd-go'), typed + 0.9)
   const F = typed + 1.15
+  tl.addLabel('search', F)
   tl.to(hand, { opacity: 0, duration: 0.2 }, F)
   tl.to(q('.sd-body'), { opacity: 0, duration: 0.15 }, F)
   tl.to(card, { width: 600, height: 44, borderRadius: 22, y: -228, duration: 0.6, ease: 'expo.inOut' }, F)
@@ -70,6 +74,7 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
 
   // Ranked papers, each with the reason it ranks.
   const R = P + 3.4
+  tl.addLabel('rank', R)
   tl.to([q('.sd-progress'), card], { opacity: 0, y: '-=12', duration: 0.3, ease: 'power2.in' }, R)
   tl.fromTo(q('.sd-head'), { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.35 }, R + 0.2)
   qa('.sd-result').forEach((c, i) => {
@@ -80,6 +85,11 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
   tl.addLabel('end', R + 2.4)
   tl.to(q('.sd-all'), { opacity: 0, duration: 0.4 }, R + 4.6)
   return tl
+})
+const current = computed(() => {
+  let index = 0
+  steps.forEach(([label], i) => { if (progress.value >= labelTime(label) - 0.01) index = i })
+  return index
 })
 </script>
 
@@ -113,6 +123,9 @@ const { scale } = useStage(frame, stage, { width: W, height: H }, (gsap, root) =
           <div class="psd-cursor" v-html="HAND" />
         </div>
       </div>
+    </div>
+    <div class="psd-steps" role="group" :aria-label="t('Search steps', '检索步骤')">
+      <button v-for="([label, text], i) in steps" :key="label" type="button" :aria-current="current === i ? 'step' : undefined" @click="seek(label)"><b>{{ i + 1 }}</b>{{ text }}</button>
     </div>
   </div>
 </template>
