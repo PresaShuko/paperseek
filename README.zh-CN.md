@@ -9,7 +9,7 @@
   <p>开源文献检索、初步文献计量与基于摘要的文献综述。</p>
   <p>
     <a href="https://www.producthunt.com/products/paperseek?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-paperseek-2" target="_blank" rel="noopener noreferrer"><img alt="PaperSeek - launch v1.0.0-beta1 with complete architectural rewrite | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1277911&amp;theme=light&amp;t=1791815965864"></a>
-    <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek" target="_blank" rel="noopener noreferrer"><img alt="部署到 ModelScope · 5.4k 次浏览" width="250" height="54" src="docs/public/deploy-modelscope-badge.svg"></a>
+    <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek" target="_blank" rel="noopener noreferrer"><img alt="Deploy to ModelScope · 5.4k views" width="250" height="54" src="docs/public/deploy-modelscope-badge.svg"></a>
   </p>
   <p>
     <a href="LICENSE"><img alt="Apache 2.0 许可" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
