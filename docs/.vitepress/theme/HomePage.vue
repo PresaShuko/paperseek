@@ -2,7 +2,10 @@
 import { computed } from 'vue'
 import { useData, withBase } from 'vitepress'
 import HeroPainting from './HeroPainting.vue'
-import ProductTour from './ProductTour.vue'
+import FeatureSection from './features/FeatureSection.vue'
+import SearchDemo from './features/SearchDemo.vue'
+import BiblioDemo from './features/BiblioDemo.vue'
+import ReviewDemo from './features/ReviewDemo.vue'
 
 const { lang } = useData()
 const zh = computed(() => lang.value.startsWith('zh'))
@@ -31,16 +34,34 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
       <a class="ps-sources" :href="link('guide/sources')" :aria-label="t('Supported scholarly sources', '支持的学术数据源')"><span v-for="source in sources" :key="source">{{ source }}</span></a>
     </section>
 
-    <section class="ps-section ps-container" aria-labelledby="tour-heading">
-      <h2 id="tour-heading" class="ps-sr-only">{{ t("Explore the research workspace", "探索文献研究工作区") }}</h2>
-      <ProductTour :zh="zh" />
-      <p class="ps-tour-caption">{{ t('An illustrative look at the workflow. Your results depend on the question, source, and model you choose.', '流程示意。实际结果取决于研究问题、数据源和所选模型。') }}</p>
-      <div class="ps-principles">
-        <article><span class="ps-step-number">01 / {{ t('SEARCH', '检索') }}</span><h3>{{ t('Go beyond a single query.', '不止于一次关键词检索。') }}</h3><p>{{ t('PaperSeek plans queries, refines the search, and combines complementary retrieval paths before ranking the candidates.', '从问题理解到检索式迭代，综合不同召回路径，再对候选文献排序。你可以查看每一步进展。') }}</p><a :href="link('guide/search')">{{ t('How search works', '了解检索流程') }} →</a></article>
-        <article><span class="ps-step-number">02 / {{ t('ANALYZE', '计量') }}</span><h3>{{ t('Explore the whole retrieved corpus.', '观察完整候选集。') }}</h3><p>{{ t('Inspect distributions, keyword co-occurrence, and shared references using the full retrieved corpus. Keep model scoring focused on its subset.', '用实际获取的候选集分析分布、关键词共现和共同参考文献，模型评分仍只针对原子集。') }}</p><a :href="link('guide/bibliometrics')">{{ t('Explore bibliometrics', '了解文献计量') }} →</a></article>
-        <article><span class="ps-step-number">03 / {{ t('SYNTHESIZE', '综合') }}</span><h3>{{ t('Write with the evidence.', '带着证据，开始写作。') }}</h3><p>{{ t('Select papers, shape an outline, and draft an abstract-based review with linked citations. Review writing is experimental.', '选择文献、调整大纲，再从摘要证据生成带引用的综述。综述功能目前为实验性。') }}</p><a :href="link('guide/reviews')">{{ t('Meet the review workflow', '了解综述流程') }} →</a></article>
+    <div class="ps-features">
+      <div class="ps-features-intro ps-container">
+        <p class="ps-eyebrow">{{ t('FROM QUESTION TO REVIEW', '从问题到综述') }}</p>
+        <h2>{{ t('Three steps through the literature.', '走过文献的三步。') }}<br><span>{{ t('Each one you can see and check.', '每一步都看得见、可核对。') }}</span></h2>
       </div>
-    </section>
+      <FeatureSection id="feature-search" index="01" :eyebrow="t('Literature search', '文献检索')"
+        :title="t('Ask a question. Get a reading list.', '提出问题，得到一份阅读清单。')"
+        :body="t('PaperSeek turns your question into search strategies, refines them over several rounds, follows citations, and ranks every candidate with a reason you can read.', 'PaperSeek 把研究问题转化为检索式，多轮迭代、沿引用扩展，再为每篇候选文献评分，并写明排序理由。')"
+        :points="[t('Eight scholarly sources, from OpenAlex to Web of Science', '八个学术数据源，从 OpenAlex 到 Web of Science'), t('Every stage of the search visible while it runs', '检索的每个阶段都实时可见'), t('A score and a written reason for each paper', '每篇文献都有评分和排序理由')]"
+        :href="link('guide/search')" :link-text="t('How search works', '了解检索流程')">
+        <SearchDemo :zh="zh" />
+      </FeatureSection>
+      <FeatureSection id="feature-biblio" index="02" :eyebrow="t('Bibliometrics', '文献计量')" reverse
+        :title="t('See the shape of the field.', '看清一个领域的全貌。')"
+        :body="t('Analyse the whole retrieved corpus, not only the top results: publication trends, venues, authors and countries, with keyword topics and bibliographic coupling generated on demand.', '分析实际获取的完整候选集，而不只是排在前面的结果：发表趋势、期刊、作者与国家地区，并按需生成关键词主题与文献耦合网络。')"
+        :points="[t('Distributions across years, venues, authors and countries', '年份、期刊、作者与国家地区分布'), t('Keyword co-occurrence networks', '关键词共现网络'), t('Shared-reference networks between papers', '基于共同参考文献的文献耦合网络')]"
+        :href="link('guide/bibliometrics')" :link-text="t('Explore bibliometrics', '了解文献计量')">
+        <BiblioDemo :zh="zh" />
+      </FeatureSection>
+      <FeatureSection id="feature-review" index="03" :eyebrow="t('Literature review', '文献综述')" :badge="t('Experimental', '实验性')"
+        :title="t('From evidence to a draft you can check.', '从证据到可核对的综述初稿。')"
+        :body="t('Choose the papers. PaperSeek quotes evidence from each abstract, proposes an outline for you to confirm, then writes section by section. Every citation leads back to the sentence it came from.', '选定文献后，PaperSeek 从每篇摘要中摘取证据，生成供你确认的大纲，再逐节撰写正文。每条引用都能追溯到出处的原句。')"
+        :points="[t('Evidence quoted from each abstract and checked against it', '证据摘自每篇摘要，并与原文核对'), t('An outline you review before any writing starts', '先确认大纲，再开始写作'), t('Export to Word, Markdown or BibTeX', '导出为 Word、Markdown 或 BibTeX')]"
+        :href="link('guide/reviews')" :link-text="t('Meet the review workflow', '了解综述流程')">
+        <ReviewDemo :zh="zh" />
+      </FeatureSection>
+      <p class="ps-features-note ps-container">{{ t('Animated illustrations of the workflow. Your results depend on the question, source and model you choose.', '流程动画示意。实际结果取决于研究问题、数据源和所选模型。') }}</p>
+    </div>
 
     <section class="ps-choice-section">
       <div class="ps-container">
