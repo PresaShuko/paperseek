@@ -52,7 +52,6 @@ def _active_text_files() -> list[Path]:
             COMMUNITY_ROOT / "Dockerfile",
             COMMUNITY_ROOT / "compose.yaml",
             COMMUNITY_ROOT / "README.md",
-            COMMUNITY_ROOT / "README.en.md",
             COMMUNITY_ROOT / "CONTRIBUTING.md",
             COMMUNITY_ROOT / ".env.example",
         )
@@ -231,7 +230,6 @@ class M4UniqueDistributionContract(unittest.TestCase):
 
         public_docs = [
             COMMUNITY_ROOT / "README.md",
-            COMMUNITY_ROOT / "README.en.md",
             COMMUNITY_ROOT / "CONTRIBUTING.md",
             COMMUNITY_ROOT / "integrations" / "skills" / "README.md",
             COMMUNITY_ROOT / "integrations" / "skills" / "paperseek" / "references" / "management-layer.md",

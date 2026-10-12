@@ -8,10 +8,6 @@
   <p><strong>从问题出发，找到研究的线索。</strong></p>
   <p>开源文献检索、初步文献计量与基于摘要的文献综述。</p>
   <p>
-    <a href="https://www.producthunt.com/products/paperseek?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-paperseek-2" target="_blank" rel="noopener noreferrer"><img alt="PaperSeek - launch v1.0.0-beta1 with complete architectural rewrite | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1277911&amp;theme=light&amp;t=1791815965864"></a>
-    <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek" target="_blank" rel="noopener noreferrer"><img alt="Deploy to ModelScope · 5.4k views" width="250" height="54" src="docs/public/deploy-modelscope-badge.svg"></a>
-  </p>
-  <p>
     <a href="LICENSE"><img alt="Apache 2.0 许可" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
     <img alt="版本 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta1-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
@@ -22,11 +18,16 @@
 
 ---
 
+[![PaperSeek：从问题出发，找到研究的线索](docs/public/images/readme-banner-zh.png)](https://paperseek.app/)
+
 PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从所选学术数据源召回候选文献，在支持时扩展引用，再按问题相关性排序。你可以查看检索过程、探索文献联系、保存结果，并从选中的摘要证据继续撰写综述。
 
 可以在自己的电脑或服务器运行社区版，也可以直接打开 [PaperSeek 在线版](https://paperseek.app/)。自由选择模型 API，通过 Web、命令行、HTTP API 或 MCP 接入。
 
-[![PaperSeek：从问题出发，找到研究的线索](docs/public/images/readme-banner-zh.png)](https://paperseek.app/)
+<p align="center">
+  <a href="https://www.producthunt.com/products/paperseek?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-paperseek-2" target="_blank" rel="noopener noreferrer"><img alt="PaperSeek - launch v1.0.0-beta1 with complete architectural rewrite | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1277911&amp;theme=light&amp;t=1791815965864"></a>
+  <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek" target="_blank" rel="noopener noreferrer"><img alt="Deploy to ModelScope" width="250" height="54" src="https://api.paperseek.app/badges/modelscope.svg"></a>
+</p>
 
 ## 目录
 

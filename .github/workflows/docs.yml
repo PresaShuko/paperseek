@@ -6,7 +6,6 @@ on:
     paths:
       - "docs/**"
       - "README.md"
-      - "README.en.md"
       - "README.zh-CN.md"
       - "package.json"
       - "package-lock.json"
@@ -16,7 +15,6 @@ on:
     paths:
       - "docs/**"
       - "README.md"
-      - "README.en.md"
       - "README.zh-CN.md"
       - "package.json"
       - "package-lock.json"
