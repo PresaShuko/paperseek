@@ -214,6 +214,22 @@ class M2RankingPipelineContractTest(unittest.TestCase):
         self.assertTrue(all(item["reasoning"] == "" for item in output))
         self.assertEqual(len(llm.calls), 1)
 
+    def test_reasons_cut_off_mid_reply_are_kept_and_the_rest_requested_again(self) -> None:
+        # The first reply stops mid-list, as a long reply does when it reaches its token budget.
+        llm = FixtureLLM(
+            '{"reasons":[[1,"First paper fits the question."],[2,"Second paper is rel',
+            '{"reasons":[[1,"Second paper fits too."],[2,"Third paper is adjacent."]]}',
+        )
+        scores = [{"uid": record.uid, "score": score} for record, score in zip(documents(), (9.0, 6.0, 3.0))]
+        scorer = RankingScorer(llm)
+
+        output = asyncio.run(scorer.attach_reasons(QUESTION, documents(), scores, "{}"))
+
+        self.assertEqual([item["reasoning"] for item in output],
+                         ["First paper fits the question.", "Second paper fits too.", "Third paper is adjacent."])
+        self.assertEqual(scorer.missing_reason_count, 0)
+        self.assertEqual(len(llm.calls), 2)
+
     def test_pipeline_makes_missing_reasons_visible_without_inventing_text(self) -> None:
         llm = FixtureLLM(
             read_fixture("llm/ranking_scores.json"),

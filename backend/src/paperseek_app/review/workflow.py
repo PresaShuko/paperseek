@@ -106,8 +106,10 @@ class ReviewStageWorkflow:
         cards = [card for card in self.review.content.cards if card.signature == signature or content.sections]
         if len(cards) < 2:
             raise ReviewError("review_insufficient_evidence", status=422)
-        if len(cards) != sum(paper.has_abstract for paper in content.papers):
-            raise ReviewError("review_evidence_incomplete", status=422)
+        # A paper whose evidence still fails after its own retry is left out and flagged, rather than
+        # blocking a review built from many other papers; a later run retries only those papers.
+        carded = {card.paper_id for card in cards}
+        failed = [paper.id for paper in content.papers if paper.has_abstract and paper.id not in carded]
         usable = usable_cards(cards, content.papers)
         if len(usable) < 2:
             raise ReviewError("review_insufficient_evidence", status=422)
@@ -124,6 +126,7 @@ class ReviewStageWorkflow:
             usable_ids = {card.paper_id for card in usable}
             value.cards = cards
             value.evidence_errors = {card.paper_id: "review_evidence_unusable" for card in cards if card.paper_id not in usable_ids}
+            value.evidence_errors.update({paper_id: "review_evidence_failed" for paper_id in failed})
             value.outline = outline
             value.section_count = len(outline.sections)
             value.outline_revision += 1

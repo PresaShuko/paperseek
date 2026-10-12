@@ -405,6 +405,29 @@ class ReviewWorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.review.content.cards), 2)
         self.assertFalse(self.review.content.evidence_errors)
 
+    async def test_a_paper_whose_evidence_keeps_failing_is_flagged_while_the_outline_proceeds(self):
+        run = await asyncio.to_thread(create_source, Path(self.temporary.name), 3)
+        request = ReviewCreate(source_run_id=run.id, paper_uids=[row.record.uid for row in self.store.get_results(run.id)],
+                               topic="Compare methods and scope", language="en", length="short", section_count=1)
+        self.review = ReviewService(self.store, self.store).create(request, "three-papers")
+        original = self.llm.chat_json
+
+        async def bad_quote(messages, **kwargs):
+            result = json.loads(await original(messages, **kwargs))
+            for card in result.get("cards", []):
+                if card["paper_id"] == "p_003":
+                    card["evidence"][0]["quote"] = "A claim absent from the source abstract."
+            return json.dumps(result)
+
+        self.llm.chat_json = bad_quote
+        self.submit("prepare_outline")
+        finished = await self.executor.run_once()
+        self.assertEqual(finished.status.value, "completed_with_warnings")
+        review = self.store.get_review(self.review.id)
+        self.assertEqual([card.paper_id for card in review.content.cards], ["p_001", "p_002"])
+        self.assertEqual(review.content.evidence_errors, {"p_003": "review_evidence_failed"})
+        self.assertTrue(all("p_003" not in section.paper_ids for section in review.content.outline.sections))
+
     async def test_summary_input_cannot_leak_evidence_outside_confirmed_assignment(self):
         from paperseek_core.review.generation import write_section
         from paperseek_app.execution import CancellationScope

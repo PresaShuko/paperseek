@@ -60,14 +60,21 @@ class RankingScorer:
         reason_by_uid: dict[str, str] = {}
         self.missing_reason_count = 0
         self.reason_failures = []
-        for start in range(0, len(reason_documents), 64):
-            batch = reason_documents[start : start + 64]
-            try:
-                reason_by_uid.update(
-                    await self.request_reasons(question, batch, scores, plan_context)
-                )
-            except Exception as exc:
-                self.reason_failures.append(failure_details(exc))
+        # One pass in moderate batches, then one retry for whatever a batch left out in smaller ones.
+        for size in (32, 12):
+            pending = [
+                document
+                for document in reason_documents
+                if document_identity(document) not in reason_by_uid
+            ]
+            for start in range(0, len(pending), size):
+                batch = pending[start : start + size]
+                try:
+                    reason_by_uid.update(
+                        await self.request_reasons(question, batch, scores, plan_context)
+                    )
+                except Exception as exc:
+                    self.reason_failures.append(failure_details(exc))
         self.missing_reason_count = sum(
             document_identity(document) not in reason_by_uid
             for document in reason_documents
@@ -230,6 +237,7 @@ class RankingScorer:
                 ),
             },
         ]
-        max_tokens = min(8192, max(2048, len(documents) * 96))
+        # A one-sentence reason in Chinese can take 150 tokens; a tight budget cuts the JSON off.
+        max_tokens = min(8192, max(2048, len(documents) * 180))
         raw = await self.llm.chat_json(messages, temperature=0.0, max_tokens=max_tokens)
         return self.codec.parse_reasons(raw, identities)

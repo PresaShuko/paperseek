@@ -193,6 +193,12 @@ async def structured_call(
 async def extract_evidence(llm: LLMPort, cancellation: CancellationToken,
                            papers: list[ReviewPaper], language: str, signature: str,
                            diagnostics: list[str] | None = None) -> list[EvidenceCard]:
+    dropped: list[str] = []
+
+    def report() -> None:
+        if dropped and diagnostics is not None:
+            diagnostics.append("Dropped unverifiable quotes: " + "; ".join(dropped[:8]))
+
     try:
         batch = await _extract_batch(llm, cancellation, papers, language, signature)
     except ReviewOutputError as exc:
@@ -207,7 +213,7 @@ async def extract_evidence(llm: LLMPort, cancellation: CancellationToken,
             if len(matches) != 1:
                 continue
             try:
-                cards.extend(validate_cards(EvidenceBatch(cards=matches), [paper], signature))
+                cards.extend(validate_cards(EvidenceBatch(cards=matches), [paper], signature, dropped))
             except ValueError:
                 continue
         # Retry only missing papers in isolation, with the same strict quote validation.
@@ -219,12 +225,15 @@ async def extract_evidence(llm: LLMPort, cancellation: CancellationToken,
                     continue
                 try:
                     recovered = await _extract_batch(llm, cancellation, [paper], language, signature)
-                    cards.extend(validate_cards(recovered, [paper], signature))
+                    cards.extend(validate_cards(recovered, [paper], signature, dropped))
                 except ReviewOutputError as failure:
                     if diagnostics is not None:
                         diagnostics.append(f"{paper.id}: {failure.reason}")
+        report()
         return sorted(cards, key=lambda card: next(i for i, paper in enumerate(papers) if paper.id == card.paper_id))
-    return validate_cards(batch, papers, signature)
+    cards = validate_cards(batch, papers, signature, dropped)
+    report()
+    return cards
 
 
 async def _extract_batch(llm: LLMPort, cancellation: CancellationToken,
@@ -269,7 +278,14 @@ async def prepare_outline(llm: LLMPort, cancellation: CancellationToken, *, topi
     schema = create_model("OutlinePlan", __base__=ReviewOutline,
                           sections=(list[section_schema], Field(min_length=count, max_length=count)))
 
+    available = {card.paper_id for card in cards if card.evidence}
+
     def validate(value: ReviewOutline) -> None:
+        # A paper without verified evidence is simply left out of the plan, not a reason to redo it.
+        for section in value.sections:
+            for plan in section.paragraphs:
+                plan.paper_ids = [paper for paper in plan.paper_ids if paper in available] or plan.paper_ids
+            section.paper_ids = list(dict.fromkeys(paper for plan in section.paragraphs for paper in plan.paper_ids))
         # Coverage is completed by a small assignment request after the structure is valid.
         validate_outline(value, cards, require_all=False)
         if len(value.sections) != count or any(section.parent_id for section in value.sections):

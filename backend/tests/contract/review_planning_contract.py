@@ -82,6 +82,35 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("未在正文中标注", findings[0].reason)
         self.assertIn("英文", findings[0].reason)
 
+    def test_ellipsis_quotes_split_unverifiable_extras_drop_and_a_seventh_item_is_ignored(self):
+        paper = snapshot(FinalPaperResult(rank=1, uid="multi", title="Multi",
+            abstract="Alpha beta gamma delta epsilon. Zeta eta theta iota kappa. Lambda mu nu xi omicron."), "source", 1)
+        items = [{"category": "finding", "text": "Joined", "quote": "Alpha beta gamma delta epsilon... Lambda mu nu xi omicron"},
+                 {"category": "finding", "text": "Invented", "quote": "A sentence that appears nowhere in this abstract at all."}]
+        items += [{"category": "scope", "text": f"Extra {i}", "quote": "Zeta eta theta iota kappa."} for i in range(5)]
+        batch = EvidenceBatch.model_validate({"cards": [{"paper_id": paper.id, "evidence": items}]})
+        self.assertEqual(len(batch.cards[0].evidence), 6)
+        dropped = []
+        card = validate_cards(batch, [paper], "test", dropped)[0]
+        self.assertEqual([item.quote for item in card.evidence],
+                         ["Alpha beta gamma delta epsilon", "Lambda mu nu xi omicron", "Zeta eta theta iota kappa."])
+        self.assertEqual(len(dropped), 1)
+        self.assertIn("appears nowhere", dropped[0])
+
+    async def test_outline_leaves_out_papers_without_verified_evidence_instead_of_failing(self):
+        original = self.llm.chat_json
+
+        async def stray(messages, **kwargs):
+            result = json.loads(await original(messages, **kwargs))
+            if "TASK: outline\n" in messages[0]["content"]:
+                result["sections"][0]["paragraphs"][0]["paper_ids"].append("p_093")
+            return json.dumps(result)
+
+        self.llm.chat_json = stray
+        outline = await self.outline(1)
+        self.assertEqual(self.llm.calls["outline"], 1)
+        self.assertEqual(outline.sections[0].paper_ids, ["p_001", "p_002"])
+
     async def test_explicit_counts_and_presets_produce_two_level_plans(self):
         for count in (1, 2, 3, 4, 6, 14):
             with self.subTest(count=count):
