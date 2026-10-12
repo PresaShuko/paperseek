@@ -60,7 +60,7 @@ The Web UI, six-command CLI, versioned HTTP API, and independent same-version MC
 
 ### Upgrade notes
 
-Python **3.12+** is required. Old Python imports, internal APIs, frontend endpoints, and retired CLI/configuration entries are not retained. Supported 0.2 data and environment settings have explicit migration commands; migrated configuration uses the new names without a legacy runtime fallback. See the [migration guide](self-hosting/upgrade.md) and [architecture notes](contributing.md#architecture).
+Python **3.12+** is required. Old Python imports, internal APIs, frontend endpoints, and retired CLI/configuration entries are not retained. Supported 0.2 data and environment settings have explicit migration commands; migrated configuration uses the new names without a legacy runtime fallback. See the [migration guide](self-hosting/upgrade.md) and [architecture notes](developers/contributing.md#architecture).
 
 Search uses abstracts and metadata provided by the source. Standalone cross-source abstract and citation-count enrichment are no longer part of the configuration.
 

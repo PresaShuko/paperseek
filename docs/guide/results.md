@@ -4,7 +4,7 @@ Inspect your reading list, select what matters, and export it into your own rese
 
 ## Three independent histories
 
-Choose a module in the left sidebar to see its **Search history**, **Analyses**, or **Reviews**. Search runs, analyses, and reviews are saved separately. Use the magnifying glass beside the history heading to search records, or **All** to open the full list and its record menus for rename, export, and delete. See [workspace and history](workspace.md).
+Search runs, analyses, and reviews are saved separately — each module in the sidebar shows its own history. Where history lives, how records are renamed, exported, or deleted, and what survives a reload: [Workspace and history](workspace.md).
 
 ## Read a paper card
 
@@ -32,7 +32,7 @@ The **Export** menu groups complete and selected CSV/JSON downloads. A complete 
 
 ## Reopen history
 
-Community history belongs to the local database. Online history belongs to your account. Signing in after an anonymous search does not backfill it.
+Community history belongs to the local database. Online history belongs to your account. [Signing in after an anonymous search](../online/privacy.md#search-without-signing-in) does not backfill it.
 
 A saved run retains its actual settings. Reopening it does not replace its model or budget with current defaults; older unrecorded fields remain unknown.
 

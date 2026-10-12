@@ -1,6 +1,8 @@
 # Workspace and history
 
-Open **Search**, **Bibliometrics**, or **Reviews** from the left sidebar. Use the module’s history to reopen a saved search, analysis, or review.
+How the PaperSeek workspace is organized, where your data lives, and what survives a reload. For result-level tasks, see [Results and history](results.md).
+
+Open **Search**, **Bibliometrics**, or **Reviews** from the left sidebar. Use the module's history to reopen a saved search, analysis, or review.
 
 | Module | Subfunctions | Saved object |
 | --- | --- | --- |

@@ -11,6 +11,6 @@ head:
 
 # 文档已更新
 
-[阅读新版文档 →](/zh/contributing)
+[阅读新版文档 →](/zh/developers/contributing)
 
-[English documentation](/contributing) · [中文文档](/zh/guide/)
+[English documentation](/developers/contributing) · [中文文档](/zh/developers/contributing)

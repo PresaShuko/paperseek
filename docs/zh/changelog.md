@@ -60,7 +60,7 @@ Web、六命令 CLI、版本化 HTTP API 和独立的同版本 MCP 适配器共�
 
 ### 升级须知
 
-需要 **Python 3.12+**。旧 Python 导入路径、内部 API、前端接口以及废弃的 CLI／配置入口不再保留。0.2 用户数据与仍有效的环境配置通过显式命令迁移，新运行时使用新配置名称，不再回退读取旧名称。详见[迁移指南](self-hosting/upgrade.md)与[架构说明](contributing.md#architecture)。
+需要 **Python 3.12+**。旧 Python 导入路径、内部 API、前端接口以及废弃的 CLI／配置入口不再保留。0.2 用户数据与仍有效的环境配置通过显式命令迁移，新运行时使用新配置名称，不再回退读取旧名称。详见[迁移指南](self-hosting/upgrade.md)与[架构说明](developers/contributing.md#architecture)。
 
 检索使用数据源原生摘要与元数据，不再提供独立的跨源摘要或引用数补全配置。
 

@@ -1,29 +1,89 @@
 import { defineConfig, type DefaultTheme } from 'vitepress'
 
 const base = process.env.DOCS_BASE || '/'
-const groups = [
-  ['Start here', '开始使用', [['Introduction', '认识 PaperSeek', 'guide/'], ['Quick start', '快速开始', 'guide/quick-start']]],
-  ['Using PaperSeek', '使用 PaperSeek', [['Workspace & history', '工作区与历史', 'guide/workspace'], ['Search', '文献检索', 'guide/search'], ['Bibliometrics', '文献计量', 'guide/bibliometrics'], ['Data sources', '数据源', 'guide/sources'], ['Models & ranking', '模型与排序', 'guide/models'], ['Results & history', '结果与历史', 'guide/results'], ['Citation maps', '引用图谱', 'guide/citation-map'], ['Reviews · Experimental', '综述 · 实验性', 'guide/reviews']]],
-  ['PaperSeek online', '在线版', [['Service, keys & credits', '服务、密钥与积分', 'online/'], ['Your account', '账户与登录', 'online/account']]],
-  ['Run it yourself', '自托管与集成', [['Local & Docker', '本地与 Docker', 'self-hosting/'], ['Upgrade to 1.0.0-beta1', '升级至 1.0.0-beta1', 'self-hosting/upgrade'], ['Command line', '命令行', 'integrations/cli'], ['Agent Skill', 'Agent Skill', 'integrations/skill'], ['MCP', 'MCP', 'integrations/mcp'], ['HTTP API', 'HTTP API', 'integrations/api']]],
-  ['Reference', '参考', [['Configuration', '配置参考', 'reference/configuration'], ['Troubleshooting', '常见问题', 'reference/troubleshooting'], ['Contributing', '参与贡献', 'contributing']]],
-  ['Changelog', '更新日志', [['All releases', '版本记录', 'changelog']]]
-] as const
+
+type PageLink = [en: string, zh: string, path: string]
+type SubGroup = [en: string, zh: string, pages: PageLink[]]
+type SidebarSection = [en: string, zh: string, entries: (PageLink | SubGroup)[]]
+
+const sections: SidebarSection[] = [
+  ['Getting started', '开始使用', [
+    ['Introduction', '认识 PaperSeek', 'get-started/'],
+    ['Quick start online', '在线快速开始', 'get-started/online'],
+    ['Quick start local', '本地快速开始', 'get-started/local']
+  ]],
+  ['User guides', '使用指南', [
+    ['Overview', '概览', 'guide/'],
+    ['Research workflow', '检索工作流', [
+      ['Search', '文献检索', 'guide/search'],
+      ['Results & history', '结果与历史', 'guide/results'],
+      ['Citation maps', '引用图谱', 'guide/citation-map'],
+      ['Bibliometrics', '文献计量', 'guide/bibliometrics'],
+      ['Reviews · Experimental', '综述 · 实验性', 'guide/reviews']
+    ]],
+    ['Setup', '配置', [
+      ['Data sources', '数据源', 'guide/sources'],
+      ['Models & ranking', '模型与排序', 'guide/models']
+    ]],
+    ['Workspace & history', '工作区与历史', 'guide/workspace']
+  ]],
+  ['PaperSeek online', '在线服务', [
+    ['Overview', '概览', 'online/'],
+    ['Your account', '账户与登录', 'online/account'],
+    ['Service & credits', '服务与积分', 'online/credits'],
+    ['Your own keys', '自有密钥', 'online/byok'],
+    ['Data & privacy', '数据与隐私', 'online/privacy']
+  ]],
+  ['Self-hosting', '自部署', [
+    ['Deployment', '部署与运维', 'self-hosting/'],
+    ['Upgrade to 1.0.0-beta1', '升级至 1.0.0-beta1', 'self-hosting/upgrade']
+  ]],
+  ['Developers', '开发者', [
+    ['Integrations', '集成接口', [
+      ['Overview', '概览', 'developers/'],
+      ['Command line', '命令行', 'developers/cli'],
+      ['HTTP API', 'HTTP API', 'developers/api'],
+      ['MCP', 'MCP', 'developers/mcp'],
+      ['Agent Skill', 'Agent Skill', 'developers/skill']
+    ]],
+    ['Contribute', '参与贡献', [
+      ['Contributing', '贡献指南', 'developers/contributing'],
+      ['Architecture', '内部架构', 'developers/architecture'],
+      ['Interface guidelines', '界面规范', 'developers/design-system']
+    ]]
+  ]],
+  ['Reference & help', '参考与帮助', [
+    ['Configuration', '配置参考', 'reference/configuration'],
+    ['Troubleshooting', '故障排查', 'reference/troubleshooting']
+  ]],
+  ['Changelog', '更新日志', [
+    ['All releases', '版本记录', 'changelog']
+  ]]
+]
+
+function isSubGroup(entry: PageLink | SubGroup): entry is SubGroup {
+  return Array.isArray(entry[2])
+}
 
 function navigation(zh = false): DefaultTheme.Config {
   const prefix = zh ? '/zh/' : '/'
+  const toItem = ([en, cn, path]: PageLink): DefaultTheme.SidebarItem => ({ text: zh ? cn : en, link: prefix + path })
+  const sidebar: DefaultTheme.SidebarItem[] = sections.map(([en, cn, entries]) => ({
+    text: zh ? cn : en,
+    collapsed: false,
+    items: entries.map(entry => isSubGroup(entry)
+      ? { text: zh ? entry[1] : entry[0], collapsed: false, items: entry[2].map(toItem) }
+      : toItem(entry))
+  }))
   return {
     nav: [
-      { text: zh ? '文档' : 'Documentation', link: `${prefix}guide/`, activeMatch: `${prefix}(guide|self-hosting|integrations|reference|contributing)` },
-      { text: zh ? '在线版' : 'Online guide', link: `${prefix}online/`, activeMatch: `${prefix}online/` },
-      { text: 'v1.0.0-beta1', link: `${prefix}changelog` },
+      { text: zh ? '开始使用' : 'Get started', link: `${prefix}get-started/`, activeMatch: `^${prefix}get-started/` },
+      { text: zh ? '使用指南' : 'Guides', link: `${prefix}guide/`, activeMatch: `^${prefix}(guide|online|self-hosting|reference)/` },
+      { text: zh ? '开发者' : 'Developers', link: `${prefix}developers/`, activeMatch: `^${prefix}developers/` },
+      { text: zh ? '更新日志' : 'Changelog', link: `${prefix}changelog` },
       { text: zh ? '打开 PaperSeek' : 'Open PaperSeek', link: 'https://paperseek.app/' }
     ],
-    sidebar: groups.map(([en, cn, pages]) => ({
-      text: zh ? cn : en,
-      collapsed: false,
-      items: pages.map(([english, chinese, path]) => ({ text: zh ? chinese : english, link: prefix + path }))
-    })),
+    sidebar,
     editLink: { pattern: 'https://github.com/paperseek/paperseek/edit/main/docs/:path', text: zh ? '在 GitHub 上编辑此页' : 'Edit this page on GitHub' },
     outline: { label: zh ? '本页目录' : 'On this page', level: [2, 3] },
     docFooter: { prev: zh ? '上一页' : 'Previous page', next: zh ? '下一页' : 'Next page' },

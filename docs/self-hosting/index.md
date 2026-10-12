@@ -2,6 +2,8 @@
 
 Community includes the search engine, Web UI, local history, citation maps, and experimental reviews. Choose a Python installation or a persistent Docker service.
 
+Just want to try it out? The [local quick start](../get-started/local.md) walks through a first search step by step.
+
 ## Install the Python package
 
 Requires **Python 3.12 or newer**. The package includes the built Web UI; Node.js is only needed when developing the frontend.
@@ -11,7 +13,7 @@ python -m pip install "paperseek==1.0.0b1"
 paperseek serve
 ```
 
-Open [http://127.0.0.1:8765](http://127.0.0.1:8765). Configure a model and data source in the application.
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). Configure a model and data source in the application — the [local quick start](../get-started/local.md) shows these steps.
 
 To install a checkout instead:
 
@@ -22,7 +24,7 @@ python -m pip install ./backend
 paperseek serve
 ```
 
-For a checkout without built Web assets, follow the [development setup](../contributing.md) to build the frontend before packaging.
+For a checkout without built Web assets, follow the [development setup](../developers/contributing.md) to build the frontend before packaging.
 
 ## Docker Compose
 

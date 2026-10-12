@@ -13,7 +13,7 @@ Version 1.0.0-beta1 is a complete architectural refactor with breaking changes t
 | Storage | Migrate the 0.2 database explicitly; new SQLite schema changes are managed by Alembic |
 | Running tasks | Finish or cancel old work before switching versions; do not assume an unfinished old task or checkpoint can resume under the new workflow |
 
-The new application separates the research core, task services, and deployment adapters. Saved runs now use worker leases, events, checkpoints, and artifacts. These changes are described in the [changelog](../changelog.md#v1-0-0-beta) and [architecture notes](../contributing.md#architecture).
+The new application separates the research core, task services, and deployment adapters. Saved runs now use worker leases, events, checkpoints, and artifacts. These changes are described in the [changelog](../changelog.md#v1-0-0-beta) and [architecture notes](../developers/contributing.md#architecture).
 
 This guide covers a Community installation. Using PaperSeek online does not require running a local database migration.
 

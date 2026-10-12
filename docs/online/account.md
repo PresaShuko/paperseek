@@ -22,7 +22,7 @@ If you use more than one sign-in method, check the email and account ID in **Set
 Open it from the account menu (**Account & credits**) or from **Settings**.
 
 - **Account** shows your email and account ID. The ID is masked; use **Show** or **Copy** when contacting support. It is not an API key.
-- **Credits** shows today's remaining credits, the refill time, and what each task uses. See [Credits](index.md#credits).
+- **Credits** shows today's remaining credits, the refill time, and what each task uses. See [Service & credits](credits.md).
 - **Sign-in methods** links or unlinks GitHub, Hugging Face, and ModelScope, and sets a password for an account created without one. Unlinking keeps your history.
 - **Data management**:
   - **Clear keys** deletes every model connection and data-source key saved to your account. Type `clear saved keys` to confirm. Submitted tasks are not affected.

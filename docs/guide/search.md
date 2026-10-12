@@ -56,4 +56,4 @@ Use **Stop** to request cancellation. **Cancelling** can remain briefly while in
 
 Refreshing a persisted run reconnects to saved state. A network reconnect is not a new search. Retrying a finished or cancelled run starts new work; it does not reopen the old execution.
 
-Online queue and anonymous-session details are in the [online guide](../online/index.md).
+Online queueing is covered in the [online overview](../online/index.md#when-your-task-is-queued); anonymous sessions in [Data & privacy](../online/privacy.md#search-without-signing-in).

@@ -2,6 +2,8 @@
 
 社区版包含检索引擎、Web 界面、本地历史、引用图谱和实验性综述。可以选择 Python 安装，也可以使用持久化 Docker 服务。
 
+只想先试试？[本地快速上手](../get-started/local.md)会带你一步步完成第一次检索。
+
 ## 安装 Python 包
 
 需要 **Python 3.12 或更新版本**。发行包自带已构建的网页，只有开发前端时才需要 Node.js。
@@ -11,7 +13,7 @@ python -m pip install "paperseek==1.0.0b1"
 paperseek serve
 ```
 
-打开 [http://127.0.0.1:8765](http://127.0.0.1:8765)，在界面中配置模型与数据源。
+打开 [http://127.0.0.1:8765](http://127.0.0.1:8765)，在界面中配置模型与数据源——具体步骤见[本地快速上手](../get-started/local.md)。
 
 也可以从源码安装：
 
@@ -22,7 +24,7 @@ python -m pip install ./backend
 paperseek serve
 ```
 
-如果源码检出中没有已构建的页面，先按[开发指南](../contributing.md)构建前端，再制作发行包。
+如果源码检出中没有已构建的页面，先按[开发指南](../developers/contributing.md)构建前端，再制作发行包。
 
 ## Docker Compose
 

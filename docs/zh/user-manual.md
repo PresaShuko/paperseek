@@ -11,6 +11,6 @@ head:
 
 # 文档已更新
 
-[阅读新版文档 →](/zh/guide/)
+[阅读新版文档 →](/zh/get-started/)
 
-[English documentation](/guide/) · [中文文档](/zh/guide/)
+[English documentation](/get-started/) · [中文文档](/zh/get-started/)
