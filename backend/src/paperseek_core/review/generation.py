@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field, ValidationError, create_model, model_vali
 
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.ports import CancellationToken, LLMPort
-from paperseek_core.review.evidence import evidence_index, validate_body, validate_cards, validate_mentions, validate_outline
+from paperseek_core.review.evidence import (
+    CitationStyleError, citation_style_issues, evidence_index, validate_body, validate_cards, validate_mentions,
+    validate_outline,
+)
 from paperseek_core.review.models import (
     EvidenceBatch, EvidenceCard, OutlineSection, ParagraphPlan, ReviewModel, ReviewOutline, ReviewPaper, ReviewParagraph,
     SectionBody, SupportCheck, SupportFinding,
@@ -55,6 +58,7 @@ SYSTEM_ZH = """你只依据提供的论文原生摘要撰写学术文献综述�
 全文使用简体中文。专业术语用中文表述；术语首次出现时，可在中文后用括号注明英文全称或缩写，
 例如“大语言模型（Large Language Model, LLM）”，此后只用中文或已定义的缩写，不要反复给同一术语加英文括注。
 不要在中文句子里直接夹用英文单词或短语。人名、论文题名、机构、数据集、软件和模型名称等专有名词保留原文。
+综述正文提及具体研究时用其论文编号指代，不要抄写英文题名或英文摘要原句，研究内容一律译成中文转述。
 引文（quote）保持原文语言，逐字不变。
 只返回所要求的 JSON。不要使用 Markdown 代码块，不要输出参考文献列表，不要调用工具或外部资源。
 """
@@ -636,20 +640,40 @@ async def write_section(
         "遵守 paragraph_limits 中的篇幅和被引论文数量。不要把剩余文献挪进一个庞大的最后一段；简洁地展开每个计划论点。"
     ))
     planned = bool(section.paragraphs and not instruction)
+    # Paragraphs kept despite a citation-placement or language issue, so later passes can still
+    # revise the other paragraphs; issues that remain are reported to the user at the end.
+    accepted: set[str] = set()
 
     def validate(value: SectionBody) -> SectionBody:
-        # Hard rules only: real evidence IDs, attributed mentions and the approved paragraph count.
+        # Real evidence IDs, attributed mentions and the approved paragraph count are required.
+        # Inline placement and language are requested, but cannot fail an otherwise grounded draft.
         # Length and source-count limits are guidance, enforced afterwards by a focused condense pass.
         validate_body(value, cards, section.paper_ids)
-        validate_mentions(value, cards)
+        validate_mentions(value, cards, language=language, exempt=accepted)
         if planned and len(value.paragraphs) != len(section.paragraphs):
             raise ValueError(f"Follow the approved plan: write {len(section.paragraphs)} prose paragraphs.")
         return value
     body_schema = create_model("PlannedSectionBody", __base__=SectionBody,
         paragraphs=(list[ReviewParagraph], Field(min_length=len(section.paragraphs), max_length=len(section.paragraphs)))) \
         if planned else SectionBody
-    body = await structured_call(llm, cancellation, "section", prompt, data, body_schema,
-                                 max_tokens=tokens, validate=validate, attempts=3, language=language)
+    try:
+        body = await structured_call(llm, cancellation, "section", prompt, data, body_schema,
+                                     max_tokens=tokens, validate=validate, attempts=3, language=language)
+    except ReviewOutputError as exc:
+        # A draft that fails only placement or language rules is kept and marked for review.
+        if not isinstance(exc.result, SectionBody):
+            raise
+        try:
+            validate(exc.result)
+        except CitationStyleError:
+            accepted.update(paragraph.text for paragraph in exc.result.paragraphs)
+            try:
+                validate(exc.result)
+            except ValueError:
+                raise exc from None
+        except ValueError:
+            raise exc from None
+        body = exc.result
     weak_phrases = ("遗憾的是", "仅为", "仍明显落后", "效果有限", "作用有限", "效应有限", "微乎其微",
                     "unfortunately", "merely", "still lags behind", "limited effectiveness")
     editing_focus = [{"paragraph": i, "expressions_to_reframe": matches}
@@ -753,6 +777,16 @@ async def write_section(
         else:
             body = await finish(repaired)
             findings = await support(body)
+    style_notes = {
+        "unplaced": ("部分引用未在正文中标注到具体论断，已附在段末，请核对。",
+                     "Some citations are not placed beside their claims and appear at the end; check them."),
+        "grouped": ("本段引用集中在段末，未对应到具体论断，请核对。",
+                    "This paragraph groups its citations at the end rather than beside each claim; check them."),
+        "language": ("本段含有英文句子或题名，请改写为中文。",
+                     "This paragraph contains English sentences or titles; rewrite them in Chinese."),
+    }
+    for paragraph, kind, _ in citation_style_issues(body, cards, language):
+        note(paragraph, *style_notes[kind])
     index = evidence_index(cards)
     cited = {index[key].paper_id for paragraph in body.paragraphs for key in paragraph.evidence_ids}
     missing = set(section.paper_ids) - cited

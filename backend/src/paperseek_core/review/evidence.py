@@ -175,22 +175,54 @@ def validate_body(body: SectionBody, cards: list[EvidenceCard], paper_ids: list[
     return body
 
 
-def validate_mentions(body: SectionBody, cards: list[EvidenceCard]) -> None:
+# Eight or more English words in a row, outside parentheses, is an English sentence or title.
+_LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z'’-]*(?:[\s,;:/&-]+[A-Za-z][A-Za-z'’-]*){7,}")
+_PARENTHETICAL = re.compile(r"[（(][^（）()]*[)）]")
+
+
+class CitationStyleError(ValueError):
+    """The paragraphs are grounded but miss a writing rule; the draft is usable if repair fails."""
+
+    def __init__(self, issues: list[tuple[int, str, str]]) -> None:
+        super().__init__("\n".join(message for _, _, message in issues))
+        self.issues = issues
+
+
+def citation_style_issues(body: SectionBody, cards: list[EvidenceCard], language: str = "en",
+                          exempt: frozenset[str] | set[str] = frozenset()) -> list[tuple[int, str, str]]:
+    """Inline placement and output language, for paragraphs not already accepted as they are."""
+    index = evidence_index(cards)
+    issues = []
+    for i, paragraph in enumerate(body.paragraphs):
+        if paragraph.text in exempt:
+            continue
+        number = i + 1
+        cited = {index[key].paper_id for key in paragraph.evidence_ids if key in index}
+        mentions = [(match.start(), match.group()) for match in PAPER_MENTION.finditer(paragraph.text)]
+        if unplaced := cited - {paper_id for _, paper_id in mentions}:
+            issues.append((i, "unplaced", f"Paragraph {number} cites {sorted(unplaced)} without naming them in the text. Put each "
+                              "cited paper's ID right after the claim it supports, e.g. '... (p_003).'"))
+        else:
+            # A paragraph whose sources all trail its last sentence reads like a citation dump.
+            text = paragraph.text.rstrip()
+            final_sentence = max(text.rfind(mark, 0, max(len(text) - 1, 0)) for mark in ".。!?！？;；")
+            if len(cited) >= 3 and final_sentence > 0 and all(position > final_sentence for position, _ in mentions):
+                issues.append((i, "grouped", f"Paragraph {number} groups all its citations at the end. Attach each paper ID to "
+                                  "the specific claim it supports within the paragraph."))
+        if language == "zh" and _LATIN_RUN.search(_PARENTHETICAL.sub(" ", PAPER_MENTION.sub(" ", paragraph.text))):
+            issues.append((i, "language", f"Paragraph {number} contains English sentences or titles. Write it entirely in "
+                              "Chinese: refer to studies by their paper IDs and translate their findings."))
+    return issues
+
+
+def validate_mentions(body: SectionBody, cards: list[EvidenceCard], *, language: str = "en",
+                      exempt: frozenset[str] | set[str] = frozenset()) -> None:
     """Citations sit beside the claims they support, so a reader can tell which study says what."""
     index = evidence_index(cards)
-    for number, paragraph in enumerate(body.paragraphs, 1):
+    for paragraph in body.paragraphs:
         cited = {index[key].paper_id for key in paragraph.evidence_ids}
-        mentions = [(match.start(), match.group()) for match in PAPER_MENTION.finditer(paragraph.text)]
-        mentioned = {paper_id for _, paper_id in mentions}
-        if missing := mentioned - cited:
+        if missing := {match.group() for match in PAPER_MENTION.finditer(paragraph.text)} - cited:
             raise ValueError(f"Text mentions {sorted(missing)} without evidence from those papers in this paragraph. "
                              "Correct the attribution or include the actual supporting evidence IDs.")
-        if unplaced := cited - mentioned:
-            raise ValueError(f"Paragraph {number} cites {sorted(unplaced)} without naming them in the text. Put each "
-                             "cited paper's ID right after the claim it supports, e.g. '... (p_003).'")
-        # A paragraph whose sources all trail its last sentence reads like a citation dump.
-        text = paragraph.text.rstrip()
-        final_sentence = max(text.rfind(mark, 0, max(len(text) - 1, 0)) for mark in ".。!?！？;；")
-        if len(cited) >= 3 and final_sentence > 0 and all(position > final_sentence for position, _ in mentions):
-            raise ValueError(f"Paragraph {number} groups all its citations at the end. Attach each paper ID to the "
-                             "specific claim it supports within the paragraph.")
+    if issues := citation_style_issues(body, cards, language, exempt):
+        raise CitationStyleError(issues)

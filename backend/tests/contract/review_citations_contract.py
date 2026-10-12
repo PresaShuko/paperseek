@@ -80,6 +80,17 @@ class ReviewCitationsTest(unittest.TestCase):
         body.paragraphs[0].text = "召回率提高（p_001），精确率保持稳定（p_002），两者一致（p_003）。"
         validate_mentions(body, self.cards)
 
+    def test_chinese_paragraphs_reject_english_sentences_but_allow_a_first_mention_gloss(self):
+        body = self.review.content.sections[0].body
+        body.paragraphs[1].text = "研究报告了相关发现（p_003），大语言模型（Large Language Model, LLM）也有类似结果（p_004）。"
+        validate_mentions(body, self.cards, language="zh")
+        body.paragraphs[1].text = ("研究（p_003）指出：Extended Reality supports situated human control in "
+                                   "dynamic shared environments for robots（p_004）。")
+        with self.assertRaisesRegex(ValueError, "contains English"):
+            validate_mentions(body, self.cards, language="zh")
+        validate_mentions(body, self.cards, language="en")
+        validate_mentions(body, self.cards, language="zh", exempt={body.paragraphs[1].text})
+
     def test_chinese_reviews_are_prompted_in_chinese(self):
         from paperseek_core.review.generation import SYSTEM, SYSTEM_ZH, _say
         self.assertIn("大语言模型（Large Language Model, LLM）", SYSTEM_ZH)

@@ -62,6 +62,26 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(findings[0].status, 'needs_revision')
         self.assertIn('validated draft was retained', findings[0].reason)
 
+    async def test_draft_missing_only_inline_placement_or_chinese_is_kept_and_marked(self):
+        outline = await self.outline(1)
+        original = self.llm.chat_json
+
+        async def stubborn(messages, **kwargs):
+            result = json.loads(await original(messages, **kwargs))
+            if any(f"TASK: {task}\n" in messages[0]["content"] for task in ("section", "section_edit", "section_repair")):
+                for paragraph in result["paragraphs"]:
+                    paragraph["text"] = "Both studies report an association across their two separate study settings."
+            return json.dumps(result)
+
+        self.llm.chat_json = stubborn
+        body, findings = await write_section(self.llm, CancellationScope(), topic="Settings", language="zh",
+            length="short", outline=outline, section=outline.sections[0], cards=self.cards, papers=self.papers)
+        self.assertEqual(self.llm.calls["section"], 3)
+        self.assertEqual(len(body.paragraphs[0].evidence_ids), 2)
+        self.assertEqual(findings[0].status, "needs_revision")
+        self.assertIn("未在正文中标注", findings[0].reason)
+        self.assertIn("英文", findings[0].reason)
+
     async def test_explicit_counts_and_presets_produce_two_level_plans(self):
         for count in (1, 2, 3, 4, 6, 14):
             with self.subTest(count=count):
