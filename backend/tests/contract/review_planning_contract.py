@@ -121,11 +121,11 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
             if task == "section":
                 self.assertEqual(data["review_focus"], outline.focus)
                 self.assertEqual(len(data["section"]["paragraphs"]), 2)
-                result["paragraphs"][0]["text"] = "Unfortunately, the studies examine different settings."
+                result["paragraphs"][0]["text"] = "Unfortunately, the studies examine different settings (p_001, p_002)."
             elif task == "section_edit":
                 self.assertEqual(data["editing_focus"], [{"paragraph": 0, "expressions_to_reframe": ["unfortunately"]}])
                 for paragraph in result["paragraphs"]:
-                    paragraph["text"] = "The association was studied in two distinct settings."
+                    paragraph["text"] = "The association was studied in two distinct settings (p_001, p_002)."
             elif task == "support_check":
                 inspected.extend(data["paragraphs"])
                 self.assertEqual({p['paper_id'] for p in data['paragraphs'][0]['cited_paper_abstracts']},
@@ -168,7 +168,8 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         async def omit_once(messages, **kwargs):
             result = json.loads(await original(messages, **kwargs))
             if "TASK: section\n" in messages[0]["content"] and self.llm.calls["section"] == 1:
-                result["paragraphs"][0]["evidence_ids"] = [self.cards[0].evidence[0].id]
+                result["paragraphs"][0].update(text="Setting one shows an association (p_001).",
+                                               evidence_ids=[self.cards[0].evidence[0].id])
             return json.dumps(result)
 
         self.llm.chat_json = omit_once
@@ -195,14 +196,14 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(list(data["paragraphs"]), ["paragraph_2"])
                 self.assertEqual(data["paragraphs"]["paragraph_2"]["missing_paper_ids"], ["p_002"])
                 # Merely exchanging the old citation for the missing one must not lose coverage elsewhere.
-                return json.dumps({"paragraph_2": {"text": "The association was studied in setting two.",
+                return json.dumps({"paragraph_2": {"text": "The association was studied in setting two (p_002).",
                                                   "evidence_ids": [self.cards[1].evidence[0].id]}})
             if task == "support_check":
                 checked.extend(data["paragraphs"])
             result = json.loads(await original(messages, **kwargs))
             if task in {"section", "section_edit"}:
                 for p in result["paragraphs"]:
-                    p["text"] = "Existing supported comparison."
+                    p["text"] = "Existing supported comparison (p_001)."
                     p["evidence_ids"] = [self.cards[0].evidence[0].id]
             return json.dumps(result)
 
@@ -210,7 +211,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         body, _ = await write_section(self.llm, CancellationScope(), topic="Settings", language="en", length="short",
                                       outline=outline, section=outline.sections[0], cards=self.cards)
         self.assertEqual(patch_calls, 1)
-        self.assertEqual(body.paragraphs[0].text, "Existing supported comparison.")
+        self.assertEqual(body.paragraphs[0].text, "Existing supported comparison (p_001).")
         self.assertEqual(body.paragraphs[0].evidence_ids, [self.cards[0].evidence[0].id])
         self.assertEqual(checked[1]["text"], body.paragraphs[1].text)
         self.assertEqual(checked[1]["abstract_quotes"][0]["quote"], self.papers[1].abstract)
@@ -227,11 +228,14 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
                 patch_calls += 1
                 if patch_calls == 2:
                     self.assertIn("p_001", messages[-1]["content"])
-                evidence = [self.cards[1].evidence[0].id] if patch_calls == 1 else [c.evidence[0].id for c in self.cards]
-                return json.dumps({"paragraph_1": {"text": "The studies examine two settings.", "evidence_ids": evidence}})
+                cards = self.cards[1:] if patch_calls == 1 else self.cards
+                mentions = ", ".join(c.paper_id for c in cards)
+                return json.dumps({"paragraph_1": {"text": f"The studies examine two settings ({mentions}).",
+                                                   "evidence_ids": [c.evidence[0].id for c in cards]}})
             result = json.loads(await original(messages, **kwargs))
             if task in {"section", "section_edit"}:
-                result["paragraphs"][0]["evidence_ids"] = [self.cards[0].evidence[0].id]
+                result["paragraphs"][0].update(text="Setting one shows an association (p_001).",
+                                               evidence_ids=[self.cards[0].evidence[0].id])
             return json.dumps(result)
 
         self.llm.chat_json = replace_then_include
@@ -250,11 +254,12 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
                 nonlocal patches
                 if "TASK: section_sources\n" in messages[0]['content']:
                     patches += 1
-                    return json.dumps({'paragraph_1': {'text': 'Existing valid finding.',
+                    return json.dumps({'paragraph_1': {'text': 'Existing valid finding (p_001).',
                         'evidence_ids': ['invented'] if invalid_id else [self.cards[0].evidence[0].id]}})
                 result = json.loads(await original(messages, **kwargs))
                 if any(f'TASK: {t}\n' in messages[0]['content'] for t in ['section', 'section_edit']):
-                    result['paragraphs'][0]['evidence_ids'] = [self.cards[0].evidence[0].id]
+                    result['paragraphs'][0].update(text='Setting one shows an association (p_001).',
+                                                   evidence_ids=[self.cards[0].evidence[0].id])
                 return json.dumps(result)
 
             self.llm.chat_json = incomplete
@@ -457,7 +462,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         async def oversized(messages, **kwargs):
             result = json.loads(await original(messages, **kwargs))
             if any(f"TASK: {task}\n" in messages[0]['content'] for task in ("section", "section_edit")):
-                result['paragraphs'][0]['text'] = '综述' * 801
+                result['paragraphs'][0]['text'] = '综述' * 801 + '（p_001、p_002）'
             return json.dumps(result)
 
         self.llm.chat_json = oversized
@@ -476,16 +481,16 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
             result = json.loads(await original(messages, **kwargs))
             content = messages[0]['content']
             if "TASK: section_condense\n" in content:
-                result['text'] = '综述' * 801
+                result['text'] = '综述' * 801 + '（p_001、p_002）'
             elif any(f"TASK: {task}\n" in content for task in ("section", "section_edit")):
-                result['paragraphs'][0]['text'] = '综述' * 801
+                result['paragraphs'][0]['text'] = '综述' * 801 + '（p_001、p_002）'
             return json.dumps(result)
 
         self.llm.chat_json = stubborn
         body, findings = await write_section(self.llm, CancellationScope(), topic="Settings", language="zh",
                                              length="standard", outline=outline, section=outline.sections[0],
                                              cards=self.cards, papers=self.papers)
-        self.assertEqual(len(body.paragraphs[0].text), 1602)
+        self.assertEqual(len(body.paragraphs[0].text), 1615)
         self.assertEqual(findings[0].status, 'needs_revision')
         self.assertIn('篇幅', findings[0].reason)
 
@@ -571,7 +576,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
                 seen.update(json.loads(messages[1]["content"]), prompt=content)
             if any(f"TASK: {task}\n" in content for task in ("section", "section_edit")):
                 # 500 characters: within the default 900 limit but beyond 1.5× a 200-character target.
-                result["paragraphs"][0]["text"] = "综" * 500
+                result["paragraphs"][0]["text"] = "综" * 500 + "（p_001、p_002）"
             return json.dumps(result)
 
         self.llm.chat_json = long_draft
@@ -580,7 +585,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
                                       cards=self.cards, papers=self.papers, paragraph_length=200)
         self.assertEqual(seen["paragraph_target"], {"characters": 200})
         self.assertEqual(seen["paragraph_limits"]["size"], 300)
-        self.assertIn("about 200 characters", seen["prompt"])
+        self.assertIn("每段约 200 字", seen["prompt"])
         self.assertEqual(self.llm.calls["section_condense"], 1)
 
     async def test_english_paragraph_length_is_counted_in_words(self):
@@ -590,7 +595,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         async def wordy(messages, **kwargs):
             result = json.loads(await original(messages, **kwargs))
             if any(f"TASK: {task}\n" in messages[0]["content"] for task in ("section", "section_edit")):
-                result["paragraphs"][0]["text"] = " ".join(["evidence"] * 160)  # 1,439 characters, 160 words
+                result["paragraphs"][0]["text"] = " ".join(["evidence"] * 160) + " (p_001, p_002)"  # 162 words
             return json.dumps(result)
 
         self.llm.chat_json = wordy

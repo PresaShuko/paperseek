@@ -67,6 +67,25 @@ class ReviewCitationsTest(unittest.TestCase):
         self.assertNotIn("p_004", [s.citation.paper_id for s in rendered.spans if s.citation])
         self.assertIn("citation needs checking", export_review(self.review, "md").content.decode())
 
+    def test_cited_papers_must_be_named_beside_their_claims_not_stacked_at_the_end(self):
+        body = self.review.content.sections[0].body
+        body.paragraphs[1].text = "A further finding."
+        with self.assertRaisesRegex(ValueError, "without naming"):
+            validate_mentions(body, self.cards)
+        body.paragraphs[1].text = "p_003 and p_004 report further findings."
+        body.paragraphs[0].evidence_ids = self.keys[:3]
+        body.paragraphs[0].text = "Recall improves. Precision holds. Both agree (p_001, p_002, p_003)."
+        with self.assertRaisesRegex(ValueError, "groups all its citations at the end"):
+            validate_mentions(body, self.cards)
+        body.paragraphs[0].text = "召回率提高（p_001），精确率保持稳定（p_002），两者一致（p_003）。"
+        validate_mentions(body, self.cards)
+
+    def test_chinese_reviews_are_prompted_in_chinese(self):
+        from paperseek_core.review.generation import SYSTEM, SYSTEM_ZH, _say
+        self.assertIn("大语言模型（Large Language Model, LLM）", SYSTEM_ZH)
+        self.assertEqual(_say("zh", SYSTEM, SYSTEM_ZH), SYSTEM_ZH)
+        self.assertEqual(_say("en", SYSTEM, SYSTEM_ZH), SYSTEM)
+
     def test_exports_share_the_view_labels_without_modifying_the_saved_draft(self):
         before = self.review.model_dump_json()
         for style, label in [("numeric", "[1]"), ("harvard", "(Smith, 2020a)")]:

@@ -176,10 +176,21 @@ def validate_body(body: SectionBody, cards: list[EvidenceCard], paper_ids: list[
 
 
 def validate_mentions(body: SectionBody, cards: list[EvidenceCard]) -> None:
+    """Citations sit beside the claims they support, so a reader can tell which study says what."""
     index = evidence_index(cards)
-    for paragraph in body.paragraphs:
+    for number, paragraph in enumerate(body.paragraphs, 1):
         cited = {index[key].paper_id for key in paragraph.evidence_ids}
-        missing = set(PAPER_MENTION.findall(paragraph.text)) - cited
-        if missing:
+        mentions = [(match.start(), match.group()) for match in PAPER_MENTION.finditer(paragraph.text)]
+        mentioned = {paper_id for _, paper_id in mentions}
+        if missing := mentioned - cited:
             raise ValueError(f"Text mentions {sorted(missing)} without evidence from those papers in this paragraph. "
                              "Correct the attribution or include the actual supporting evidence IDs.")
+        if unplaced := cited - mentioned:
+            raise ValueError(f"Paragraph {number} cites {sorted(unplaced)} without naming them in the text. Put each "
+                             "cited paper's ID right after the claim it supports, e.g. '... (p_003).'")
+        # A paragraph whose sources all trail its last sentence reads like a citation dump.
+        text = paragraph.text.rstrip()
+        final_sentence = max(text.rfind(mark, 0, max(len(text) - 1, 0)) for mark in ".。!?！？;；")
+        if len(cited) >= 3 and final_sentence > 0 and all(position > final_sentence for position, _ in mentions):
+            raise ValueError(f"Paragraph {number} groups all its citations at the end. Attach each paper ID to the "
+                             "specific claim it supports within the paragraph.")

@@ -48,11 +48,11 @@ class ReviewLLM:
                  * data.get("paragraphs_per_section", 1)}
                 for i in range(count)]}
         elif task in {"section", "section_repair", "section_edit"}:
-            result = {"paragraphs": [{"text": "The selected abstracts describe related research with differing scopes.",
+            result = {"paragraphs": [{"text": _inline(data["abstract_evidence"]),
                                        "evidence_ids": [item["id"] for item in data["abstract_evidence"]]}
                                       for _ in data["section"].get("paragraphs") or [None]]}
         elif task == "section_condense":
-            result = {"text": "Condensed synthesis of the planned argument.",
+            result = {"text": _inline(data["abstract_evidence"]),
                       "evidence_ids": data["paragraph"]["evidence_ids"]}
         elif task == "support_check":
             result = {"findings": [{"paragraph": p["index"], "status": "supported", "reason": "Fixture evidence check."}
@@ -62,6 +62,12 @@ class ReviewLLM:
         else:
             raise AssertionError(task)
         return json.dumps(result)
+
+
+def _inline(evidence) -> str:
+    """Name each cited study beside its own sentence, as the writing prompt asks."""
+    papers = dict.fromkeys(item["paper_id"] for item in evidence)
+    return " ".join(f"One study reports a related finding ({paper})." for paper in papers)
 
 
 def create_source(directory: Path, count: int = 2):
