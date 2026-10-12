@@ -10,6 +10,7 @@ defineProps<{
   linkText: string
   badge?: string
   reverse?: boolean
+  note?: string
 }>()
 </script>
 
@@ -27,5 +28,6 @@ defineProps<{
     <div class="ps-feature-demo">
       <slot />
     </div>
+    <p v-if="note" class="ps-features-note">{{ note }}</p>
   </section>
 </template>

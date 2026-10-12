@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useData, withBase } from 'vitepress'
 import HeroPainting from './HeroPainting.vue'
 import FeatureSection from './features/FeatureSection.vue'
 import SearchDemo from './features/SearchDemo.vue'
 import BiblioDemo from './features/BiblioDemo.vue'
 import ReviewDemo from './features/ReviewDemo.vue'
+import { pageSnap } from './features/pageSnap'
 
 const { lang } = useData()
 const zh = computed(() => lang.value.startsWith('zh'))
 const t = (en: string, cn: string) => zh.value ? cn : en
 const link = (path: string) => withBase((zh.value ? '/zh/' : '/') + path)
+// On large screens the home page moves one section at a time (features/features.css, features/pageSnap.ts).
+let stopSnap: (() => void) | undefined
+onMounted(() => { document.documentElement.classList.add('ps-snap'); stopSnap = pageSnap() })
+onBeforeUnmount(() => { document.documentElement.classList.remove('ps-snap'); stopSnap?.() })
 const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 'Google Scholar', 'PaperHub', 'Web of Science']
 </script>
 
@@ -35,10 +40,6 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
     </section>
 
     <div class="ps-features">
-      <div class="ps-features-intro ps-container">
-        <p class="ps-eyebrow">{{ t('FROM QUESTION TO REVIEW', '从问题到综述') }}</p>
-        <h2>{{ t('Three steps through the literature.', '走过文献的三步。') }}<br><span>{{ t('Each one you can see and check.', '每一步都看得见、可核对。') }}</span></h2>
-      </div>
       <FeatureSection id="feature-search" index="01" :eyebrow="t('Literature search', '文献检索')"
         :title="t('Ask a question. Get a reading list.', '提出问题，得到一份阅读清单。')"
         :body="t('PaperSeek turns your question into search strategies, refines them over several rounds, follows citations, and ranks every candidate with a reason you can read.', 'PaperSeek 把研究问题转化为检索式，多轮迭代、沿引用扩展，再为每篇候选文献评分，并写明排序理由。')"
@@ -57,10 +58,10 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
         :title="t('From evidence to a draft you can check.', '从证据到可核对的综述初稿。')"
         :body="t('Choose the papers. PaperSeek quotes evidence from each abstract, proposes an outline for you to confirm, then writes section by section. Every citation leads back to the sentence it came from.', '选定文献后，PaperSeek 从每篇摘要中摘取证据，生成供你确认的大纲，再逐节撰写正文。每条引用都能追溯到出处的原句。')"
         :points="[t('Evidence quoted from each abstract and checked against it', '证据摘自每篇摘要，并与原文核对'), t('An outline you review before any writing starts', '先确认大纲，再开始写作'), t('Export to Word, Markdown or BibTeX', '导出为 Word、Markdown 或 BibTeX')]"
-        :href="link('guide/reviews')" :link-text="t('Meet the review workflow', '了解综述流程')">
+        :href="link('guide/reviews')" :link-text="t('Meet the review workflow', '了解综述流程')"
+        :note="t('Animated illustrations of the workflow. Your results depend on the question, source and model you choose.', '流程动画示意。实际结果取决于研究问题、数据源和所选模型。')">
         <ReviewDemo :zh="zh" />
       </FeatureSection>
-      <p class="ps-features-note ps-container">{{ t('Animated illustrations of the workflow. Your results depend on the question, source and model you choose.', '流程动画示意。实际结果取决于研究问题、数据源和所选模型。') }}</p>
     </div>
 
     <section class="ps-choice-section">

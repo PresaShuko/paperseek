@@ -35,6 +35,9 @@ const tell = (state) => {
 
 // ---- canvas and engine state --------------------------------------------
 let W = 1200, H = 420, m = 420;
+// The scene is drawn this far below its own coordinates: the frame shows more sky and the name sits at its
+// vertical centre, while the sea falls below the visible part of the frame.
+const SHIFT = Math.round(H * 0.15);
 let brushScale = null;
 
 const S = { water: 0.55, coverage: 0.84, density: 0.5, scale: 1.1, soft: 0.7, glaze: 0.3, touch: 0.25, detail: 0.5, brushSize: 1.4 };
@@ -78,7 +81,7 @@ function bandPolygon(y0, y1, wobble, n = 12) {
 const bboxOf = (pts, pad) => {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
-  return [Math.max(0, Math.floor(x0 - pad)), Math.max(0, Math.floor(y0 - pad)), Math.min(W, Math.ceil(x1 + pad)), Math.min(H, Math.ceil(y1 + pad))];
+  return [Math.max(0, Math.floor(x0 - pad)), Math.floor(y0 - pad), Math.min(W, Math.ceil(x1 + pad)), Math.ceil(y1 + pad)];
 };
 
 function fillStyle(color, opacity, bleed, texture, border) { brush.noStroke(); brush.noHatch(); brush.noWash(); brush.fill(color, opacity); brush.fillBleed(bleed, 'out'); brush.fillTexture(texture, border); }
@@ -133,6 +136,7 @@ function createEngine(cfg) {
     buf.clear();
     buf.push(); buf.translate(-W / 2, -H / 2);
     buf.image(paint, 0, 0, W, H);
+    buf.translate(0, SHIFT);
     randomSeed(s.seed); noiseSeed(s.seed);
     s.fn(buf);
     flushWash();
@@ -141,7 +145,7 @@ function createEngine(cfg) {
   }
   function foldStroke() { paint.push(); paint.translate(-W / 2, -H / 2); paint.image(buf, 0, 0, W, H); paint.pop(); }
   function revealSlice(s) {
-    const [x0, y0, x1, y1] = s.bb;
+    const [x0, y0, x1, y1] = [s.bb[0], Math.max(0, s.bb[1] + SHIFT), s.bb[2], Math.min(H, s.bb[3] + SHIFT)];
     if (x1 <= x0 || y1 <= y0 || s.p <= 0) return;
     if (s.axis === 'x') {
       const w = Math.round((x1 - x0) * s.p); if (w <= 0) return;
@@ -191,8 +195,8 @@ function glazeDraw(x0, y0, x1, y1, color, weight, field = 'hand') { brush.field(
 function flickDraw(x, y, len, a, color, weight) { strokeStyle('flick', color, weight * S.brushSize); brush.line(x - Math.cos(a) * len / 2, y - Math.sin(a) * len / 2, x + Math.cos(a) * len / 2, y + Math.sin(a) * len / 2); }
 
 function dWash(color, opacity) {
-  const pts = [[-10, -10], [W + 10, -10], [W + 10, H + 10], [-10, H + 10]];
-  return D(() => { washStyle(color, opacity); brush.polygon(pts); }, [0, 0, W, H], 'x', 1, 700, 120);
+  const pts = [[-10, -SHIFT - 10], [W + 10, -SHIFT - 10], [W + 10, H + 10], [-10, H + 10]];
+  return D(() => { washStyle(color, opacity); brush.polygon(pts); }, [0, -SHIFT, W, H], 'x', 1, 700, 120);
 }
 function dBand(y0, y1, color, opacity, wobble) {
   const pts = bandPolygon(y0, y1, wobble), bleed = 0.25 + S.water * 0.5, texture = 0.3 + S.water * 0.5;
@@ -255,7 +259,7 @@ function buildLighthouse(C) {
 
   // dusk sky, a warm band at the horizon, the sea in two depths, the low sun's glow
   out.push(dWash(C.sky[1], Math.round(S.coverage * 220)));
-  out.push(dBand(-20, horizon * 0.42, C.sky[0], 220, m * 0.03));
+  out.push(dBand(-SHIFT - 20, horizon * 0.42, C.sky[0], 220, m * 0.03));
   out.push(dBand(horizon * 0.5, horizon * 0.9, C.sky[2], 190, m * 0.03));
   out.push(dBand(horizon * 0.8, horizon + H * 0.01, C.glow, 210, m * 0.015));
   out.push(dSea(horizon, H * 0.84, C.sea[0], 235));
@@ -275,7 +279,7 @@ function buildLighthouse(C) {
   // stars, and a few joined into constellations: the citations among papers
   const stars = [];
   for (let i = 0; i < 60; i++) {
-    const x = rr(W * 0.25, W), y = rr(0, horizon * 0.55), r = rr(0.8, 2) * (m / 420);
+    const x = rr(W * 0.25, W), y = rr(-SHIFT, horizon * 0.55), r = rr(0.8, 2) * (m / 420);
     stars.push({ color: random() < 0.8 ? C.highlights[1] : C.teal, pts: jitterEllipse(x, y, r, r, 6, 0.1), op: Math.round(rr(150, 240)) });
   }
   out.push(...dMarks(stars, 160, 20));
