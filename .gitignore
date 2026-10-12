@@ -3,6 +3,7 @@ __pycache__/
 *$py.class
 
 .venv/
+.venv-harness/
 venv/
 env/
 .env
@@ -19,10 +20,18 @@ test-artifacts/
 CLI_TEST_RUNBOOK.md
 
 .pytest_cache/
+.pytest-tmp/
+.pytest-final-*/
+.pytest-*/
 .mypy_cache/
+.cutover-*/
+.uv-cache/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Benchmark datasets, runs, and reports are maintained outside community releases.
+/benchmarks/
 
 node_modules/
 docs/.vitepress/cache/
@@ -30,3 +39,6 @@ docs/.vitepress/dist/
 
 .DS_Store
 Thumbs.db
+
+# Playwright output
+web/test-results/

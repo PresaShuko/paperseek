@@ -1,0 +1,179 @@
+{
+  "openalex": {
+    "method": "GET",
+    "url": "https://api.openalex.org/works",
+    "params": {
+      "per-page": 25,
+      "page": 3,
+      "select": "id,doi,title,display_name,publication_year,publication_date,type,type_crossref,authorships,primary_location,cited_by_count,abstract_inverted_index,open_access,keywords,concepts,ids,primary_topic,referenced_works",
+      "search": "AI governance",
+      "filter": "primary_topic.field.id:17|14",
+      "sort": "cited_by_count:desc",
+      "api_key": "fixture-openalex-key",
+      "mailto": "fixture@example.org"
+    },
+    "headers": {
+      "Accept": "application/json",
+      "User-Agent": "paperseek/1.0 (mailto:fixture@example.org)"
+    },
+    "timeout": 45
+  },
+  "crossref": {
+    "method": "GET",
+    "url": "https://api.crossref.org/works",
+    "params": {
+      "query.bibliographic": "AI governance",
+      "rows": 25,
+      "offset": 50,
+      "order": "desc",
+      "select": "DOI,title,author,published-print,published-online,issued,container-title,type,is-referenced-by-count,URL,abstract,ISSN,ISBN",
+      "sort": "is-referenced-by-count",
+      "mailto": "fixture@example.org"
+    },
+    "headers": {
+      "Accept": "application/json",
+      "User-Agent": "paperseek/1.0 (mailto:fixture@example.org)"
+    },
+    "timeout": 45
+  },
+  "arxiv": {
+    "method": "GET",
+    "url": "https://export.arxiv.org/api/query",
+    "params": {
+      "search_query": "all:\"graph retrieval\"",
+      "start": 1,
+      "max_results": 1,
+      "sortBy": "submittedDate",
+      "sortOrder": "descending"
+    },
+    "headers": {
+      "Accept": "application/atom+xml",
+      "User-Agent": "paperseek/1.0"
+    },
+    "timeout": 45
+  },
+  "semanticscholar": {
+    "method": "GET",
+    "url": "https://api.semanticscholar.org/graph/v1/paper/search",
+    "params": {
+      "query": "graph learning",
+      "limit": 1,
+      "offset": 2,
+      "fields": "paperId,corpusId,title,abstract,year,publicationDate,venue,publicationVenue,publicationTypes,authors,url,externalIds,citationCount,fieldsOfStudy,openAccessPdf"
+    },
+    "headers": {
+      "Accept": "application/json",
+      "User-Agent": "paperseek/1.0",
+      "x-api-key": "fixture-semantic-key"
+    },
+    "timeout": 45
+  },
+  "pubmed": {
+    "method": "GET",
+    "requests": [
+      {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+        "params": {
+          "db": "pubmed",
+          "term": "cancer",
+          "retmode": "json",
+          "retmax": 1,
+          "retstart": 1,
+          "sort": "pub+date",
+          "tool": "paperseek-fixture",
+          "email": "fixture@example.org",
+          "api_key": "fixture-pubmed-key"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "User-Agent": "paperseek/1.0 (mailto:fixture@example.org)"
+        },
+        "timeout": 45
+      },
+      {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+        "params": {
+          "db": "pubmed",
+          "id": "123",
+          "retmode": "json",
+          "tool": "paperseek-fixture",
+          "email": "fixture@example.org",
+          "api_key": "fixture-pubmed-key"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "User-Agent": "paperseek/1.0 (mailto:fixture@example.org)"
+        },
+        "timeout": 45
+      },
+      {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+        "params": {
+          "db": "pubmed",
+          "id": "123",
+          "retmode": "xml",
+          "tool": "paperseek-fixture",
+          "email": "fixture@example.org",
+          "api_key": "fixture-pubmed-key"
+        },
+        "headers": {
+          "Accept": "application/xml",
+          "User-Agent": "paperseek/1.0 (mailto:fixture@example.org)"
+        },
+        "timeout": 45
+      }
+    ]
+  },
+  "googlescholar": {
+    "method": "POST",
+    "url": "https://google.serper.dev/scholar",
+    "json": {
+      "q": "AI governance",
+      "page": 2
+    },
+    "headers": {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "User-Agent": "paperseek/1.0",
+      "X-API-KEY": "fixture-serper-key"
+    },
+    "timeout": 45
+  },
+  "paperhub": {
+    "method": "GET",
+    "requests": [
+      {
+        "url": "https://raw.githubusercontent.com/Yupu-Wang/paper-hub/main/data/manifest.json",
+        "params": null,
+        "headers": {
+          "Accept": "application/json"
+        },
+        "timeout": 45
+      },
+      {
+        "url": "https://raw.githubusercontent.com/Yupu-Wang/paper-hub/main/data/shards/iclr.fixture.json",
+        "params": null,
+        "headers": {
+          "Accept": "application/json"
+        },
+        "timeout": 90
+      }
+    ]
+  },
+  "wos": {
+    "method": "GET",
+    "url": "https://api.clarivate.com/apis/wos-starter/v1/documents",
+    "params": {
+      "q": "TS=(governance)",
+      "db": "WOS",
+      "limit": 50,
+      "sortField": "RS+D"
+    },
+    "headers": {
+      "Accept": "application/json",
+      "User-Agent": "paperseek-wos-client/0.3",
+      "X-ApiKey": "fixture-wos-key"
+    },
+    "timeout": 45.0
+  }
+}

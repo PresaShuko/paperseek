@@ -1,0 +1,13 @@
+{
+  "result": {
+    "123": {
+      "uid": "123",
+      "title": "Cancer Immunotherapy Evidence",
+      "pubdate": "2024 Jan",
+      "authors": [{"name": "Ada Lovelace"}],
+      "articleids": [{"idtype": "doi", "value": "10.1234/pubmed.fixture"}],
+      "pubtype": ["Journal Article"],
+      "fulljournalname": "Medical Evidence Journal"
+    }
+  }
+}

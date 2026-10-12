@@ -1,0 +1,194 @@
+{
+  "relevance": [
+    {
+      "id": "https://openalex.org/W1001",
+      "doi": "https://doi.org/10.5555/fixture.1001",
+      "title": "Accountable Automated Decisions in Public Agencies",
+      "publication_year": 2024,
+      "type": "article",
+      "cited_by_count": 18,
+      "primary_location": {
+        "source": {"display_name": "Journal of Public AI"},
+        "landing_page_url": "https://example.test/papers/1001",
+        "pdf_url": "https://example.test/papers/1001.pdf"
+      },
+      "authorships": [
+        {"author": {"display_name": "Researcher One"}},
+        {"author": {"display_name": "Researcher Two"}}
+      ],
+      "keywords": [
+        {"display_name": "algorithmic accountability"},
+        {"display_name": "public administration"}
+      ],
+      "abstract_inverted_index": {
+        "Transparent": [0], "automated": [1], "decisions": [2], "strengthen": [3],
+        "procedural": [4], "accountability": [5], "in": [6], "public": [7], "agencies.": [8]
+      }
+    },
+    {
+      "id": "https://openalex.org/W1002",
+      "doi": "https://doi.org/10.5555/fixture.1002",
+      "title": "Auditing Public-Sector Algorithms",
+      "publication_year": 2023,
+      "type": "article",
+      "cited_by_count": 31,
+      "primary_location": {
+        "source": {"display_name": "Government Information Quarterly"},
+        "landing_page_url": "https://example.test/papers/1002",
+        "pdf_url": "https://example.test/papers/1002.pdf"
+      },
+      "authorships": [
+        {"author": {"display_name": "Researcher Three"}}
+      ],
+      "keywords": [
+        {"display_name": "algorithm audit"},
+        {"display_name": "public sector"}
+      ],
+      "abstract_inverted_index": {
+        "Audits": [0], "make": [1], "public-sector": [2], "algorithms": [3],
+        "more": [4], "transparent": [5], "and": [6], "answerable.": [7]
+      }
+    },
+    {
+      "id": "https://openalex.org/W1003",
+      "doi": "https://doi.org/10.5555/fixture.1003",
+      "title": "Transparency Practices for Decision Support",
+      "publication_year": 2025,
+      "type": "review",
+      "cited_by_count": 7,
+      "primary_location": {
+        "source": {"display_name": "AI and Society Review"},
+        "landing_page_url": "https://example.test/papers/1003",
+        "pdf_url": "https://example.test/papers/1003.pdf"
+      },
+      "authorships": [
+        {"author": {"display_name": "Researcher Four"}}
+      ],
+      "keywords": [
+        {"display_name": "transparency"},
+        {"display_name": "decision support"}
+      ],
+      "abstract_inverted_index": {
+        "A": [0], "review": [1], "of": [2], "transparency": [3], "practices": [4],
+        "for": [5], "automated": [6], "public": [7], "decision": [8], "support.": [9]
+      }
+    }
+  ],
+  "impact": [
+    {"ref": "W1002"},
+    {"ref": "W1001"},
+    {"ref": "W1003"}
+  ],
+  "recent": [
+    {"ref": "W1003"},
+    {"ref": "W1001"},
+    {"ref": "W1002"}
+  ],
+  "citations": {
+    "records": [
+      {
+        "id": "https://openalex.org/W1004",
+        "doi": "https://doi.org/10.5555/fixture.1004",
+        "title": "Procedural Accountability for Government Algorithms",
+        "publication_year": 2021,
+        "type": "article",
+        "cited_by_count": 44,
+        "primary_location": {
+          "source": {"display_name": "Public Administration Review"},
+          "landing_page_url": "https://example.test/papers/1004",
+          "pdf_url": "https://example.test/papers/1004.pdf"
+        },
+        "authorships": [
+          {"author": {"display_name": "Researcher Five"}}
+        ],
+        "keywords": [
+          {"display_name": "procedural accountability"},
+          {"display_name": "government algorithms"}
+        ],
+        "abstract_inverted_index": {
+          "Procedural": [0], "controls": [1], "govern": [2], "accountability": [3],
+          "for": [4], "government": [5], "algorithms.": [6]
+        }
+      },
+      {
+        "id": "https://openalex.org/W1005",
+        "doi": "https://doi.org/10.5555/fixture.1005",
+        "title": "Oversight of Automated Public Decisions",
+        "publication_year": 2025,
+        "type": "article",
+        "cited_by_count": 4,
+        "primary_location": {
+          "source": {"display_name": "Digital Government Studies"},
+          "landing_page_url": "https://example.test/papers/1005",
+          "pdf_url": "https://example.test/papers/1005.pdf"
+        },
+        "authorships": [
+          {"author": {"display_name": "Researcher Six"}}
+        ],
+        "keywords": [
+          {"display_name": "oversight"},
+          {"display_name": "automated decisions"}
+        ],
+        "abstract_inverted_index": {
+          "Independent": [0], "oversight": [1], "improves": [2], "accountability": [3],
+          "for": [4], "automated": [5], "public": [6], "decisions.": [7]
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "id": "https://openalex.org/W1001",
+        "title": "Accountable Automated Decisions in Public Agencies",
+        "year": 2024,
+        "source": "Journal of Public AI",
+        "citations": 18,
+        "roles": ["seed"],
+        "seed_uids": []
+      },
+      {
+        "id": "https://openalex.org/W1004",
+        "title": "Procedural Accountability for Government Algorithms",
+        "year": 2021,
+        "source": "Public Administration Review",
+        "citations": 44,
+        "roles": ["backward"],
+        "seed_uids": ["https://openalex.org/W1001"]
+      },
+      {
+        "id": "https://openalex.org/W1005",
+        "title": "Oversight of Automated Public Decisions",
+        "year": 2025,
+        "source": "Digital Government Studies",
+        "citations": 4,
+        "roles": ["forward"],
+        "seed_uids": ["https://openalex.org/W1001"]
+      }
+    ],
+    "edges": [
+      {
+        "source": "https://openalex.org/W1001",
+        "target": "https://openalex.org/W1004",
+        "type": "references",
+        "seed": "https://openalex.org/W1001",
+        "layer": "1"
+      },
+      {
+        "source": "https://openalex.org/W1005",
+        "target": "https://openalex.org/W1001",
+        "type": "cites",
+        "seed": "https://openalex.org/W1001",
+        "layer": "1"
+      }
+    ],
+    "frontier": {
+      "depth": 1,
+      "request_count": 2,
+      "processed_plans": 1,
+      "stop_reason": "fixture_complete",
+      "direction_stats": {
+        "backward": {"requests": 1, "fetched": 1, "added": 1},
+        "forward": {"requests": 1, "fetched": 1, "added": 1}
+      }
+    }
+  }
+}

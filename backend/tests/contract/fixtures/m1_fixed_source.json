@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "fixture_id": "m1-fixed-source-v1",
+  "source": "openalex",
+  "question": "durable literature search",
+  "records": [
+    {
+      "uid": "fixed-001",
+      "title": "A Synthetic Durable Literature Search Record",
+      "types": [],
+      "source_types": [],
+      "source": {
+        "source_title": "PaperSeek Fixture",
+        "publish_year": 2026,
+        "publish_month": "",
+        "volume": "",
+        "issue": "",
+        "pages": null
+      },
+      "names": {
+        "authors": [
+          {
+            "display_name": "A. Researcher",
+            "wos_standard": "",
+            "researcher_id": ""
+          }
+        ]
+      },
+      "links": null,
+      "citations": [],
+      "identifiers": {
+        "doi": "",
+        "issn": "",
+        "eissn": "",
+        "isbn": "",
+        "eisbn": "",
+        "pmid": "",
+        "openalex": "",
+        "arxiv": "",
+        "semanticscholar": ""
+      },
+      "keywords": null,
+      "abstract": "Synthetic offline metadata for the M1 architecture contract.",
+      "provider": "fixed",
+      "raw": {}
+    }
+  ],
+  "llm_responses": [
+    "{\"intent\":\"Find durable literature search evidence.\",\"question_type\":\"specific_relation\",\"core_concepts\":[\"durable literature search\"],\"must_have_facets\":[\"durable literature search\"],\"optional_facets\":[],\"required_relation\":\"\",\"likely_synonyms\":[],\"adjacent_concepts\":[],\"boundaries\":[],\"adjustment_strategy\":\"Preserve the exact fixture intent.\",\"ambiguities\":[],\"query_views\":[]}",
+    "{\"query\":\"durable literature search\",\"rationale\":\"Use the deterministic fixture query.\"}",
+    "{\"scores\":[[1,9]]}",
+    "{\"reasons\":[[1,\"Directly matches the deterministic literature-search fixture.\"]]}"
+  ],
+  "expected": {
+    "status": "completed",
+    "result_count": 1,
+    "versions": {
+      "workflow_version": "m2.research-workflow.v2",
+      "engine_version": "1.0.0b1",
+      "prompt_version": "m2.search-history.v2",
+      "config_schema_version": 1,
+      "artifact_schema_version": 1
+    }
+  }
+}

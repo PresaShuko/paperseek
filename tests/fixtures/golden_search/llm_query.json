@@ -1,0 +1,4 @@
+{
+  "query": "(\"AI governance\" OR \"automated decision systems\") AND accountability",
+  "strategy": "Keep accountability mandatory and include established governance terminology."
+}

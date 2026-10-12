@@ -1,5 +1,7 @@
 .git
 .github
+.cutover-*
+.cutover-tmp
 .venv
 venv
 env
@@ -11,11 +13,18 @@ __pycache__
 build
 dist
 *.egg-info
+backend/.uv-cache
+backend/.venv
+backend/.pytest_cache
+web/node_modules
+web/dist
 .env
 .env.*
 !.env.example
 .DS_Store
 Thumbs.db
-docs/assets/*.png
+paperseek
+paperseek_core
 skills
 tests
+docs

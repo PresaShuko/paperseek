@@ -1,0 +1,4 @@
+{
+  "query": "all:(\"AI governance\" OR \"algorithmic governance\"",
+  "rationale": "The query value is intentionally unbalanced."
+}

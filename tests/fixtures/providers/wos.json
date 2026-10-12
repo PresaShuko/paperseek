@@ -1,0 +1,36 @@
+{
+  "metadata": {"page": 1, "limit": 50, "total": 1},
+  "hits": [
+    {
+      "uid": "WOS:FIXTURE",
+      "title": "Governance Evidence",
+      "types": ["Article"],
+      "sourceTypes": ["Journal"],
+      "source": {
+        "sourceTitle": "Governance Journal",
+        "publishYear": 2024,
+        "volume": "5",
+        "issue": "2"
+      },
+      "names": {
+        "authors": [
+          {
+            "displayName": "Ada Lovelace",
+            "wosStandard": "Lovelace, Ada"
+          }
+        ]
+      },
+      "links": {
+        "record": "https://www.webofscience.com/wos/woscc/full-record/WOS:FIXTURE"
+      },
+      "citations": [{"db": "WOS", "count": 8}],
+      "identifiers": {
+        "doi": "10.1234/wos.fixture",
+        "issn": "1234-5678"
+      },
+      "keywords": {
+        "authorKeywords": ["governance"]
+      }
+    }
+  ]
+}

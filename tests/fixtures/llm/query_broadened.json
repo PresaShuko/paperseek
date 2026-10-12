@@ -1,0 +1,4 @@
+{
+  "query": "all:(\"AI governance\" OR \"algorithmic governance\") AND all:accountability",
+  "rationale": "Broadened only the governance concept group."
+}

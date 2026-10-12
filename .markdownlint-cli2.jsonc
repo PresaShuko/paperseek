@@ -1,0 +1,36 @@
+// markdownlint-cli2 config for the VitePress docs site.
+// Conservative: only rules that conflict with site idioms are disabled.
+{
+  "config": {
+    "default": true,
+
+    // Long prose lines and long URLs are intentional; no hard wrapping.
+    "MD013": false,
+
+    // Vue components (<HomePage />) and inline HTML are part of VitePress authoring.
+    "MD033": false,
+
+    // Pages may start with frontmatter or a component instead of an H1.
+    "MD041": false,
+
+    // Sibling sections legitimately repeat headings (e.g. per-edition "Install").
+    "MD024": false,
+
+    // Bold lead-ins are used as pseudo-headings in places.
+    "MD036": false,
+
+    // Table column style: spacing inside pipe tables varies on purpose (CJK width).
+    "MD060": false,
+
+    // ::: code-group containers place fences flush against ::: and each other;
+    // markdownlint cannot see the container, so blanks-around-fences misfires.
+    "MD031": false,
+
+    // markdownlint slugifies GitHub-style (CJK punctuation stripped), but VitePress
+    // uses @mdit-vue/shared (CJK punctuation kept) — zh anchors verified against the
+    // built site would be flagged here, so fragment checking is off.
+    "MD051": false
+
+    // MD040 (fenced-code-language) stays ON: every fence in these docs is tagged.
+  }
+}

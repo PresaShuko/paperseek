@@ -1,0 +1,4 @@
+{
+  "query": "all:\"AI governance\" AND all:accountability",
+  "rationale": "Directly combines the two required concepts."
+}

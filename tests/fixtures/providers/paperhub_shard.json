@@ -1,0 +1,26 @@
+{
+  "papers": [
+    {
+      "id": "paperhub-new",
+      "title": "Graph Retrieval Evidence",
+      "authors": ["Ada Lovelace"],
+      "conference": "ICLR",
+      "year": 2025,
+      "presentation": "Oral",
+      "keywords": ["retrieval"],
+      "abstract": "Graph retrieval with evidence.",
+      "url": "https://example.org/paperhub/new"
+    },
+    {
+      "id": "paperhub-old",
+      "title": "Graph Retrieval Baseline",
+      "authors": ["Grace Hopper"],
+      "conference": "ICLR",
+      "year": 2023,
+      "presentation": "Poster",
+      "keywords": ["retrieval"],
+      "abstract": "A graph retrieval baseline.",
+      "url": "https://example.org/paperhub/old"
+    }
+  ]
+}

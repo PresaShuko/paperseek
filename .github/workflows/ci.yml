@@ -3,31 +3,21 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - "README.en.md"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - "README.en.md"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/docs.yml"
 
 jobs:
-  test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+  backend:
+    name: Backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest]
+
+    defaults:
+      run:
+        working-directory: backend
 
     steps:
       - name: Check out repository
@@ -36,23 +26,150 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
 
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+      - name: Install uv and release validation dependency
+        run: python -m pip install uv==0.9.24 packaging
+
+      - name: Check release version guard
+        run: python -m unittest discover -s ../.github/scripts -p "test_*.py"
+
+      - name: Sync locked backend
+        run: uv sync --locked
 
       - name: Compile Python
-        run: python -m compileall -q paperseek skills/paperseek/scripts
+        run: uv run --locked python -m compileall -q src
 
-      - name: Run tests
-        run: python -m unittest discover -s tests
+      - name: Lint Python
+        run: uv run --locked ruff check --config pyproject.toml src ../integrations/mcp/src
 
-      - name: Check JavaScript syntax
-        if: matrix.python-version == '3.12'
-        run: node --check paperseek/static/app.js
+      - name: Check shared transport and credential types
+        run: uv run --locked mypy
 
-      - name: Build wheel
-        if: matrix.python-version == '3.12'
-        run: python -m pip wheel . -w dist --no-deps
+      - name: Check dependency boundaries
+        run: uv run --locked python tests/import_boundaries.py
+
+      - name: Run backend contracts
+        run: uv run --locked python -m unittest discover -s tests/contract -p "*contract.py"
+
+      - name: Run backend integrations
+        run: uv run --locked python -m unittest discover -s tests/integration -p "*.py"
+
+      - name: Run database migration gates
+        run: uv run --locked python -m unittest discover -s tests/migration -p "*.py"
+
+      - name: Build backend distributions
+        if: matrix.os == 'ubuntu-latest'
+        run: uv build --out-dir dist
+
+  web:
+    name: Web (Node 22.14.0)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.9.24
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked Web dependencies
+        run: npm ci
+
+      - name: Check generated OpenAPI TypeScript
+        working-directory: backend
+        run: uv run --locked python scripts/generate_openapi_types.py --check
+
+      - name: Type-check Web
+        run: npm run typecheck
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser contracts
+        run: npm run test:browser
+
+      - name: Build Web
+        run: |
+          npm run build -- --outDir ../backend/src/paperseek_community/static --emptyOutDir
+          git -C .. diff --exit-code -- backend/src/paperseek_community/static
+
+  mcp:
+    name: Independent MCP distribution (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.9.24
+
+      - name: Check independent MCP lock
+        working-directory: integrations/mcp
+        run: uv lock --check
+
+      - name: Sync independent MCP development environment
+        working-directory: integrations/mcp
+        run: uv sync --locked
+
+      - name: Run MCP distribution and transport contracts
+        working-directory: integrations/mcp
+        run: uv run --locked python -m unittest discover -s tests -p "*contract.py"
+
+      - name: Build exact-version Community and MCP wheels
+        shell: bash
+        run: |
+          mkdir -p .mcp-dist
+          uv build --wheel --out-dir .mcp-dist backend
+          uv build --wheel --out-dir .mcp-dist integrations/mcp
+
+      - name: Run isolated official-client three-transport gate
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          uv venv .mcp-installed --python 3.12
+          uv pip install --python .mcp-installed/bin/python \
+            .mcp-dist/paperseek-1.0.0b1-py3-none-any.whl \
+            .mcp-dist/paperseek_mcp-1.0.0b1-py3-none-any.whl
+          gate=$(env -u PYTHONPATH \
+            PAPERSEEK_CLI_EXECUTABLE="$PWD/.mcp-installed/bin/paperseek" \
+            PAPERSEEK_ISOLATED_PREFIX="$PWD/.mcp-installed" \
+            PAPERSEEK_CLI_FIXTURE="$PWD/backend/tests/contract/fixtures/m1_fixed_source.json" \
+            PAPERSEEK_CLI_DATABASE="$PWD/.mcp-installed/paperseek.db" \
+            PAPERSEEK_EXPECTED_COMMIT="${GITHUB_SHA}" \
+            PAPERSEEK_EXPECTED_DIRTY=false \
+            .mcp-installed/bin/python backend/tests/integration/installed_product_smoke.py)
+          run_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["completed_run_id"])' <<< "$gate")
+          env -u PYTHONPATH \
+            PAPERSEEK_MCP_EXECUTABLE="$PWD/.mcp-installed/bin/paperseek-mcp" \
+            PAPERSEEK_EXECUTABLE="$PWD/.mcp-installed/bin/paperseek" \
+            PAPERSEEK_ISOLATED_PREFIX="$PWD/.mcp-installed" \
+            PAPERSEEK_MCP_DATABASE="$PWD/.mcp-installed/paperseek.db" \
+            PAPERSEEK_COMPLETED_RUN_ID="$run_id" \
+            .mcp-installed/bin/python integrations/mcp/tests/m4_official_client_integration.py -v
