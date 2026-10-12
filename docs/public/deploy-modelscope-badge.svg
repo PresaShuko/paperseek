@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="250" height="54" viewBox="0 0 250 54" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Deploy to ModelScope, 5.4k views">
+  <title>Deploy to ModelScope · 5.4k views</title>
+  <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+    <rect stroke="#624AFF" stroke-width="1" fill="#FFFFFF" x="0.5" y="0.5" width="249" height="53" rx="10"></rect>
+    <text font-family="Helvetica-Bold, Helvetica" font-size="9" font-weight="bold" fill="#624AFF">
+      <tspan x="53" y="20">DEPLOY TO</tspan>
+    </text>
+    <text font-family="Helvetica-Bold, Helvetica" font-size="21" font-weight="bold" fill="#624AFF">
+      <tspan x="52" y="40">ModelScope</tspan>
+    </text>
+    <g transform="translate(201.000000, 13.000000)" fill="#624AFF">
+      <text font-family="Helvetica-Bold, Helvetica" font-size="13" font-weight="bold" text-anchor="middle">
+        <tspan x="20.5" y="14">5.4k</tspan>
+      </text>
+      <text font-family="Helvetica-Bold, Helvetica" font-size="9" font-weight="bold" text-anchor="middle">
+        <tspan x="20.5" y="27">VIEWS</tspan>
+      </text>
+    </g>
+    <g transform="translate(11.000000, 12.000000)">
+      <circle cx="15.5" cy="15.5" r="15.5" fill="#624AFF"></circle>
+      <g transform="translate(5.3, 4.95) scale(0.85)" fill="#FFFFFF" fill-rule="evenodd">
+        <path d="M2.667 5.3H8v2.667H5.333v2.666H2.667V8.467H.5v2.166h2.167V13.3H0V7.967h2.667V5.3zM2.667 13.3h2.666v2.667H8v2.666H2.667V13.3zM8 10.633h2.667V13.3H8v-2.667zM13.333 13.3v2.667h-2.666V13.3h2.666zM13.333 13.3v-2.667H16V13.3h-2.667z"></path>
+        <path d="M21.333 13.3v-2.667h-2.666V7.967H16V5.3h5.333v2.667H24V13.3h-2.667zm0-2.667H23.5V8.467h-2.167v2.166z"></path>
+        <path d="M21.333 13.3v5.333H16v-2.666h2.667V13.3h2.666z"></path>
+      </g>
+    </g>
+  </g>
+</svg>

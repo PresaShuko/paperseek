@@ -8,6 +8,10 @@
   <p><strong>Follow the question. Find the evidence.</strong></p>
   <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
   <p>
+    <a href="https://www.producthunt.com/products/paperseek?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-paperseek-2" target="_blank" rel="noopener noreferrer"><img alt="PaperSeek - launch v1.0.0-beta1 with complete architectural rewrite | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1277911&amp;theme=light&amp;t=1791815965864"></a>
+    <a href="https://modelscope.cn/studios/HongMingfeng/PaperSeek" target="_blank" rel="noopener noreferrer"><img alt="Deploy to ModelScope · 5.4k views" width="250" height="54" src="docs/public/deploy-modelscope-badge.svg"></a>
+  </p>
+  <p>
     <a href="https://github.com/paperseek/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
     <img alt="Version 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta1-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
