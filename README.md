@@ -53,7 +53,7 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 
 **Connect papers instead of reading a flat list.** OpenAlex citation expansion follows references and citing works. The interactive map provides another route through the literature around your results.
 
-**Choose your model stack.** Use OpenAI Responses, OpenAI-compatible Chat Completions, or Anthropic Messages. Start with local preliminary ranking or configure Embedding + Rerank or System One.
+**Choose your model stack.** Use OpenAI Responses, OpenAI-compatible Chat Completions, or Anthropic Messages. Start with local preliminary ranking, or configure Embedding + Rerank or the Jev decision model.
 
 **Keep the next step close.** Filter and select papers, export complete results, reopen history, or turn a selected evidence set into an experimental review project.
 
@@ -170,9 +170,17 @@ Preliminary ranking has three paths:
 
 - **Local fusion:** combines local lexical and semantic signals; no separate ranking service to configure.
 - **Embedding + Rerank:** uses external vector and reranking services.
-- **System One:** uses a configured decision service for preliminary selection.
+- **System One:** uses a configured decision service for preliminary selection, such as TypeSafe Jev.
 
 Local fusion is the default preliminary-ranking path; it does not remove the main language-model requirement. See [Models & ranking](https://docs.paperseek.app/guide/models).
+
+### Preliminary ranking with Jev
+
+In our repeated tests, the Jev decision model picked out the papers worth a closer look more reliably than Embedding + Rerank. PaperSeek now supports Jev for preliminary ranking: add a System One connection with the TypeSafe provider (`jev-latest`), then choose **System One decision** as the preliminary ranking. Jev assesses the locally fused candidates, up to twice the final candidate budget, before the main model scores the final subset.
+
+![Search results with and without Jev, compared with other research tools](docs/public/images/jev-benchmark.webp)
+
+*Results from our tests: target coverage, query hit rate, all-target hit rate and retrieval-pool target coverage for PaperSeek with and without Jev, GPT Researcher with Jev, Local Deep Research and OpenAlex search.*
 
 ## Reviews · Experimental
 

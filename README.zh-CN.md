@@ -48,7 +48,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 **沿着文献关系继续探索。** OpenAlex 引用扩展可追踪参考文献与施引文献，交互图谱展示结果周围的研究联系。
 
-**自由选择模型。** 支持 OpenAI Responses、OpenAI 兼容 Chat Completions 和 Anthropic Messages。初排序可选本地融合、Embedding + Rerank 或 System One。
+**自由选择模型。** 支持 OpenAI Responses、OpenAI 兼容 Chat Completions 和 Anthropic Messages。初排序可选本地融合、Embedding + Rerank 或 Jev 决策模型。
 
 **自然衔接下一步。** 筛选、选择和导出文献，重新打开历史，或将一组摘要证据整理为实验性综述项目。
 
@@ -165,9 +165,17 @@ Python 项目位于 `backend/`。前端开发以及缺少预构建页面时的�
 
 - **本地融合**：结合本地词法与语义信号，无需额外排序服务。
 - **Embedding + Rerank**：使用外部向量与重排序服务。
-- **System One**：使用配置的决策服务进行初步选择。
+- **System One**：使用配置的决策服务进行初步选择，例如 TypeSafe 的 Jev。
 
 本地融合是默认初排序方式，不代表整个检索过程无需语言模型。详见[模型与排序](https://docs.paperseek.app/zh/guide/models)。
+
+### 使用 Jev 初排序
+
+经过反复测试，Jev 决策模型筛选候选论文的能力强于 Embedding + Rerank，因此 PaperSeek 现已支持用 Jev 对候选论文进行初排序：添加一个 System One 连接，服务商选 TypeSafe（模型 `jev-latest`），再把候选初排序设为 **System One 决策**。Jev 会先评估本地融合后的候选（最多为最终候选预算的两倍），主模型再为选出的论文评分。
+
+![使用与不使用 Jev 的检索效果，以及与其他研究工具的对比](docs/public/images/jev-benchmark.webp)
+
+*我们的测试结果：PaperSeek（使用 / 不使用 Jev）、GPT Researcher + Jev、Local Deep Research 与 OpenAlex 检索在目标覆盖率、查询命中率、全部目标命中率和检索池目标覆盖率上的对比。*
 
 ## 综述（实验性）
 
