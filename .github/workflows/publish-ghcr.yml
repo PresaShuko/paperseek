@@ -3,6 +3,12 @@ name: Publish Community and MCP images to GHCR
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,10 +27,16 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.release_tag || github.ref_name }}
 
       - name: Verify release version
         shell: bash
-        run: test "${GITHUB_REF_NAME#v}" = "${PAPERSEEK_VERSION}"
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          test "${RELEASE_TAG#v}" = "${PAPERSEEK_VERSION}"
+          echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,14 +69,14 @@ jobs:
             PAPERSEEK_ISOLATED_PREFIX="$PWD/.release-mcp/venv" \
             PAPERSEEK_CLI_FIXTURE="$PWD/backend/tests/contract/fixtures/m1_fixed_source.json" \
             PAPERSEEK_CLI_DATABASE="$PWD/.release-mcp/paperseek.db" \
-            PAPERSEEK_EXPECTED_COMMIT="${GITHUB_SHA}" \
+            PAPERSEEK_EXPECTED_COMMIT="${RELEASE_COMMIT}" \
             PAPERSEEK_EXPECTED_DIRTY=false \
             .release-mcp/venv/bin/python backend/tests/integration/installed_product_smoke.py)
           run_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["completed_run_id"])' <<<"${gate}")
           env -u PYTHONPATH \
             PAPERSEEK_MCP_EXECUTABLE="$PWD/.release-mcp/venv/bin/paperseek-mcp" \
             PAPERSEEK_EXECUTABLE="$PWD/.release-mcp/venv/bin/paperseek" \
-            PAPERSEEK_ISOLATED_PREFIX="$PWD/.release-mcp" \
+            PAPERSEEK_ISOLATED_PREFIX="$PWD/.release-mcp/venv" \
             PAPERSEEK_MCP_DATABASE="$PWD/.release-mcp/paperseek.db" \
             PAPERSEEK_COMPLETED_RUN_ID="${run_id}" \
             .release-mcp/venv/bin/python integrations/mcp/tests/m4_official_client_integration.py -v
@@ -90,8 +102,8 @@ jobs:
         shell: bash
         run: |
           docker compose -f compose.yaml config --quiet
-          docker build --platform linux/amd64 --build-arg PAPERSEEK_BUILD_COMMIT="${GITHUB_SHA}" --build-arg PAPERSEEK_BUILD_DIRTY=false --tag "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" .
-          docker build --platform linux/amd64 --build-arg PAPERSEEK_BUILD_COMMIT="${GITHUB_SHA}" --build-arg PAPERSEEK_BUILD_DIRTY=false --file integrations/mcp/Dockerfile --tag "${MCP_IMAGE}:${PAPERSEEK_VERSION}" .
+          docker build --platform linux/amd64 --build-arg PAPERSEEK_BUILD_COMMIT="${RELEASE_COMMIT}" --build-arg PAPERSEEK_BUILD_DIRTY=false --tag "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" .
+          docker build --platform linux/amd64 --build-arg PAPERSEEK_BUILD_COMMIT="${RELEASE_COMMIT}" --build-arg PAPERSEEK_BUILD_DIRTY=false --file integrations/mcp/Dockerfile --tag "${MCP_IMAGE}:${PAPERSEEK_VERSION}" .
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}")" = "linux/amd64"
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${MCP_IMAGE}:${PAPERSEEK_VERSION}")" = "linux/amd64"
           docker run --rm --entrypoint python "${COMMUNITY_IMAGE}:${PAPERSEEK_VERSION}" -c 'import shutil; tools=[x for x in ("node","npm","gcc","g++","make","cc","git") if shutil.which(x)]; assert not tools, tools'
@@ -142,7 +154,7 @@ jobs:
             -e PAPERSEEK_ISOLATED_PREFIX=/usr/local \
             -e PAPERSEEK_CLI_FIXTURE=/tmp/fixture.json \
             -e PAPERSEEK_CLI_DATABASE=/var/lib/paperseek/paperseek.db \
-            -e PAPERSEEK_EXPECTED_COMMIT="${GITHUB_SHA}" \
+            -e PAPERSEEK_EXPECTED_COMMIT="${RELEASE_COMMIT}" \
             -e PAPERSEEK_EXPECTED_DIRTY=false \
             paperseek-release-community \
             python /tmp/installed_product_smoke.py)
