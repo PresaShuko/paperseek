@@ -68,6 +68,8 @@ files = [
     "src/paperseek_core/model_http.py",
     "src/paperseek_core/ranking_output.py",
     "src/paperseek_community/credential_resolution.py",
+    "src/paperseek_app/settings.py",
+    "src/paperseek_app/settings_probes.py",
 ]
 follow_imports = "silent"
 check_untyped_defs = true

@@ -2,35 +2,48 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
+import unittest
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
-import tempfile
-import unittest
 from uuid import uuid4
 from zipfile import ZipFile
 
 from docx import Document
+from fixtures.review_support import ROUTE, ReviewLLM, create_source
 from sqlalchemy import event, text
 
 from paperseek_app.errors import RunNotFound, RunOwnershipLost, RunStateError
 from paperseek_app.models import PendingEvent
 from paperseek_app.review.execution import ReviewExecution, ReviewExecutor
 from paperseek_app.review.exports import export_review
-from paperseek_app.review.models import OutlineSave, ReviewCreate, ReviewError, ReviewJobRequest, SectionSave
+from paperseek_app.review.models import (
+    OutlineSave,
+    ReviewCreate,
+    ReviewError,
+    ReviewJobRequest,
+    SectionSave,
+)
 from paperseek_app.review.rendering import render_review
 from paperseek_app.review.services import ReviewService
-from paperseek_app.services import RunCleanupService, RunExecutionService, RunQueryService
+from paperseek_app.services import (
+    RunCleanupService,
+    RunExecutionService,
+    RunQueryService,
+)
 from paperseek_app.worker import RunExecutor
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork
 from paperseek_community.persistence.sqlite_review_jobs import SQLiteReviewUnitOfWork
 from paperseek_core.models import FinalPaperResult
-from paperseek_core.review.evidence import normalize_abstract, snapshot, validate_body, validate_cards
+from paperseek_core.review.evidence import (
+    normalize_abstract,
+    snapshot,
+    validate_body,
+    validate_cards,
+)
 from paperseek_core.review.models import EvidenceBatch, SectionBody
-from fixtures.review_support import ROUTE, ReviewLLM, create_source
-
-
 
 
 class ReviewEvidenceTest(unittest.TestCase):
@@ -472,8 +485,10 @@ class ReviewWorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.review.content.outline.sections[0].paper_ids, ['p_001', 'p_002', 'p_003'])
 
     async def test_summary_input_cannot_leak_evidence_outside_confirmed_assignment(self):
-        from paperseek_core.review.generation import write_section
         from paperseek_app.execution import CancellationScope
+        from paperseek_core.review.generation import (
+            write_section,
+        )
 
         await self.prepare()
         cards = self.review.content.cards

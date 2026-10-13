@@ -5,14 +5,25 @@ import json
 import unittest
 from uuid import uuid4
 
+from fixtures.review_support import ReviewLLM
+
 from paperseek_app.execution import CancellationScope
 from paperseek_app.review.models import ReviewContent, ReviewCreate
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.models import FinalPaperResult
 from paperseek_core.review.evidence import snapshot, validate_cards
-from paperseek_core.review.generation import ReviewOutputError, extract_evidence, prepare_outline, structured_call, write_section
+from paperseek_core.review.generation import (
+    write_section,
+)
 from paperseek_core.review.models import EvidenceBatch, ReviewOutline, SectionBody
-from fixtures.review_support import ReviewLLM
+from paperseek_core.review.planning import (
+    extract_evidence,
+    prepare_outline,
+)
+from paperseek_core.review.structured import (
+    ReviewOutputError,
+    structured_call,
+)
 
 
 class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):

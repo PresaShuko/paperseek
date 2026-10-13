@@ -47,8 +47,7 @@ LABEL org.opencontainers.image.title="PaperSeek Community" \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PAPERSEEK_DATABASE=/var/lib/paperseek/paperseek.db \
-    PORT=8765
+    PAPERSEEK_DATABASE=/var/lib/paperseek/paperseek.db
 
 RUN useradd --create-home --shell /bin/sh paperseek \
     && install -d -o paperseek -g paperseek /var/lib/paperseek
@@ -68,7 +67,7 @@ VOLUME ["/var/lib/paperseek"]
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os, urllib.request; port=os.environ['PORT']; urllib.request.urlopen('http://127.0.0.1:' + port + '/health', timeout=3).read()" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).read()" || exit 1
 
 ENTRYPOINT ["paperseek"]
 CMD ["serve", "--database", "/var/lib/paperseek/paperseek.db", "--host", "0.0.0.0", "--port", "8765"]

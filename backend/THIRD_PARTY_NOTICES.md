@@ -1,13 +1,19 @@
 # Third-party notices / 第三方声明
 
-PaperSeek is distributed under the Apache License 2.0. This page lists the third-party packages used by PaperSeek and the external data source integrated for computer-science conference search.
+PaperSeek is distributed under the Apache License 2.0. This page identifies direct Python runtime dependencies, bundled interface and documentation assets, and the external computer-science conference index. Transitive Python dependencies retain notices in their separately installed distributions.
 
-PaperSeek 使用 Apache License 2.0 发布。本页列出 PaperSeek 使用的第三方软件包，以及计算机顶会检索所接入的外部数据源。
+PaperSeek 使用 Apache License 2.0 发布。本页说明直接 Python 运行依赖、随产品和文档站交付的界面资源，以及计算机顶会外部索引。间接 Python 依赖保留各自独立安装包中的声明。
 
 ## Runtime dependencies / 运行依赖
 
 | Project | License | PaperSeek usage |
 | --- | --- | --- |
+| [Alembic](https://github.com/sqlalchemy/alembic) | MIT | Database migrations. |
+| [cryptography](https://github.com/pyca/cryptography) | Apache-2.0 OR BSD-3-Clause | Authenticated encryption of saved and run credentials. |
+| [FastAPI](https://github.com/fastapi/fastapi) | MIT | HTTP API and OpenAPI schema. |
+| [httpx](https://github.com/encode/httpx) | BSD-3-Clause | Model and academic-source HTTP clients. |
+| [SQLAlchemy](https://github.com/sqlalchemy/sqlalchemy) | MIT | Database migration support. |
+| [Uvicorn](https://github.com/encode/uvicorn) | BSD-3-Clause | ASGI server. |
 | [Pydantic](https://github.com/pydantic/pydantic) | [MIT](https://github.com/pydantic/pydantic/blob/main/LICENSE) | Typed configuration, search plans, checkpoints, and search-state contracts. |
 | [python-docx](https://github.com/python-openxml/python-docx) | MIT | Basic DOCX review export. |
 | [lxml](https://lxml.de/) | BSD-3-Clause (libxml2/libxslt retain their own notices) | XML serialization used by python-docx. |
@@ -25,3 +31,34 @@ These packages are installed as separate Python distributions and retain their o
 ## Community interface assets
 
 The bundled Vue interface uses [Lucide](https://lucide.dev/) icons (ISC) and self-hosted [Geist / Geist Mono](https://github.com/vercel/geist-font) fonts (SIL Open Font License 1.1). Their license and copyright notices are distributed alongside the static assets in `static/third-party-notices.txt`. The styling follows shadcn/ui conventions; no shadcn/ui or React code is bundled.
+
+## Bundled product interface / 产品界面
+
+| Project | License | Usage |
+| --- | --- | --- |
+| [Vue](https://github.com/vuejs/core) | MIT | Product interface runtime. |
+| [Vue Router](https://github.com/vuejs/router) | MIT | Product navigation. |
+| [D3 force](https://github.com/d3/d3-force) | ISC | Citation and bibliometric graph layout. |
+| [Lucide](https://github.com/lucide-icons/lucide) | ISC | Interface icons. |
+| [Geist / Geist Mono](https://github.com/vercel/geist-font) | OFL-1.1 | Self-hosted product fonts. |
+
+## Documentation site / 文档站
+
+The documentation is a separate Node project. Its assets are not required by the Community Python runtime.
+
+文档站是独立的 Node 项目；这些资源不是 Community Python 运行依赖。
+
+| Project | License | Usage |
+| --- | --- | --- |
+| [VitePress](https://github.com/vuejs/vitepress) and Vue | MIT | Documentation site and interactive theme. |
+| [p5.js](https://github.com/processing/p5.js) | LGPL-2.1 | Homepage canvas illustration. |
+| [p5.brush](https://github.com/acamposuribe/p5.brush) | MIT | Homepage brush rendering. |
+| [GSAP](https://gsap.com/standard-license/) | GSAP Standard License | Homepage animation. |
+| Geist / Geist Mono | OFL-1.1 | Self-hosted documentation fonts. |
+| [Noto Sans SC](https://github.com/notofonts/noto-cjk) | OFL-1.1 | Self-hosted Chinese documentation font. |
+
+## Independent MCP adapter / 独立 MCP 适配器
+
+[The Python MCP SDK](https://github.com/modelcontextprotocol/python-sdk) is used by the separately installed `paperseek-mcp` package under its MIT license.
+
+When changing dependencies, update this inventory and preserve upstream license/copyright files in each delivered distribution. The package metadata and lockfiles record exact versions.

@@ -128,7 +128,7 @@ cp .env.example .env
 PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 ```
 
-启动前编辑 `.env`。PowerShell 使用 `Copy-Item` 替代 `cp`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。Compose 默认使用 8765 端口，并通过 `paperseek-data` 卷持久化数据。以上命令已固定 beta 镜像；预发布不会更新 `latest`。随附的 Compose 与 `.env.example` 也默认使用 `1.0.0-beta1`。
+启动前编辑 `.env`。PowerShell 使用 `Copy-Item` 替代 `cp`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。Compose 默认只向本机发布 127.0.0.1:8765，并通过 `paperseek-data` 卷持久化数据。以上命令已固定 beta 镜像；预发布不会更新 `latest`。随附的 Compose 与 `.env.example` 也默认使用 `1.0.0-beta1`。
 
 ### ModelScope 创空间
 
@@ -176,11 +176,7 @@ Python 项目位于 `backend/`。前端开发以及缺少预构建页面时的�
 
 ### 使用 Jev 初排序
 
-经过反复测试，Jev 决策模型筛选候选论文的能力强于 Embedding + Rerank，因此 PaperSeek 现已支持用 Jev 对候选论文进行初排序：添加一个 System One 连接，服务商选 TypeSafe（模型 `jev-latest`），再把候选初排序设为 **System One 决策**。Jev 会先评估本地融合后的候选（最多为最终候选预算的两倍），主模型再为选出的论文评分。
-
-![使用与不使用 Jev 的检索效果，以及与其他研究工具的对比](docs/public/images/jev-benchmark.webp)
-
-*我们的测试结果：PaperSeek（使用 / 不使用 Jev）、GPT Researcher + Jev、Local Deep Research 与 OpenAlex 检索在目标覆盖率、查询命中率、全部目标命中率和检索池目标覆盖率上的对比。*
+PaperSeek 现已支持用 Jev 对候选论文进行初排序：添加一个 System One 连接，服务商选 TypeSafe（模型 `jev-latest`），再把候选初排序设为 **System One 决策**。Jev 会先评估本地融合后的候选（最多为最终候选预算的两倍），主模型再为选出的论文评分。
 
 ## 综述（实验性）
 

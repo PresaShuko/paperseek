@@ -133,7 +133,7 @@ cp .env.example .env
 PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 ```
 
-Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`, then `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. The included Compose service uses port 8765 and a persistent `paperseek-data` volume. These commands pin the beta image; prereleases do not update `latest`. The supplied Compose file and `.env.example` also default to `1.0.0-beta1`.
+Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`, then `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. The included Compose service publishes 127.0.0.1:8765 and uses a persistent `paperseek-data` volume. These commands pin the beta image; prereleases do not update `latest`. The supplied Compose file and `.env.example` also default to `1.0.0-beta1`.
 
 ### ModelScope Studio
 
@@ -181,11 +181,7 @@ Local fusion is the default preliminary-ranking path; it does not remove the mai
 
 ### Preliminary ranking with Jev
 
-In our repeated tests, the Jev decision model picked out the papers worth a closer look more reliably than Embedding + Rerank. PaperSeek now supports Jev for preliminary ranking: add a System One connection with the TypeSafe provider (`jev-latest`), then choose **System One decision** as the preliminary ranking. Jev assesses the locally fused candidates, up to twice the final candidate budget, before the main model scores the final subset.
-
-![Search results with and without Jev, compared with other research tools](docs/public/images/jev-benchmark.webp)
-
-*Results from our tests: target coverage, query hit rate, all-target hit rate and retrieval-pool target coverage for PaperSeek with and without Jev, GPT Researcher with Jev, Local Deep Research and OpenAlex search.*
+PaperSeek now supports Jev for preliminary ranking: add a System One connection with the TypeSafe provider (`jev-latest`), then choose **System One decision** as the preliminary ranking. Jev assesses the locally fused candidates, up to twice the final candidate budget, before the main model scores the final subset.
 
 ## Reviews · Experimental
 

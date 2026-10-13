@@ -1,206 +1,37 @@
-"""Saved model connections, data-source settings and workspace defaults.
-
-Keys are encrypted with the Community master key and never leave the server in
-plaintext; submissions name a saved connection and receive a per-run copy.
-"""
+"""SQLite storage for encrypted Community connections and workspace defaults."""
 
 from __future__ import annotations
 
-from contextlib import closing
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import sqlite3
-import time
-from typing import Callable, Literal
-from urllib.parse import urlsplit
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-import httpx
-from pydantic import BaseModel, ConfigDict, Field
 
-from paperseek_app.configuration import (
-    DECISION_ROUTE_DEFAULTS,
-    EMBEDDING_ROUTE_DEFAULTS,
-    LLM_ROUTE_DEFAULTS,
-    RERANKER_ROUTE_DEFAULTS,
+from paperseek_app.settings import (
+    SOURCE_OPTIONS,
+    ConnectionInput,
+    DefaultsInput,
+    SettingsError,
+    SourceSettingsInput,
+    key_hint,
+    normalize_route,
+    requires_key,
 )
 from paperseek_app.source_catalog import SOURCE_BY_ID, SOURCES
 from paperseek_app.submission import RunSubmission
 from paperseek_community.credentials import EncryptedRunCredentialStore
-from paperseek_community.model_transport import create_http_client
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_core.decision_prompt import decision_question, decision_state
-from paperseek_core.execution import RequestContext
-from paperseek_core.models import PaperRecord
-from paperseek_core.sources import AsyncHttpTransport
-from paperseek_core.sources.contracts import SourceError, SourceSearchRequest
 
-ConnectionKind = Literal["llm", "embedding", "reranker", "decision"]
-PreRankingMode = Literal["local_fusion", "embedding_rerank", "decision"]
-LLM_API_TYPES = ("openai_chat", "openai_responses", "anthropic_messages")
-SOURCE_OPTIONS = {
-    "openalex": ("openalex_email",),
-    "crossref": ("crossref_email",),
-    "pubmed": ("pubmed_tool", "pubmed_email"),
-    "wos": ("wos_db",),
-}
 KEY_VERSION = 1
-
-
-class SettingsError(ValueError):
-    def __init__(self, code: str, status: int = 422) -> None:
-        super().__init__(code)
-        self.code = code
-        self.status = status
-
-
-class ConnectionInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    kind: ConnectionKind
-    provider: str = Field(min_length=1, max_length=64)
-    api_type: str = Field(default="", max_length=64)
-    base_url: str = Field(default="", max_length=2048)
-    model: str = Field(default="", max_length=256)
-    # None keeps the stored key on update; an empty string clears it.
-    api_key: str | None = Field(default=None, max_length=4096, repr=False)
-
-
-class ConnectionTestInput(ConnectionInput):
-    id: str = Field(default="", max_length=64)
-
-
-class DefaultsInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    search_llm: str | None = Field(default=None, max_length=64)
-    review_llm: str | None = Field(default=None, max_length=64)
-    pre_ranking: PreRankingMode | None = None
-    embedding: str | None = Field(default=None, max_length=64)
-    reranker: str | None = Field(default=None, max_length=64)
-    decision: str | None = Field(default=None, max_length=64)
-    source: str | None = Field(default=None, max_length=64)
-
-
-class SourceSettingsInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    api_key: str | None = Field(default=None, max_length=4096, repr=False)
-    options: dict[str, str] | None = None
-
-
-class TestOutput(BaseModel):
-    status: Literal["untested", "ok", "failed"]
-    latency_ms: int | None = None
-    code: str = ""
-    tested_at: str | None = None
-
-
-class ProbeOutput(BaseModel):
-    ok: bool
-    latency_ms: int | None = None
-    code: str = ""
-
-
-class ConnectionOutput(BaseModel):
-    id: str
-    kind: ConnectionKind
-    provider: str
-    api_type: str
-    base_url: str
-    model: str
-    has_key: bool
-    # The key's last four characters, so a saved key can be recognised without revealing it.
-    key_hint: str = ""
-    requires_key: bool
-    test: TestOutput
-    created_at: str
-    updated_at: str
-
-
-class SourceSettingOutput(BaseModel):
-    id: str
-    has_key: bool
-    key_origin: Literal["", "settings", "environment"]
-    key_hint: str = ""
-    usable: bool
-    options: dict[str, str]
-    test: TestOutput
-
-
-class DefaultsOutput(BaseModel):
-    search_llm: str
-    review_llm: str
-    pre_ranking: PreRankingMode
-    embedding: str
-    reranker: str
-    decision: str
-    source: str
-
-
-class WorkspaceSettingsOutput(BaseModel):
-    connections: list[ConnectionOutput]
-    sources: list[SourceSettingOutput]
-    defaults: DefaultsOutput
-
-
-class SecretsClearOutput(BaseModel):
-    connections: int
-    source_keys: int
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _provider_table(kind: str) -> dict:
-    return {
-        "llm": LLM_ROUTE_DEFAULTS,
-        "embedding": {key: value for key, value in EMBEDDING_ROUTE_DEFAULTS.items() if key != "local"},
-        "reranker": {key: value for key, value in RERANKER_ROUTE_DEFAULTS.items() if key},
-        "decision": DECISION_ROUTE_DEFAULTS,
-    }[kind]
-
-
-def normalize_route(kind: str, provider: str, api_type: str, base_url: str, model: str) -> dict[str, str]:
-    """Fill provider presets and reject endpoints a run would refuse."""
-    provider = provider.strip().lower()
-    table = _provider_table(kind)
-    if provider not in table:
-        raise SettingsError("connection_provider_unsupported")
-    if kind == "llm":
-        default_api_type, default_base_url, default_model = table[provider]
-        api_type = api_type.strip().lower() or default_api_type
-        if api_type not in LLM_API_TYPES:
-            raise SettingsError("connection_api_type_unsupported")
-    else:
-        default_model, default_base_url = table[provider]
-        api_type = ""
-    route = {
-        "provider": provider,
-        "api_type": api_type,
-        "base_url": (base_url.strip() or default_base_url).rstrip("/"),
-        "model": model.strip() or default_model,
-    }
-    url = urlsplit(route["base_url"])
-    if (url.scheme not in {"http", "https"} or not url.hostname or url.username
-            or url.password or url.query or url.fragment):
-        raise SettingsError("connection_base_url_invalid")
-    if not route["model"]:
-        raise SettingsError("connection_model_required")
-    return route
-
-
-def key_hint(key: str) -> str:
-    """Last four characters of a key long enough not to reveal it."""
-    return key[-4:] if len(key) >= 8 else ""
-
-
-def requires_key(kind: str, provider: str) -> bool:
-    return not (kind == "llm" and provider == "ollama")
 
 
 class WorkspaceSettingsStore:
@@ -534,102 +365,3 @@ class WorkspaceSettingsStore:
         if not data.get("wos_db") and options.get("wos_db"):
             data["wos_db"] = options["wos_db"]
         return RunSubmission.model_validate(data)
-
-
-# -- connectivity probes -------------------------------------------------------
-PROBE_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
-
-
-def _probe_code(exc: BaseException) -> str:
-    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
-        return "timeout"
-    if isinstance(exc, httpx.RequestError):
-        return "connection_failed"
-    return "request_failed"
-
-
-async def probe_connection(
-    kind: str, route: dict[str, str], api_key: str, *,
-    client_factory: Callable[[list[dict]], httpx.AsyncClient] = create_http_client,
-) -> dict[str, object]:
-    """One small real request; any 2xx answer proves endpoint, model and key.
-
-    A deployment that restricts outbound requests supplies its own client factory.
-    """
-    base = route["base_url"].rstrip("/")
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    prompt = "Reply with OK."
-    requests: list[tuple[str, dict]] = []
-    if kind == "llm" and route["api_type"] == "anthropic_messages":
-        headers = {"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"}
-        requests = [(f"{base}/v1/messages", {"model": route["model"], "max_tokens": 16,
-                                            "messages": [{"role": "user", "content": prompt}]})]
-    elif kind == "llm" and route["api_type"] == "openai_responses":
-        body = {"model": route["model"], "input": prompt, "max_output_tokens": 16}
-        requests = [(f"{base}/responses", body), (f"{base}/responses", {"model": route["model"], "input": prompt})]
-    elif kind == "llm":
-        body = {"model": route["model"], "messages": [{"role": "user", "content": prompt}], "max_tokens": 16}
-        requests = [(f"{base}/chat/completions", body),
-                    (f"{base}/chat/completions", {key: value for key, value in body.items() if key != "max_tokens"})]
-    elif kind == "embedding":
-        model = route["model"].replace(";", ",").split(",")[0].strip()
-        body = {"model": model, "input": ["connectivity check"], "encoding_format": "float"}
-        if route["provider"] == "nvidia":
-            body["input_type"] = "query"
-        requests = [(f"{base}/embeddings", body)]
-    elif kind == "reranker":
-        model = route["model"].replace(";", ",").split(",")[0].strip()
-        if route["provider"] == "nvidia":
-            url = base if base.endswith(("/reranking", "/ranking")) else f"{base}/reranking"
-            requests = [(url, {"model": model, "query": {"text": "connectivity check"},
-                               "passages": [{"text": "connectivity check"}]})]
-        else:
-            requests = [(f"{base}/rerank", {"model": model, "query": "connectivity check",
-                                             "documents": ["connectivity check"], "top_n": 1})]
-    else:
-        requests = [(f"{base}/systemone", {
-            "model": route["model"],
-            "state": decision_state("connectivity check", ""),
-            "questions": {"probe": decision_question(PaperRecord(uid="probe", title="Connectivity check"))},
-        })]
-    started = time.perf_counter()
-    try:
-        async with client_factory([route]) as client:
-            for index, (url, body) in enumerate(requests):
-                response = await client.post(url, json=body, headers=headers, timeout=PROBE_TIMEOUT)
-                if response.status_code not in {400, 422} or index == len(requests) - 1:
-                    break
-    except Exception as exc:  # noqa: BLE001 - every failure is reported, never raised
-        return {"ok": False, "latency_ms": int((time.perf_counter() - started) * 1000), "code": _probe_code(exc)}
-    latency = int((time.perf_counter() - started) * 1000)
-    if 200 <= response.status_code < 300:
-        return {"ok": True, "latency_ms": latency, "code": ""}
-    return {"ok": False, "latency_ms": latency, "code": f"http_{response.status_code}"}
-
-
-async def probe_source(
-    source_id: str, api_key: str, options: dict[str, str], settings: CommunityDeploymentSettings,
-) -> dict[str, object]:
-    from paperseek_community.composition import build_source
-
-    started = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
-            transport = AsyncHttpTransport(client=client, context=RequestContext(
-                step_key="settings.source_test", deadline_at=time.monotonic() + 30,
-            ))
-            source = build_source(
-                source_id, transport, api_key,
-                wos_db=options.get("wos_db") or settings.wos_db,
-                contacts={key: value for key, value in options.items() if key != "wos_db"},
-                settings=settings,
-            )
-            await source.search(SourceSearchRequest(query="machine learning", limit=1))
-    except SourceError as exc:
-        code = f"http_{exc.status}" if exc.status else str(getattr(exc, "failure_kind", "") or "request_failed")
-        return {"ok": False, "latency_ms": int((time.perf_counter() - started) * 1000), "code": code}
-    except Exception as exc:  # noqa: BLE001 - every failure is reported, never raised
-        return {"ok": False, "latency_ms": int((time.perf_counter() - started) * 1000), "code": _probe_code(exc)}
-    return {"ok": True, "latency_ms": int((time.perf_counter() - started) * 1000), "code": ""}

@@ -7,7 +7,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "docs:check": "node scripts/check-docs.mjs",
-    "docs:lint": "markdownlint-cli2 \"docs/**/*.md\" \"!docs/.vitepress\""
+    "docs:lint": "markdownlint-cli2 \"*.md\" \"docs/**/*.md\" \"!docs/.vitepress\""
   },
   "devDependencies": {
     "@fontsource-variable/geist": "5.3.0",

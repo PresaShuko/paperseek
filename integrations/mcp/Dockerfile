@@ -12,6 +12,9 @@ WORKDIR /build
 
 COPY backend ./backend
 COPY integrations/mcp ./integrations/mcp
+COPY web/package.json web/package-lock.json ./web/
+COPY web/src ./web/src
+COPY web/public ./web/public
 
 RUN python -m pip wheel --wheel-dir /wheels ./backend \
     && python -m pip wheel --wheel-dir /wheels --find-links /wheels ./integrations/mcp \

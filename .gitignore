@@ -36,6 +36,16 @@ htmlcov/
 node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+docs/.vitepress/.temp/
+
+# Local release verification and application data.
+/.mcp-dist/
+/.mcp-installed/
+/.release-mcp/
+*.db
+*.db-shm
+*.db-wal
+credentials.master.key
 
 .DS_Store
 Thumbs.db

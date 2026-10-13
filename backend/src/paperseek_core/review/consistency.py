@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 from paperseek_core.ports import CancellationToken, LLMPort
-from paperseek_core.review.generation import structured_call
-from paperseek_core.review.models import ConsistencyCheck, ConsistencyFinding, ReviewOutline, WrittenSection
+from paperseek_core.review.models import (
+    ConsistencyCheck,
+    ConsistencyFinding,
+    ReviewOutline,
+    WrittenSection,
+)
+from paperseek_core.review.structured import (
+    structured_call,
+)
 
 
 async def check_consistency(llm: LLMPort, cancellation: CancellationToken,

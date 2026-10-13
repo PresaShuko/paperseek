@@ -9,6 +9,9 @@ on:
       - "README.zh-CN.md"
       - "package.json"
       - "package-lock.json"
+      - "web/package*.json"
+      - "web/playwright*.ts"
+      - "web/tests/docs/**"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
@@ -18,6 +21,9 @@ on:
       - "README.zh-CN.md"
       - "package.json"
       - "package-lock.json"
+      - "web/package*.json"
+      - "web/playwright*.ts"
+      - "web/tests/docs/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -53,6 +59,13 @@ jobs:
         run: npm run docs:build
         env:
           DOCS_BASE: /
+
+      - name: Check documentation scrolling
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test --config playwright.docs.config.ts scrolling.spec.ts
 
       - name: Publish to gh-pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

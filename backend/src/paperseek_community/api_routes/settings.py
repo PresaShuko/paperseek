@@ -3,9 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Query, Response
 
 from paperseek_app.execution import run_blocking
-from paperseek_community.api_dependencies import ApiError
-from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.workspace_settings import (
+from paperseek_app.settings import (
     ConnectionInput,
     ConnectionOutput,
     ConnectionTestInput,
@@ -16,12 +14,20 @@ from paperseek_community.workspace_settings import (
     SettingsError,
     SourceSettingsInput,
     WorkspaceSettingsOutput,
-    WorkspaceSettingsStore,
     normalize_route,
+)
+from paperseek_app.settings_probes import (
     probe_connection,
     probe_source,
 )
 from paperseek_app.source_catalog import SOURCE_BY_ID
+from paperseek_community.api_dependencies import ApiError
+from paperseek_community.composition import build_source
+from paperseek_community.model_transport import create_http_client
+from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_community.workspace_settings import (
+    WorkspaceSettingsStore,
+)
 
 
 def settings_error(exc: SettingsError) -> ApiError:
@@ -74,13 +80,13 @@ def register_settings_routes(
             saved, saved_key = await call(store.connection_secret, request.id, request.kind)
             if saved["provider"] == route["provider"] and saved["base_url"] == route["base_url"]:
                 key = saved_key
-        return await probe_connection(request.kind, route, key)
+        return await probe_connection(request.kind, route, key, client_factory=create_http_client)
 
     @app.post("/api/v1/settings/connections/{connection_id}/test", response_model=ProbeOutput)
     async def test_connection(connection_id: str) -> dict:
         route, key = await call(store.connection_secret, connection_id)
         connection = await call(store.connection, connection_id)
-        result = await probe_connection(str(connection["kind"]), route, key)
+        result = await probe_connection(str(connection["kind"]), route, key, client_factory=create_http_client)
         await call(store.record_connection_test, connection_id, result)
         return result
 
@@ -98,6 +104,9 @@ def register_settings_routes(
         if source_id not in SOURCE_BY_ID:
             raise ApiError(404, "source_not_found", "source_not_found")
         key, options = await call(store.source_secret, source_id)
-        result = await probe_source(source_id, key, options, settings)
+        result = await probe_source(lambda transport: build_source(
+            source_id, transport, key, wos_db=options.get("wos_db") or settings.wos_db,
+            contacts={name: value for name, value in options.items() if name != "wos_db"}, settings=settings,
+        ))
         await call(store.record_source_test, source_id, result)
         return result

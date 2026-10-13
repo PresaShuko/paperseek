@@ -30,16 +30,9 @@ jobs:
 
     steps:
       - name: Run PR Agent
-        uses: the-pr-agent/pr-agent@main
+        uses: the-pr-agent/pr-agent@330f0813b5fe0d1f54b794077c2d02aa85a1fb63
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_KEY }}
           OPENAI__KEY: ${{ secrets.OPENAI_KEY }}
-          OPENAI__API_BASE: https://api.deepseek.com
-          config.model: openai/deepseek-v4-pro
-          config.fallback_models: '["openai/deepseek-v4-pro"]'
-          config.custom_model_max_tokens: "32000"
-          github_action_config.auto_describe: "true"
-          github_action_config.auto_review: "true"
-          github_action_config.auto_improve: "false"

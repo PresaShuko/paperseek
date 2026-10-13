@@ -18,6 +18,11 @@ Python paths below are relative to `backend/src/`; Web paths are relative to the
 | Analysis views, controls, browser layout worker | `web/src/features/bibliometrics/` |
 | Search draft and reusable model inputs | `web/src/features/search/search-draft.ts`, `web/src/features/search/use-search-configuration.ts`, `web/src/features/settings/ConnectionSheet.vue` |
 | Review evidence and saved source graph | `web/src/features/review/ReviewEvidence.vue` |
+| Shared settings contracts and validation | `paperseek_app/settings.py` |
+| Connectivity checks | `paperseek_app/settings_probes.py`, with deployment-supplied clients and sources |
+| Structured review output and repair | `paperseek_core/review/structured.py` |
+| Review evidence extraction and planning | `paperseek_core/review/planning.py` |
+| Review section generation and checks | `paperseek_core/review/generation.py`; shared instructions in `prompts.py` |
 
 Retrieval keeps metadata for already-returned pages before lane/fusion selection. The ranking inputs retain their existing bounds. A completed run writes a separate `bibliometric_corpus` artifact; result APIs and event streams do not carry the corpus. Community recovery checkpoints preserve it. The online edition's policy can skip checkpoints while still retaining the final corpus artifact.
 
