@@ -85,10 +85,12 @@ def _say(language: str, en: str, zh: str) -> str:
 class ReviewOutputError(ValueError):
     """The model did not produce a valid, grounded structure after one repair."""
 
-    def __init__(self, message: str, result: BaseModel | None = None, *, task: str = "", reason: str = "") -> None:
+    def __init__(self, message: str, result: BaseModel | None = None, *, task: str = "", reason: str = "",
+                 output: str = "") -> None:
         super().__init__(message)
         self.result = result
         self.task, self.reason = task, reason
+        self.output = output
 
 
 class _PlannedSection(OutlineSection):
@@ -158,14 +160,16 @@ async def structured_call(
         output = await llm.chat_json(messages, temperature=0, max_tokens=max_tokens)
         cancellation.raise_if_cancelled()
         result = None
+        cleaned = _clean_json(output)
         try:
             try:
-                result = schema.model_validate_json(_clean_json(output))
+                result = schema.model_validate_json(cleaned)
             except ValidationError as exc:
                 # Broken JSON syntax is a formatting problem: fix it without regenerating content.
                 if not _syntax_only(exc):
                     raise
-                result = schema.model_validate_json(await _reformat(llm, cancellation, contract, output, max_tokens))
+                cleaned = await _reformat(llm, cancellation, contract, output, max_tokens)
+                result = schema.model_validate_json(cleaned)
             if validate:
                 validate(result)
             return result
@@ -176,7 +180,7 @@ async def structured_call(
             ) if isinstance(exc, ValidationError) else str(exc)
             reason = reason[:2000]
             if attempt == attempts - 1:
-                raise ReviewOutputError(f"Invalid {task} output.", result, task=task, reason=reason) from exc
+                raise ReviewOutputError(f"Invalid {task} output.", result, task=task, reason=reason, output=cleaned) from exc
             messages.extend([
                 {"role": "assistant", "content": output},
                 {"role": "user", "content": _say(
@@ -206,10 +210,19 @@ async def extract_evidence(llm: LLMPort, cancellation: CancellationToken,
             diagnostics.append(exc.reason)
         if not isinstance(exc.result, EvidenceBatch) and len(papers) == 1:
             raise
+        candidates = exc.result.model_dump()["cards"] if isinstance(exc.result, EvidenceBatch) else []
+        if not candidates:
+            # A schema error in one card must not discard other complete, independently valid cards.
+            try:
+                raw = json.loads(exc.output)
+            except ValueError:
+                raw = {}
+            if isinstance(raw, dict) and isinstance(raw.get("cards"), list):
+                candidates = raw["cards"]
         # One bad quote must not discard independently verified papers in the batch.
         cards = []
         for paper in papers:
-            matches = [card for card in exc.result.cards if card.paper_id == paper.id] if isinstance(exc.result, EvidenceBatch) else []
+            matches = [card for card in candidates if isinstance(card, dict) and card.get("paper_id") == paper.id]
             if len(matches) != 1:
                 continue
             try:
@@ -226,9 +239,10 @@ async def extract_evidence(llm: LLMPort, cancellation: CancellationToken,
                 try:
                     recovered = await _extract_batch(llm, cancellation, [paper], language, signature)
                     cards.extend(validate_cards(recovered, [paper], signature, dropped))
-                except ReviewOutputError as failure:
+                except (ReviewOutputError, LLMRequestError) as failure:
                     if diagnostics is not None:
-                        diagnostics.append(f"{paper.id}: {failure.reason}")
+                        reason = failure.reason if isinstance(failure, ReviewOutputError) else failure.code
+                        diagnostics.append(f"{paper.id}: {reason}")
         report()
         return sorted(cards, key=lambda card: next(i for i, paper in enumerate(papers) if paper.id == card.paper_id))
     cards = validate_cards(batch, papers, signature, dropped)
@@ -284,7 +298,7 @@ async def prepare_outline(llm: LLMPort, cancellation: CancellationToken, *, topi
         # A paper without verified evidence is simply left out of the plan, not a reason to redo it.
         for section in value.sections:
             for plan in section.paragraphs:
-                plan.paper_ids = [paper for paper in plan.paper_ids if paper in available] or plan.paper_ids
+                plan.paper_ids = [paper for paper in plan.paper_ids if paper in available]
             section.paper_ids = list(dict.fromkeys(paper for plan in section.paragraphs for paper in plan.paper_ids))
         # Coverage is completed by a small assignment request after the structure is valid.
         validate_outline(value, cards, require_all=False)
@@ -370,6 +384,36 @@ async def prepare_outline(llm: LLMPort, cancellation: CancellationToken, *, topi
              "year": metadata[card.paper_id].year if card.paper_id in metadata else None} for card in cards]},
         schema, max_tokens=min(14000, 2000 + count * 1600), validate=validate, language=language,
     )
+    empty = {f"{section.id}:{i + 1}": (section, paragraph)
+             for section in plan.sections for i, paragraph in enumerate(section.paragraphs) if not paragraph.paper_ids}
+    if empty:
+        repair_schema = create_model("UnsupportedParagraphPlans", __base__=ReviewModel,
+                                     **{key: (ParagraphPlan, ...) for key in empty})
+
+        def validate_repair(value: BaseModel) -> None:
+            for paragraph in value.model_dump().values():
+                if set(paragraph["paper_ids"]) - available or len(set(paragraph["paper_ids"])) != len(paragraph["paper_ids"]):
+                    raise ValueError(f"Use distinct supplied paper IDs only: {sorted(available)}.")
+
+        repaired = await structured_call(
+            llm, cancellation, "outline_sources",
+            "The supplied paragraph plans lost all their sources because those papers have no usable evidence. "
+            "Revise ONLY these paragraph goals and sources to make a supported argument using the supplied evidence. "
+            "Do not just attach unrelated citations to the old claim. Keep the section's theme and the paragraph's "
+            "place in the review. Return each requested key with goal and paper_ids; use only the supplied IDs, "
+            "without duplicates. Write goals in the requested language.",
+            {"topic": topic, "language": language, "focus": plan.focus,
+             "paragraphs": {key: {"section": section.title, "section_goal": section.goal, "goal": paragraph.goal}
+                            for key, (section, paragraph) in empty.items()},
+             "papers": [{"id": card.paper_id, "claims": [item.text for item in card.evidence]} for card in cards]},
+            repair_schema, max_tokens=min(14000, max(2000, len(empty) * 600)),
+            validate=validate_repair, language=language,
+        )
+        for key, (_, paragraph) in empty.items():
+            replacement = getattr(repaired, key)
+            paragraph.goal, paragraph.paper_ids = replacement.goal, replacement.paper_ids
+        for section in plan.sections:
+            section.paper_ids = list(dict.fromkeys(paper for paragraph in section.paragraphs for paper in paragraph.paper_ids))
     assigned = {paper for section in plan.sections for paper in section.paper_ids}
     missing = [card for card in cards if card.paper_id not in assigned]
     complete = not missing

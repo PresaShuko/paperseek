@@ -61,7 +61,9 @@ class ReviewStageWorkflow:
         content = self.review.content
         signature = fingerprint([PROMPT_VERSION, content.corpus_hash, content.language, self.route])
         # Existing prose cites these immutable quotes, including when changing the writing model.
-        ready = {card.paper_id for card in content.cards if card.signature == signature or content.sections}
+        usable_ids = {card.paper_id for card in usable_cards(content.cards, content.papers)}
+        ready = {card.paper_id for card in content.cards
+                 if content.sections or card.signature == signature and card.paper_id in usable_ids}
         papers = [paper for paper in content.papers if paper.has_abstract and paper.id not in ready]
         semaphore = asyncio.Semaphore(2)
 

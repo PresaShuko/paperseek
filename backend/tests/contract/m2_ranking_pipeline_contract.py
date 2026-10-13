@@ -143,6 +143,28 @@ class RateLimitOnceLLM(GeneratedBatchLLM):
 
 
 class M2RankingPipelineContractTest(unittest.TestCase):
+    def test_reason_output_repair_does_not_repeat_exhausted_transport_requests(self):
+        from paperseek_core.errors import LLMRequestError
+
+        class ExhaustedLLM:
+            calls = 0
+
+            async def chat_json(self, messages, **kwargs):
+                self.calls += 1
+                error = LLMRequestError('HTTP 429 after request retries')
+                error.retry_details = {'http_status': 429, 'attempts': 5, 'retryable': True}
+                raise error
+
+        llm = ExhaustedLLM()
+        records = [PaperRecord(uid=f'paper-{i}', title=f'Study {i}') for i in range(32)]
+        scores = [{'uid': record.uid, 'score': 9} for record in records]
+        scorer = RankingScorer(llm)
+        result = asyncio.run(scorer.attach_reasons(QUESTION, records, scores, '{}'))
+        self.assertEqual(llm.calls, 1)
+        self.assertEqual(scorer.missing_reason_count, 32)
+        self.assertEqual(scorer.reason_failures, [{'http_status': 429, 'attempts': 5, 'retryable': True}])
+        self.assertTrue(all(not score['reasoning'] and score['score'] == 9 for score in result))
+
     def test_m0_prompt_codec_scores_and_reasons_are_exact(self) -> None:
         self.assertEqual(
             hashlib.sha256(SYSTEM_RESULT_RANKING.encode("utf-8")).hexdigest().upper(),

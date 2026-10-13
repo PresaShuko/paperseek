@@ -139,7 +139,8 @@ def validate_cards(batch: EvidenceBatch, papers: list[ReviewPaper], signature: s
                 # Evidence always keeps the abstract's own text, never the model's copy.
                 quote = paper.abstract[start:end]
                 key = "e_" + fingerprint([paper.id, paper.abstract_hash, quote])[:24]
-                if any(existing.id == key for existing in evidence):
+                if any(existing.id == key and existing.category == item.category and existing.text == item.text
+                       for existing in evidence):
                     continue
                 evidence.append(ReviewEvidence(
                     **item.model_dump(exclude={"quote"}), quote=quote, id=key,

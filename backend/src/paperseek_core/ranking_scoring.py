@@ -58,6 +58,7 @@ class RankingScorer:
     ) -> list[dict[str, Any]]:
         reason_documents = self.reason_documents(documents, scores)
         reason_by_uid: dict[str, str] = {}
+        exhausted: set[str] = set()
         self.missing_reason_count = 0
         self.reason_failures = []
         # One pass in moderate batches, then one retry for whatever a batch left out in smaller ones.
@@ -65,7 +66,7 @@ class RankingScorer:
             pending = [
                 document
                 for document in reason_documents
-                if document_identity(document) not in reason_by_uid
+                if document_identity(document) not in reason_by_uid and document_identity(document) not in exhausted
             ]
             for start in range(0, len(pending), size):
                 batch = pending[start : start + size]
@@ -75,6 +76,8 @@ class RankingScorer:
                     )
                 except Exception as exc:
                     self.reason_failures.append(failure_details(exc))
+                    if not self.should_retry_in_chunks(exc):
+                        exhausted.update(document_identity(document) for document in batch)
         self.missing_reason_count = sum(
             document_identity(document) not in reason_by_uid
             for document in reason_documents

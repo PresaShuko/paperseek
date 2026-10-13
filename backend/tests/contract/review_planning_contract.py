@@ -45,6 +45,86 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(batches, [['p_001', 'p_002'], ['p_001', 'p_002'], ['p_002']])
         self.assertEqual(cards[1].evidence[0].quote, self.papers[1].abstract)
 
+    async def test_bad_card_schema_retries_only_that_paper(self):
+        original = self.llm.chat_json
+        batches = []
+
+        async def oversized(messages, **kwargs):
+            data = json.loads(messages[1]['content'])
+            batches.append([paper['id'] for paper in data['papers']])
+            result = json.loads(await original(messages, **kwargs))
+            if len(data['papers']) > 1:
+                result['cards'][1]['evidence'][0]['quote'] = 'x' * 2001
+            return json.dumps(result)
+
+        self.llm.chat_json = oversized
+        diagnostics = []
+        cards = await extract_evidence(self.llm, CancellationScope(), self.papers, 'en', 'test', diagnostics)
+        self.assertEqual([card.paper_id for card in cards], ['p_001', 'p_002'])
+        self.assertEqual(batches, [['p_001', 'p_002'], ['p_001', 'p_002'], ['p_002']])
+        self.assertIn('at most 2000', diagnostics[0])
+
+    async def test_isolated_request_failure_preserves_verified_cards_but_cancellation_propagates(self):
+        original = self.llm.chat_json
+        failure = LLMRequestError('Request retries exhausted')
+
+        async def unavailable(messages, **kwargs):
+            data = json.loads(messages[1]['content'])
+            if len(data['papers']) == 1:
+                raise failure
+            result = json.loads(await original(messages, **kwargs))
+            result['cards'][1]['evidence'][0]['quote'] = 'An invented quotation.'
+            return json.dumps(result)
+
+        self.llm.chat_json = unavailable
+        diagnostics = []
+        cards = await extract_evidence(self.llm, CancellationScope(), self.papers, 'en', 'test', diagnostics)
+        self.assertEqual([card.paper_id for card in cards], ['p_001'])
+        self.assertIn('p_002: research_workflow_failed', diagnostics)
+        failure = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await extract_evidence(self.llm, CancellationScope(), self.papers, 'en', 'test')
+
+    async def test_empty_source_paragraph_is_replanned_without_regenerating_valid_paragraphs(self):
+        original = self.llm.chat_json
+        calls = []
+
+        async def missing_source(messages, **kwargs):
+            task = messages[0]['content'].split('TASK: ', 1)[1].split('\n', 1)[0]
+            calls.append(task)
+            if task == 'outline_sources':
+                return json.dumps({'theme:2': {'goal': 'A revised argument grounded in the first study.',
+                                               'paper_ids': ['p_001']}})
+            result = json.loads(await original(messages, **kwargs))
+            if task == 'outline':
+                result['sections'][0]['paragraphs'][1] = {'goal': 'An unsupported planned argument.', 'paper_ids': ['p_093']}
+            return json.dumps(result)
+
+        self.llm.chat_json = missing_source
+        result = await prepare_outline(self.llm, CancellationScope(), topic='Study settings', language='en',
+                                       length='short', section_count=1, paragraph_count=2, cards=self.cards)
+        self.assertEqual(calls, ['outline', 'outline_sources'])
+        self.assertEqual(result.sections[0].paper_ids, ['p_001', 'p_002'])
+        self.assertEqual(len(result.sections[0].paragraphs), 2)
+        self.assertEqual(result.sections[0].paragraphs[0].goal, 'Compare findings across study settings.')
+        self.assertEqual(result.sections[0].paragraphs[1].goal, 'A revised argument grounded in the first study.')
+
+    async def test_empty_source_repair_cannot_reintroduce_unavailable_papers(self):
+        original = self.llm.chat_json
+
+        async def unsupported(messages, **kwargs):
+            if 'TASK: outline_sources\n' in messages[0]['content']:
+                return json.dumps({'theme:1': {'goal': 'Unsupported', 'paper_ids': ['p_093']}})
+            result = json.loads(await original(messages, **kwargs))
+            result['sections'][0]['paragraphs'][0]['paper_ids'] = ['p_093']
+            return json.dumps(result)
+
+        self.llm.chat_json = unsupported
+        with self.assertRaises(ReviewOutputError) as caught:
+            await self.outline(1, 'short')
+        self.assertEqual(caught.exception.task, 'outline_sources')
+        self.assertIn('supplied paper IDs', caught.exception.reason)
+
     async def test_invalid_edit_keeps_valid_draft_and_still_checks_evidence(self):
         outline = await self.outline(1)
         original = self.llm.chat_json
@@ -87,7 +167,7 @@ class ReviewPlanningTest(unittest.IsolatedAsyncioTestCase):
             abstract="Alpha beta gamma delta epsilon. Zeta eta theta iota kappa. Lambda mu nu xi omicron."), "source", 1)
         items = [{"category": "finding", "text": "Joined", "quote": "Alpha beta gamma delta epsilon... Lambda mu nu xi omicron"},
                  {"category": "finding", "text": "Invented", "quote": "A sentence that appears nowhere in this abstract at all."}]
-        items += [{"category": "scope", "text": f"Extra {i}", "quote": "Zeta eta theta iota kappa."} for i in range(5)]
+        items += [{"category": "scope", "text": "Repeated observation", "quote": "Zeta eta theta iota kappa."} for _ in range(5)]
         batch = EvidenceBatch.model_validate({"cards": [{"paper_id": paper.id, "evidence": items}]})
         self.assertEqual(len(batch.cards[0].evidence), 6)
         dropped = []
