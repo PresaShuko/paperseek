@@ -4,6 +4,12 @@ import { expect, test } from '@playwright/test';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+test.beforeEach(async ({ page }) => {
+  // Exercise the built-in still-image fallback: software-rendered WebGL on CI
+  // can monopolize the renderer, unrelated to the wheel/navigation contract.
+  await page.route('**/hero-painting.html?**', route => route.abort());
+});
+
 for (const prefix of ['/', '/zh/']) {
   test(`small wheel inputs do not advance home sections (${prefix})`, async ({ page }) => {
     await page.goto(prefix);
