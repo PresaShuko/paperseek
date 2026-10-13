@@ -264,19 +264,19 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
         with self.assertRaises(InvalidCursor):
             self.query_service.get_result_page(other.id, cursor=first.next_cursor, page_size=2)
 
-    def test_history_is_terminal_keyset_paginated_and_deleted_runs_hide_immediately(self) -> None:
+    def test_history_includes_active_runs_and_deleted_runs_hide_immediately(self) -> None:
         oldest = self._complete()
         middle = self._complete(warnings=["citation_expansion_failed_base_candidates_retained"])
         newest = self._complete()
-        queued = self.submission_service.create_run("Not history yet", "openalex")
+        queued = self.submission_service.create_run("Active history", "openalex")
 
         first = self.query_service.get_history_page(page_size=2)
         second = self.query_service.get_history_page(cursor=first.next_cursor, page_size=2)
-        self.assertEqual([item.id for item in first.items], [newest.id, middle.id])
-        self.assertEqual([item.id for item in second.items], [oldest.id])
-        self.assertNotIn(queued.id, [item.id for item in [*first.items, *second.items]])
+        self.assertEqual([item.id for item in first.items], [queued.id, newest.id])
+        self.assertEqual([item.id for item in second.items], [middle.id, oldest.id])
+        self.assertIsNone(second.next_cursor)
         self.assertEqual(
-            first.items[1].warnings,
+            second.items[0].warnings,
             ["citation_expansion_failed_base_candidates_retained"],
         )
 
@@ -288,6 +288,19 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
             middle.id,
             [item.id for item in self.query_service.get_history_page(page_size=10).items],
         )
+
+    def test_active_history_survives_a_fresh_client_and_remains_searchable(self) -> None:
+        run = self.submission_service.create_run("Recover after refresh", "openalex")
+        for status in ("queued", "running", "cancelling"):
+            with self.subTest(status=status):
+                with closing(sqlite3.connect(self.database)) as connection:
+                    connection.execute("UPDATE runs SET status=? WHERE id=?", (status, run.id))
+                    connection.commit()
+                with TestClient(create_app(self.database)) as client:
+                    for query in ({}, {"query": "recover"}):
+                        page = client.get("/api/v1/history", params=query).json()
+                        self.assertEqual([(item["id"], item["status"]) for item in page["items"]], [(run.id, status)])
+                    self.assertEqual(client.delete(f"/api/v1/history/{run.id}").status_code, 409)
 
     def test_user_artifacts_export_and_citation_map_never_expose_internal_objects_or_paths(self) -> None:
         run = self._complete()
@@ -386,7 +399,7 @@ class M3SseReadHistoryExportCleanupContractTest(unittest.TestCase):
             missing = client.get(f"/api/v1/runs/{completed.id}")
 
         self.assertEqual(history.status_code, 200)
-        self.assertEqual(history.json()["items"][0]["id"], completed.id)
+        self.assertEqual(history.json()["items"][0]["id"], active.id)
         self.assertEqual(results.json()["results"][0]["title"], "Paper 1")
         self.assertEqual(export.json()["ranked"][0]["title"], "Paper 1")
         self.assertEqual(citation.json(), {"edges": []})

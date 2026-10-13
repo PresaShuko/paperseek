@@ -224,6 +224,46 @@ class M2RankingPipelineContractTest(unittest.TestCase):
             asyncio.run(RankingScorer(failing).score_batch(QUESTION, documents(), "{}"))
         self.assertEqual(len(failing.calls), 2)
 
+    def test_score_repair_only_requests_missing_candidates(self) -> None:
+        records = documents()
+        llm = FixtureLLM('{"scores":[[1,9],[3,3]]}', '{"scores":[[1,6]]}')
+        scores = asyncio.run(RankingScorer(llm).score_batch(QUESTION, records, "{}"))
+        self.assertEqual({item["uid"]: item["score"] for item in scores},
+                         {records[0].uid: 9, records[1].uid: 6, records[2].uid: 3})
+        prompt = str(llm.calls[1]["messages"])
+        self.assertIn(records[1].title, prompt)
+        self.assertNotIn(records[0].title, prompt)
+        self.assertNotIn(records[2].title, prompt)
+
+    def test_partial_scores_survive_repair_with_an_explicit_warning(self) -> None:
+        llm = FixtureLLM('{"scores":[[1,9]]}', '{"scores":[[1,6]]}',
+                         '{"reasons":[[1,"Direct evidence"],[2,"Adjacent evidence"]]}')
+        observer = RecordingObserver()
+        result = asyncio.run(RankingPipeline(llm, observer).run(
+            RankingRequest(question=QUESTION, documents=documents())))
+        self.assertEqual([item.score for item in result.items], [9, 6, None])
+        self.assertEqual(result.items[-1].reasoning, "")
+        self.assertEqual(result.warnings, ["ranking_partial_failure_local_order_retained"])
+        degraded = [event for event in observer.events if event.event_type == "ranking.degraded"]
+        self.assertEqual(degraded[-1].payload["failed_candidates"], 1)
+        self.assertNotIn(documents()[2].title, str(llm.calls[-1]["messages"]))
+
+    def test_later_score_chunk_failure_keeps_valid_earlier_scores(self) -> None:
+        class InterruptedLLM:
+            calls = 0
+
+            async def chat_json(self, messages, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return '{"scores":[[1,8]]}'
+                raise RuntimeError("upstream unavailable")
+
+        llm = InterruptedLLM()
+        scores = asyncio.run(RankingScorer(llm).request_scores_in_chunks(
+            QUESTION, documents(), "{}", chunk_size=1))
+        self.assertEqual([(item["uid"], item["score"]) for item in scores], [(documents()[0].uid, 8)])
+        self.assertEqual(llm.calls, 2)
+
     def test_invalid_reason_output_keeps_scores_without_inventing_reasons(self) -> None:
         llm = FixtureLLM(read_fixture("llm/query_invalid.txt"))
         scores = [

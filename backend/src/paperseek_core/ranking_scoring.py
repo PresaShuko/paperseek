@@ -39,11 +39,16 @@ class RankingScorer:
             )
         matched, missing = self.codec.match_scores(documents, scores)
         if missing:
-            scores = await self.request_scores_in_chunks(
-                question, documents, plan_context
-            )
-            matched, missing = self.codec.match_scores(documents, scores)
-            if missing:
+            try:
+                recovered = await self.request_scores_in_chunks(
+                    question, missing, plan_context
+                )
+            except Exception:
+                if not matched:
+                    raise
+            else:
+                matched, missing = self.codec.match_scores(documents, [*matched, *recovered])
+            if not matched:
                 raise EmptyRankingBatchError(
                     f"Chunked score-only ranking omitted {len(missing)}/{len(documents)} candidate(s)."
                 )
@@ -168,14 +173,15 @@ class RankingScorer:
         scores = []
         for start in range(0, len(documents), chunk_size):
             batch = documents[start : start + chunk_size]
-            batch_scores = await self.request_compact_scores(
-                question, batch, plan_context
-            )
-            matched, missing = self.codec.match_scores(batch, batch_scores)
-            if missing:
-                raise EmptyRankingBatchError(
-                    f"Score-only chunk {start // chunk_size + 1} omitted {len(missing)}/{len(batch)} candidate(s)."
+            try:
+                batch_scores = await self.request_compact_scores(
+                    question, batch, plan_context
                 )
+            except Exception:
+                if not scores:
+                    raise
+                break  # Retain completed chunks without multiplying upstream failures.
+            matched, _ = self.codec.match_scores(batch, batch_scores)
             scores.extend(matched)
         return scores
 
@@ -189,7 +195,7 @@ class RankingScorer:
             for entry in scores
         }
         ordered = sorted(
-            documents,
+            [document for document in documents if document_identity(document) in score_by_uid],
             key=lambda document: score_by_uid.get(document_identity(document), 0),
             reverse=True,
         )
