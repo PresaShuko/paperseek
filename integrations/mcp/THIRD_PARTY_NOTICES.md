@@ -9,7 +9,6 @@ PaperSeek 使用 Apache License 2.0 发布。本页列出 PaperSeek 使用的第
 | Project | License | PaperSeek usage |
 | --- | --- | --- |
 | [Pydantic](https://github.com/pydantic/pydantic) | [MIT](https://github.com/pydantic/pydantic/blob/main/LICENSE) | Typed configuration, search plans, checkpoints, and search-state contracts. |
-
 | [python-docx](https://github.com/python-openxml/python-docx) | MIT | Basic DOCX review export. |
 | [lxml](https://lxml.de/) | BSD-3-Clause (libxml2/libxslt retain their own notices) | XML serialization used by python-docx. |
 
