@@ -1,21 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useData, withBase } from 'vitepress'
 import HeroPainting from './HeroPainting.vue'
 import FeatureSection from './features/FeatureSection.vue'
 import SearchDemo from './features/SearchDemo.vue'
 import BiblioDemo from './features/BiblioDemo.vue'
 import ReviewDemo from './features/ReviewDemo.vue'
-import { pageSnap } from './features/pageSnap'
 
 const { lang } = useData()
 const zh = computed(() => lang.value.startsWith('zh'))
 const t = (en: string, cn: string) => zh.value ? cn : en
 const link = (path: string) => withBase((zh.value ? '/zh/' : '/') + path)
-// On large screens the home page moves one section at a time (features/features.css, features/pageSnap.ts).
-let stopSnap: (() => void) | undefined
-onMounted(() => { document.documentElement.classList.add('ps-snap'); stopSnap = pageSnap() })
-onBeforeUnmount(() => { document.documentElement.classList.remove('ps-snap'); stopSnap?.() })
 const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 'Google Scholar', 'PaperHub', 'Web of Science']
 </script>
 
