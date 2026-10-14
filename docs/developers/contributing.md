@@ -18,7 +18,7 @@ PaperSeek online is built from the same Community distribution, so fix shared be
 
 ## Architecture {#architecture}
 
-Version 1.0.0-beta1 completes an architectural refactor into a modular monolith with persistent task execution. Research logic, application operations, and deployment-specific adapters have separate responsibilities, while shipping as a usable local application.
+The 1.0 line completes an architectural refactor into a modular monolith with persistent task execution. Research logic, application operations, and deployment-specific adapters have separate responsibilities, while shipping as a usable local application.
 
 ### Dependency boundaries
 
@@ -38,7 +38,7 @@ Community stores these records in SQLite, with Alembic-managed migrations and lo
 
 Vue 3 + TypeScript pages consume `/api/v1`; the OpenAPI generation script produces API types and model presets. Change the backend contract and regenerate its frontend representation together.
 
-For the changes introduced by this release, see the [1.0.0-beta1 changelog](../changelog.md#v1-0-0-beta). For existing local installations, follow the [upgrade guide](../self-hosting/upgrade.md). The [workspace maintenance guide](architecture.md) maps the new modules to their source responsibilities and verification points.
+For the changes in each release, see the [changelog](../changelog.md). For existing local installations, follow the [upgrade guide](../self-hosting/upgrade.md). The [workspace maintenance guide](architecture.md) maps the new modules to their source responsibilities and verification points.
 
 ## Development setup
 

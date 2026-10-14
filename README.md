@@ -9,7 +9,7 @@
   <p>Open-source literature search, preliminary bibliometrics, and abstract-based reviews.</p>
   <p>
     <a href="https://github.com/paperseek/paperseek/blob/main/LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
-    <img alt="Version 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta1-171717?style=flat-square">
+    <img alt="Version 1.0.0-beta2" src="https://img.shields.io/badge/version-1.0.0--beta2-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
     <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
   </p>
@@ -37,6 +37,7 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 ## Contents
 
 - [Why PaperSeek](#why-paperseek)
+- [What’s new in 1.0.0-beta2](#whats-new-in-100-beta2)
 - [What’s new in 1.0.0-beta1](#whats-new-in-100-beta1)
 - [How it works](#how-it-works)
 - [Data sources](#data-sources)
@@ -62,6 +63,18 @@ Run the Community edition on your own machine or server, or use [PaperSeek onlin
 
 **Keep the next step close.** Filter and select papers, export complete results, reopen history, or turn a selected evidence set into an experimental review project.
 
+## What’s new in 1.0.0-beta2
+
+A maintenance release that keeps research going when a model gets part of its answer wrong.
+
+- **Reviews** no longer fail because a few papers lack usable evidence: those papers are left out and marked, and the review continues. Quotes that match the abstract are kept even when another quote is wrong.
+- **Search ranking** keeps the scores a model did give and asks again only for the missing papers; long “Why it ranks” explanations are no longer cut off.
+- **History** now shows queued and running searches, also after you reload the page.
+- **Docker Compose** publishes PaperSeek on this machine only by default; set `PAPERSEEK_HOST=0.0.0.0` to reach it from other devices.
+- **Documentation site:** a resting finger or the end of a trackpad swipe no longer jumps to another section of the home page.
+
+It upgrades 1.0.0-beta1 in place, without a migration. Read the [full changelog](https://docs.paperseek.app/changelog#v1-0-0-beta2) and the [upgrade steps](https://docs.paperseek.app/self-hosting/upgrade#from-an-earlier-1-0-beta).
+
 ## What’s new in 1.0.0-beta1
 
 **1.0.0-beta1 is a complete architectural refactor with breaking changes.** The runtime, frontend, persistence, and integrations now form a modular application with durable task execution.
@@ -81,9 +94,9 @@ Install it from pip as **1.0.0b1**. See [workspace and history](https://docs.pap
 
 ## How it works
 
-![PaperSeek 1.0.0-beta1 research workspace](docs/public/images/workspace-results-en.png)
+![PaperSeek 1.0.0-beta2 research workspace](docs/public/images/workspace-results-en.png)
 
-*Community 1.0.0-beta1 with a demonstration record. PaperSeek online shares the same workspace and adds an account and service options.*
+*Community 1.0.0-beta2 with a demonstration record. PaperSeek online shares the same workspace and adds an account and service options.*
 
 | Step | What happens | What you can inspect |
 | --- | --- | --- |
@@ -118,7 +131,7 @@ OpenAlex and Serper support multi-key rotation. Metadata coverage and field filt
 Requires **Python 3.12+**. The release package includes the built Web UI.
 
 ```sh
-python -m pip install "paperseek==1.0.0b1"
+python -m pip install "paperseek==1.0.0b2"
 paperseek serve
 ```
 
@@ -130,10 +143,10 @@ Open [localhost:8765](http://127.0.0.1:8765), configure a model connection and s
 git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
-PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
+PAPERSEEK_VERSION=1.0.0-beta2 docker compose up -d
 ```
 
-Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`, then `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. The included Compose service publishes 127.0.0.1:8765 and uses a persistent `paperseek-data` volume. These commands pin the beta image; prereleases do not update `latest`. The supplied Compose file and `.env.example` also default to `1.0.0-beta1`.
+Edit `.env` before starting. On PowerShell, use `Copy-Item` instead of `cp`, then `$env:PAPERSEEK_VERSION="1.0.0-beta2"; docker compose up -d`. The included Compose service publishes 127.0.0.1:8765 and uses a persistent `paperseek-data` volume. These commands pin the beta image; prereleases do not update `latest`. The supplied Compose file and `.env.example` also default to `1.0.0-beta2`.
 
 ### ModelScope Studio
 
@@ -219,7 +232,7 @@ Configure credentials in the process environment first. The six commands are `se
 ### Model Context Protocol
 
 ```sh
-python -m pip install "paperseek-mcp==1.0.0b1"
+python -m pip install "paperseek-mcp==1.0.0b2"
 paperseek-mcp --transport stdio
 ```
 

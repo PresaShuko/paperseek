@@ -4,7 +4,41 @@ outline: 2
 
 # Changelog
 
-Features, improvements, and upgrade notes, from the first demo to PaperSeek 1.0.0-beta1.
+Features, improvements, and upgrade notes, from the first demo to PaperSeek 1.0.0-beta2.
+
+## 1.0.0-beta2 {#v1-0-0-beta2}
+
+A maintenance release. Reviews and search rankings now carry on when a model gets part of its answer wrong, running searches stay in your history, and Docker Compose is private to your machine by default. It upgrades 1.0.0-beta1 in place, without a migration.
+
+### Reviews
+
+- A review no longer fails because a few papers come back without usable evidence. Those papers are left out of the outline and marked in the paper list; the rest of the review goes ahead, and preparing the outline again retries only them.
+- A paper keeps every quote that matches its abstract, even when the model gets another quote wrong. Quotes stitched together with an ellipsis (…) are checked as separate passages instead of being rejected.
+- The outline no longer stops on a paper without checked evidence. That paper is dropped from the plan, and a paragraph left without sources is given new ones from the checked evidence.
+
+### Search ranking
+
+- When the model scores only some of the candidates, the scores it gave are kept and only the missing papers are asked for again. Papers that still have no score are listed after the scored ones in their original order, and the search reports a warning.
+- "Why it ranks" explanations are requested in smaller groups, so long explanations, Chinese ones especially, are no longer cut off. Papers a reply skipped are asked for once more.
+
+### History
+
+- Queued and running searches now appear in the search history, also after you reload the page, and cannot be deleted while they run.
+
+### Self-hosting
+
+- The supplied Docker Compose file publishes PaperSeek on this machine only (127.0.0.1:8765). To open it from other devices, set `PAPERSEEK_HOST=0.0.0.0` in `.env` and protect access; `PAPERSEEK_PORT` still changes the port.
+- The MCP Docker image builds again from a clean checkout.
+- Third-party notice tables display correctly in every distribution.
+
+### Documentation site
+
+- On the home page, a resting finger or the end of a trackpad swipe no longer jumps to another section.
+
+### Upgrade notes
+
+- From 1.0.0-beta1, install 1.0.0b2 with pip or set `PAPERSEEK_VERSION` to `1.0.0-beta2` for Docker; your data needs no migration. See [upgrading from an earlier 1.0 beta](self-hosting/upgrade.md#from-an-earlier-1-0-beta).
+- If you reach a Docker deployment from another device, take the new `compose.yaml` and set `PAPERSEEK_HOST` as described above.
 
 ## 1.0.0-beta1 {#v1-0-0-beta}
 

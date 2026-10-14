@@ -4,7 +4,7 @@ from paperseek_app.build_info import COMMUNITY_COMMIT
 
 
 DISTRIBUTION = "paperseek-mcp"
-VERSION = "1.0.0b1"
+VERSION = "1.0.0b2"
 SERVER_NAME = "io.github.paperseek/paperseek"
 
 
