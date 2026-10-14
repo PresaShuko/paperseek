@@ -9,7 +9,7 @@
   <p>开源文献检索、初步文献计量与基于摘要的文献综述。</p>
   <p>
     <a href="LICENSE"><img alt="Apache 2.0 许可" src="https://img.shields.io/badge/license-Apache%202.0-171717?style=flat-square"></a>
-    <img alt="版本 1.0.0-beta1" src="https://img.shields.io/badge/version-1.0.0--beta1-171717?style=flat-square">
+    <img alt="版本 1.0.0-beta2" src="https://img.shields.io/badge/version-1.0.0--beta2-171717?style=flat-square">
     <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-171717?style=flat-square">
     <img alt="Vue 3" src="https://img.shields.io/badge/frontend-Vue%203-171717?style=flat-square">
   </p>
@@ -32,6 +32,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 ## 目录
 
 - [为什么使用 PaperSeek](#为什么使用-paperseek)
+- [1.0.0-beta2 的变化](#100-beta2-的变化)
 - [1.0.0-beta1 的变化](#100-beta1-的变化)
 - [工作流程](#工作流程)
 - [数据源](#数据源)
@@ -57,6 +58,18 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 **自然衔接下一步。** 筛选、选择和导出文献，重新打开历史，或将一组摘要证据整理为实验性综述项目。
 
+## 1.0.0-beta2 的变化
+
+维护版本：模型回答出现部分错误时，研究流程照常进行。
+
+- **文献综述**：少数论文缺少可用证据时不再整体失败，这些论文会被排除并标出，其余部分继续；与摘要相符的引文即使有别的引文出错也会保留。
+- **检索排序**：保留模型已给出的评分，只为缺少评分的文献重新请求；较长的“排序理由”不再被截断。
+- **历史记录**：排队中和运行中的检索会显示在历史里，刷新页面后依然可见。
+- **Docker Compose**：默认只对本机开放；如需从其他设备访问，设置 `PAPERSEEK_HOST=0.0.0.0`。
+- **文档站**：首页不会再因为手指搭在触控板上或滑动结束时的余量而跳到其他板块。
+
+可从 1.0.0-beta1 原地升级，无需迁移。详见[完整更新日志](https://docs.paperseek.app/zh/changelog#v1-0-0-beta2)和[升级步骤](https://docs.paperseek.app/zh/self-hosting/upgrade#from-an-earlier-1-0-beta)。
+
 ## 1.0.0-beta1 的变化
 
 **1.0.0-beta1 是一次包含不兼容变更的完整架构重构。** 运行时、前端、持久化和集成统一为按职责划分、支持持久任务执行的模块化应用。
@@ -72,13 +85,13 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 架构变化详见[完整更新日志](https://docs.paperseek.app/zh/changelog#v1-0-0-beta)。从 0.2 升级需要 Python 3.12+，请先阅读[迁移指南](https://docs.paperseek.app/zh/self-hosting/upgrade)：用户数据有明确迁移路径，旧内部导入、前端接口及废弃命令／配置不再保留。
 
-通过 pip 安装时版本号写作 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
+新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
 
 ## 工作流程
 
-![PaperSeek 1.0.0-beta1 研究工作区](docs/public/images/workspace-results-zh.png)
+![PaperSeek 1.0.0-beta2 研究工作区](docs/public/images/workspace-results-zh.png)
 
-*社区版 1.0.0-beta1，含演示记录。在线版共用同一工作区，并增加账户和服务模式。*
+*社区版 1.0.0-beta2，含演示记录。在线版共用同一工作区，并增加账户和服务模式。*
 
 | 阶段 | 做什么 | 可以查看什么 |
 | --- | --- | --- |
@@ -113,7 +126,7 @@ OpenAlex 与 Serper 支持多 Key 轮询。元数据覆盖与领域筛选能力�
 需要 **Python 3.12+**，发行包自带已构建的网页。
 
 ```sh
-python -m pip install "paperseek==1.0.0b1"
+python -m pip install "paperseek==1.0.0b2"
 paperseek serve
 ```
 
@@ -125,10 +138,10 @@ paperseek serve
 git clone https://github.com/paperseek/paperseek.git
 cd paperseek
 cp .env.example .env
-PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
+PAPERSEEK_VERSION=1.0.0-beta2 docker compose up -d
 ```
 
-启动前编辑 `.env`。PowerShell 使用 `Copy-Item` 替代 `cp`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。Compose 默认只向本机发布 127.0.0.1:8765，并通过 `paperseek-data` 卷持久化数据。以上命令已固定 beta 镜像；预发布不会更新 `latest`。随附的 Compose 与 `.env.example` 也默认使用 `1.0.0-beta1`。
+启动前编辑 `.env`。PowerShell 使用 `Copy-Item` 替代 `cp`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta2"; docker compose up -d`。Compose 默认只向本机发布 127.0.0.1:8765，并通过 `paperseek-data` 卷持久化数据。以上命令已固定 beta 镜像；预发布不会更新 `latest`。随附的 Compose 与 `.env.example` 也默认使用 `1.0.0-beta2`。
 
 ### ModelScope 创空间
 
@@ -214,7 +227,7 @@ paperseek search "How does open-source funding affect maintenance?" --source ope
 ### Model Context Protocol
 
 ```sh
-python -m pip install "paperseek-mcp==1.0.0b1"
+python -m pip install "paperseek-mcp==1.0.0b2"
 paperseek-mcp --transport stdio
 ```
 

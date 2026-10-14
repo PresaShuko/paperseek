@@ -117,6 +117,7 @@ function checkVersions(files) {
   for (const file of files) {
     const text = readFileSync(file, "utf8");
     if (isStub(text)) continue; // stubs only hold redirect links; skip them
+    if (rel(file).endsWith("changelog.md")) continue; // the changelog names every past release
     scanned += 1;
     const lineStarts = [0];
     for (let i = 0; i < text.length; i += 1) {

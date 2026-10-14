@@ -25,7 +25,7 @@ const sources = ['OpenAlex', 'arXiv', 'Crossref', 'Semantic Scholar', 'PubMed', 
       <HeroPainting />
       <div class="ps-hero-body ps-container">
         <div>
-          <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta1', '认识 PaperSeek 1.0.0-beta1') }}<span aria-hidden="true">↗</span></a>
+          <a class="ps-release" :href="link('changelog')"><span class="ps-release-dot" />{{ t('Introducing PaperSeek 1.0.0-beta2', '认识 PaperSeek 1.0.0-beta2') }}<span aria-hidden="true">↗</span></a>
           <h1 id="hero-heading">{{ t('Follow the question.', '从问题出发，') }}<br>{{ t('Find the evidence.', '找到研究的线索。') }}</h1>
         </div>
         <div class="ps-hero-side">
