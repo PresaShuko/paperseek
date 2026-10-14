@@ -90,7 +90,7 @@ It upgrades 1.0.0-beta1 in place, without a migration. Read the [full changelog]
 
 Read the [full changelog](https://docs.paperseek.app/changelog#v1-0-0-beta) for the architectural changes. Upgrading from 0.2 requires Python 3.12+ and the [migration guide](https://docs.paperseek.app/self-hosting/upgrade): user data has a migration path, while old internal imports, frontend endpoints, and retired commands/configuration are not retained.
 
-Install it from pip as **1.0.0b1**. See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
+See [workspace and history](https://docs.paperseek.app/guide/workspace) and [bibliometrics](https://docs.paperseek.app/guide/bibliometrics).
 
 ## How it works
 

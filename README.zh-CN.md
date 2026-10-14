@@ -85,7 +85,7 @@ PaperSeek 将研究问题整理为阅读清单：构建并迭代检索式，从�
 
 架构变化详见[完整更新日志](https://docs.paperseek.app/zh/changelog#v1-0-0-beta)。从 0.2 升级需要 Python 3.12+，请先阅读[迁移指南](https://docs.paperseek.app/zh/self-hosting/upgrade)：用户数据有明确迁移路径，旧内部导入、前端接口及废弃命令／配置不再保留。
 
-通过 pip 安装时版本号写作 **1.0.0b1**。新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
+新功能说明见[工作区与历史](https://docs.paperseek.app/zh/guide/workspace)及[文献计量](https://docs.paperseek.app/zh/guide/bibliometrics)。
 
 ## 工作流程
 
