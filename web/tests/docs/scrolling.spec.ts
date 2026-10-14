@@ -11,27 +11,41 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const prefix of ['/', '/zh/']) {
-  test(`small wheel inputs do not advance home sections (${prefix})`, async ({ page }) => {
+  test(`home sections turn one page per scroll and ignore stray trackpad input (${prefix})`, async ({ page }) => {
     await page.goto(prefix);
     await expect(page.locator('.ps-home')).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await page.mouse.move(700, 780);
     await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+    const second = await page.evaluate(() => {
+      const nav = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--vp-nav-height')) || 64;
+      return Math.round(document.querySelector('.ps-feature')!.getBoundingClientRect().top + scrollY - nav);
+    });
 
-    await page.mouse.wheel(0, 80);
-    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
-    // Let both native scrolling and any scripted section animation settle.
-    await page.waitForTimeout(1200);
-    const first = await page.evaluate(() => scrollY);
-    expect(first).toBeLessThan(140);
+    // Resting fingers and the end of momentum send sparse 1–3 px events; they never turn a page.
+    for (const delta of [1, 2, 1, 3]) {
+      await page.mouse.wheel(0, delta);
+      await page.waitForTimeout(400);
+    }
+    await page.waitForTimeout(800);
+    expect(await page.evaluate(() => scrollY)).toBe(0);
 
-    // A delayed, small trackpad tail must not become a new full-screen gesture.
-    await page.mouse.wheel(0, 1);
+    // A deliberate scroll moves exactly one section.
+    await page.mouse.wheel(0, 120);
+    await page.waitForTimeout(1500);
+    expect(Math.abs(await page.evaluate(() => scrollY) - second)).toBeLessThanOrEqual(2);
+
+    // The momentum tail after that move stays on the same section.
+    for (const delta of [3, 2, 1]) {
+      await page.mouse.wheel(0, delta);
+      await page.waitForTimeout(250);
+    }
     await page.waitForTimeout(1200);
-    expect(Math.abs(await page.evaluate(() => scrollY) - first)).toBeLessThan(10);
-    await page.mouse.wheel(0, -20);
-    await page.waitForTimeout(600);
-    expect(await page.evaluate(() => scrollY)).toBeLessThan(first);
+    expect(Math.abs(await page.evaluate(() => scrollY) - second)).toBeLessThanOrEqual(2);
+
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => scrollY)).toBe(0);
     expect(new URL(page.url()).pathname).toBe(prefix);
   });
 

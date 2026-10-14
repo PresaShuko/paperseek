@@ -45,11 +45,13 @@
 .psd-steps button[aria-current='step'] { background: var(--d-bg); color: var(--d-fg); border-color: var(--d-line); }
 .psd-steps button[aria-current='step'] b { background: var(--d-ink); color: var(--d-inv); }
 
-/* Keep the spacious sections on large screens without taking over native scrolling. */
+/* Large screens: the home page moves one full page at a time. */
 @media (min-width: 960px) and (min-height: 640px) {
-  .ps-home .ps-feature { min-height: calc(100svh - var(--vp-nav-height)); padding: 40px 0; align-content: center; }
-  .ps-home .ps-choice-section { min-height: calc(100svh - var(--vp-nav-height)); display: flex; align-items: center; }
-  .ps-home .ps-choice-section > .ps-container { width: calc(100% - 80px); }
+  html.ps-snap { scroll-snap-type: y mandatory; scroll-padding-top: var(--vp-nav-height); }
+  html.ps-snap .ps-hero, html.ps-snap .ps-feature, html.ps-snap .ps-choice-section, html.ps-snap .ps-resources { scroll-snap-align: start; }
+  html.ps-snap .ps-feature { min-height: calc(100svh - var(--vp-nav-height)); padding: 40px 0; align-content: center; }
+  html.ps-snap .ps-choice-section { min-height: calc(100svh - var(--vp-nav-height)); display: flex; align-items: center; }
+  html.ps-snap .ps-choice-section > .ps-container { width: calc(100% - 80px); }
 }
 @media (max-width: 959px) {
   .ps-feature, .ps-feature.reverse { grid-template-columns: minmax(0, 1fr); gap: 34px; padding: 48px 0; }
