@@ -39,7 +39,7 @@ PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 
 On PowerShell, replace `cp` with `Copy-Item`, then run `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`. Edit `.env` with your deployment defaults before starting.
 
-The service listens on port **8765** and stores data in the `paperseek-data` volume. The command explicitly pins `1.0.0-beta1`, also the default in the supplied Compose file and `.env.example`. Prereleases do not update `latest`; change `PAPERSEEK_VERSION` deliberately when upgrading.
+Compose publishes **127.0.0.1:8765** by default; `PAPERSEEK_PORT` changes the host port while the container always uses 8765. The service listens on port **8765** and stores data in the `paperseek-data` volume. The command explicitly pins `1.0.0-beta1`, also the default in the supplied Compose file and `.env.example`. Prereleases do not update `latest`; change `PAPERSEEK_VERSION` deliberately when upgrading.
 
 ```sh
 docker compose logs -f paperseek
@@ -70,7 +70,7 @@ Do not start an additional worker unintentionally by omitting `--no-worker`.
 
 ## Network access
 
-The default server binds to loopback. Community is designed for a trusted local environment. Binding `--host 0.0.0.0` or publishing the Docker port exposes it beyond your machine; add appropriate authentication and network controls before sharing access. Changing the listen address does not turn Community into a multi-user service.
+The default server binds to loopback. Community is designed for a trusted local environment. Binding the CLI with `--host 0.0.0.0` or setting Compose's `PAPERSEEK_HOST=0.0.0.0` exposes it beyond your machine; add appropriate authentication and network controls before sharing access. Changing the listen address does not turn Community into a multi-user service.
 
 ## Back up
 

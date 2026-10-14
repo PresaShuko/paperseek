@@ -52,6 +52,12 @@ class EvidenceCardDraft(ReviewModel):
     paper_id: str
     evidence: list[EvidenceDraft] = Field(max_length=6)
 
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def keep_first_six(cls, value):
+        # A seventh observation is surplus, not a reason to discard the other six.
+        return value[:6] if isinstance(value, list) else value
+
 
 class EvidenceBatch(ReviewModel):
     cards: list[EvidenceCardDraft] = Field(min_length=1, max_length=4)

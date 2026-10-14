@@ -14,7 +14,9 @@ from paperseek_app.review.workflow import ReviewStageWorkflow
 from paperseek_app.services.run_execution import RunExecutionService
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.ports import CancellationToken, LLMPort
-from paperseek_core.review.generation import ReviewOutputError
+from paperseek_core.review.structured import (
+    ReviewOutputError,
+)
 
 
 @dataclass(frozen=True, slots=True)

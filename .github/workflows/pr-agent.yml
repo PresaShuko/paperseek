@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Run PR Agent
-        uses: the-pr-agent/pr-agent@main
+        uses: the-pr-agent/pr-agent@330f0813b5fe0d1f54b794077c2d02aa85a1fb63
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}

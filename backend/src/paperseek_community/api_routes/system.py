@@ -4,14 +4,18 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from paperseek_community.api_dependencies import ApiError, open_query_service
 from paperseek_app.api_schemas import DiagnosticOutput, SourceListOutput
+from paperseek_app.settings import (
+    SettingsError,
+)
+from paperseek_app.source_catalog import list_source_descriptors
+from paperseek_app.submission import DiagnosticSubmission, RunSubmission
+from paperseek_community.api_dependencies import ApiError, open_query_service
 from paperseek_community.diagnostics import run_configuration_diagnostics
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_app.submission import DiagnosticSubmission
-from paperseek_app.source_catalog import list_source_descriptors
-from paperseek_app.submission import RunSubmission
-from paperseek_community.workspace_settings import SettingsError, WorkspaceSettingsStore
+from paperseek_community.workspace_settings import (
+    WorkspaceSettingsStore,
+)
 
 
 def register_system_routes(

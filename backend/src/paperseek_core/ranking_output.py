@@ -11,6 +11,8 @@ from typing import Any, Callable
 from paperseek_core.document_identity import document_identity, document_key
 from paperseek_core.models import PaperRecord, RankingScore
 
+_REASON_PAIR = re.compile(r'\[\s*"?(\d+)"?\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]')
+
 
 def describe_document(
     document: PaperRecord, index: int, *, abstract_limit: int = 1200
@@ -109,7 +111,13 @@ class RankingOutputCodec:
     def parse_reasons(raw: str, identities: list[str]) -> dict[str, str]:
         pairs = RankingOutputCodec.json_object(raw).get("reasons")
         if not isinstance(pairs, list):
-            return {}
+            # A reply cut off mid-list still holds complete [index, "reason"] pairs before the break.
+            pairs = []
+            for match in _REASON_PAIR.finditer(str(raw or "")):
+                try:
+                    pairs.append([match.group(1), json.loads(f'"{match.group(2)}"')])
+                except json.JSONDecodeError:
+                    continue
         output = {}
         for pair in pairs:
             if not isinstance(pair, (list, tuple)) or len(pair) < 2:

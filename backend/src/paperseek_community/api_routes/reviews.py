@@ -9,24 +9,40 @@ from fastapi import BackgroundTasks, FastAPI, Header, Query, Response
 
 from paperseek_app.configuration import LLM_PROVIDERS, resolve_llm_route
 from paperseek_app.errors import RunNotFound, RunPersistenceError, RunStateError
-from paperseek_app.models import RunDetail, RecordRename
-from paperseek_app.review.exports import export_review
+from paperseek_app.models import RecordRename, RunDetail
 from paperseek_app.review.citations import CitationStyle
+from paperseek_app.review.exports import export_review
 from paperseek_app.review.models import (
-    OutlineSave, ReviewCreate, ReviewDetail, ReviewError, ReviewJobRequest,
-    ReviewPage, ReviewVersions, SectionSave,
+    OutlineSave,
+    ReviewCreate,
+    ReviewDetail,
+    ReviewError,
+    ReviewJobRequest,
+    ReviewPage,
+    ReviewVersions,
+    SectionSave,
 )
 from paperseek_app.review.rendering import render_review
 from paperseek_app.review.services import ReviewService
 from paperseek_app.services.run_queries import RunQueryService
+from paperseek_app.settings import (
+    SettingsError,
+)
+from paperseek_app.submission import CredentialInput, LLMRouteInput
+from paperseek_community.api_dependencies import (
+    TERMINAL_STATUSES,
+    ApiError,
+    content_response,
+    drain_cleanup_jobs,
+)
 from paperseek_community.artifacts import FileArtifactStore
-from paperseek_community.api_dependencies import ApiError, TERMINAL_STATUSES, content_response, drain_cleanup_jobs
 from paperseek_community.credential_resolution import resolve_model_credentials
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence.sqlite_review_jobs import SQLiteReviewUnitOfWork
 from paperseek_community.settings import CommunityDeploymentSettings
-from paperseek_community.workspace_settings import SettingsError, WorkspaceSettingsStore
-from paperseek_app.submission import CredentialInput, LLMRouteInput
+from paperseek_community.workspace_settings import (
+    WorkspaceSettingsStore,
+)
 from paperseek_core.review.evidence import fingerprint
 
 

@@ -273,7 +273,6 @@ class SQLiteResultHistoryRepository(SQLiteRepositoryBase):
     def search_history(self, *, query: str, offset: int, limit: int) -> HistoryPage:
         where = """
             deleted_at IS NULL AND kind = 'research'
-            AND status IN ('completed', 'completed_with_warnings', 'failed', 'cancelled')
             AND instr(paperseek_casefold(display_title || ' ' || question || ' ' || source || ' ' || status || ' ' || error_code), :query) > 0
         """
         parameters = {"query": query.strip().casefold(), "offset": offset, "limit": limit}
@@ -338,7 +337,6 @@ class SQLiteResultHistoryRepository(SQLiteRepositoryBase):
                                (SELECT COUNT(*) FROM run_results rr WHERE rr.run_id = r.id) AS result_count
                         FROM runs r
                         WHERE r.deleted_at IS NULL AND r.kind = 'research'
-                          AND r.status IN ('completed', 'completed_with_warnings', 'failed', 'cancelled')
                           {cursor_clause}
                         ORDER BY r.created_at DESC, r.id DESC
                         LIMIT :limit

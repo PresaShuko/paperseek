@@ -1,6 +1,6 @@
+import unittest
 from datetime import datetime, timezone
 from io import BytesIO
-import unittest
 
 from docx import Document
 
@@ -10,7 +10,12 @@ from paperseek_app.review.models import ReviewContent, ReviewDetail
 from paperseek_app.review.rendering import render_review
 from paperseek_core.models import FinalPaperResult
 from paperseek_core.review.evidence import snapshot, validate_cards, validate_mentions
-from paperseek_core.review.models import EvidenceBatch, ReviewOutline, SectionBody, WrittenSection
+from paperseek_core.review.models import (
+    EvidenceBatch,
+    ReviewOutline,
+    SectionBody,
+    WrittenSection,
+)
 
 
 class ReviewCitationsTest(unittest.TestCase):
@@ -92,7 +97,11 @@ class ReviewCitationsTest(unittest.TestCase):
         validate_mentions(body, self.cards, language="zh", exempt={body.paragraphs[1].text})
 
     def test_chinese_reviews_are_prompted_in_chinese(self):
-        from paperseek_core.review.generation import SYSTEM, SYSTEM_ZH, _say
+        from paperseek_core.review.prompts import (
+            SYSTEM,
+            SYSTEM_ZH,
+            _say,
+        )
         self.assertIn("大语言模型（Large Language Model, LLM）", SYSTEM_ZH)
         self.assertEqual(_say("zh", SYSTEM, SYSTEM_ZH), SYSTEM_ZH)
         self.assertEqual(_say("en", SYSTEM, SYSTEM_ZH), SYSTEM)

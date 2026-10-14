@@ -10,28 +10,33 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from paperseek_app.api_schemas import ErrorResponse
 from paperseek_app.execution import WorkflowExecution, run_blocking
 from paperseek_app.models import RunDetail
-from paperseek_app.api_schemas import ErrorResponse
-from paperseek_app.services import RunExecutionService
 from paperseek_app.review.execution import ReviewExecution, ReviewExecutor
+from paperseek_app.services import RunExecutionService
+from paperseek_app.worker import RunExecutor
 from paperseek_community import api_dependencies
 from paperseek_community.api_routes import history as history_routes
 from paperseek_community.api_routes import runs as run_routes
 from paperseek_community.api_routes import system as system_routes
-from paperseek_community.api_routes.reviews import register_review_routes
+from paperseek_community.api_routes.bibliometrics import (
+    cleanup_analyses,
+    register_bibliometric_routes,
+)
 from paperseek_community.api_routes.review_events import register_review_events
-from paperseek_community.api_routes.bibliometrics import register_bibliometric_routes, cleanup_analyses
+from paperseek_community.api_routes.reviews import register_review_routes
 from paperseek_community.api_routes.settings import register_settings_routes
 from paperseek_community.api_routes.workspace_data import register_workspace_data_routes
-from paperseek_community.workspace_settings import WorkspaceSettingsStore
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.credentials import EncryptedRunCredentialStore
 from paperseek_community.persistence import migrate_database
-from paperseek_community.settings import CommunityDeploymentSettings
 from paperseek_community.persistence.sqlite_review_jobs import SQLiteReviewUnitOfWork
 from paperseek_community.review_composition import CommunityReviewResolver
-from paperseek_app.worker import RunExecutor
+from paperseek_community.settings import CommunityDeploymentSettings
+from paperseek_community.workspace_settings import (
+    WorkspaceSettingsStore,
+)
 from paperseek_core.ports import CancellationToken
 
 

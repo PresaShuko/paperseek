@@ -102,7 +102,23 @@ def locate_quote(quote: str, abstract: str) -> tuple[int, int] | None:
     return source[start][1], source[start + length - 1][2]
 
 
-def validate_cards(batch: EvidenceBatch, papers: list[ReviewPaper], signature: str) -> list[EvidenceCard]:
+_ELLIPSIS = re.compile(r"\s*(?:\.{3,}|…|\[\.\.\.\])\s*")
+
+
+def _locate(quote: str, source: str, abstract: str) -> tuple[int, int] | None:
+    # Match formatting whitespace in old snapshots too, retaining original offsets and text.
+    words = re.split(r"(?:\s|\\r\\n|\\[rn])+", quote.strip().translate(_QUOTE_TYPOGRAPHY))
+    match = re.search(r"(?:\s|\\r\\n|\\[rn])+".join(re.escape(word) for word in words), source)
+    return (match.start(), match.end()) if match else locate_quote(quote, abstract)
+
+
+def validate_cards(batch: EvidenceBatch, papers: list[ReviewPaper], signature: str,
+                   dropped: list[str] | None = None) -> list[EvidenceCard]:
+    """Keep every quote found in its abstract; a paper fails only when none of its quotes are.
+
+    Quotes joined with an ellipsis are split into their separate spans. Unverifiable quotes are
+    dropped (and listed in ``dropped``) while the paper keeps at least one verified quote.
+    """
     by_id = {paper.id: paper for paper in papers if paper.has_abstract}
     if {card.paper_id for card in batch.cards} != set(by_id) or len(batch.cards) != len(by_id):
         raise ValueError("Return exactly one evidence card for each supplied paper.")
@@ -112,23 +128,30 @@ def validate_cards(batch: EvidenceBatch, papers: list[ReviewPaper], signature: s
         paper = by_id[draft.paper_id]
         # One-to-one substitutions preserve offsets; stored evidence always uses the original source.
         source = paper.abstract.translate(_QUOTE_TYPOGRAPHY)
-        evidence = []
+        evidence, rejected = [], []
         for item in draft.evidence:
-            # Match formatting whitespace in old snapshots too, retaining original offsets and text.
-            words = re.split(r"(?:\s|\\r\\n|\\[rn])+", item.quote.strip().translate(_QUOTE_TYPOGRAPHY))
-            match = re.search(r"(?:\s|\\r\\n|\\[rn])+".join(re.escape(word) for word in words), source)
-            span = (match.start(), match.end()) if match else locate_quote(item.quote, paper.abstract)
-            if span is None:
-                quote_errors.append(f"{paper.id}: {item.quote[:180]!r}")
+            parts = [part for part in _ELLIPSIS.split(item.quote.strip()) if part.strip()] or [item.quote]
+            spans = [_locate(part, source, paper.abstract) for part in parts]
+            if not all(spans):
+                rejected.append(f"{paper.id}: {item.quote[:180]!r}")
                 continue
-            # Evidence always keeps the abstract's own text, never the model's copy.
-            quote, start = paper.abstract[span[0]:span[1]], span[0]
-            evidence.append(ReviewEvidence(
-                **item.model_dump(exclude={"quote"}), quote=quote,
-                id="e_" + fingerprint([paper.id, paper.abstract_hash, quote])[:24],
-                paper_id=paper.id, start=start, end=start + len(quote), abstract_hash=paper.abstract_hash,
-            ))
-        result.append(EvidenceCard(paper_id=paper.id, signature=signature, evidence=evidence))
+            for start, end in spans:
+                # Evidence always keeps the abstract's own text, never the model's copy.
+                quote = paper.abstract[start:end]
+                key = "e_" + fingerprint([paper.id, paper.abstract_hash, quote])[:24]
+                if any(existing.id == key and existing.category == item.category and existing.text == item.text
+                       for existing in evidence):
+                    continue
+                evidence.append(ReviewEvidence(
+                    **item.model_dump(exclude={"quote"}), quote=quote, id=key,
+                    paper_id=paper.id, start=start, end=start + len(quote), abstract_hash=paper.abstract_hash,
+                ))
+        if rejected and not evidence:
+            quote_errors.extend(rejected)
+            continue
+        if dropped is not None:
+            dropped.extend(rejected)
+        result.append(EvidenceCard(paper_id=paper.id, signature=signature, evidence=evidence[:6]))
     if quote_errors:
         raise ValueError("Non-verbatim quotes: " + "; ".join(quote_errors[:8])
                          + ". Copy exact continuous spans from the original abstracts; preserve capitalization, "

@@ -39,7 +39,7 @@ PAPERSEEK_VERSION=1.0.0-beta1 docker compose up -d
 
 PowerShell 中将 `cp` 换成 `Copy-Item`，然后执行 `$env:PAPERSEEK_VERSION="1.0.0-beta1"; docker compose up -d`。启动前编辑 `.env`，填写需要的默认配置。
 
-服务端口为 **8765**，数据存入 `paperseek-data` 命名卷。以上命令显式固定为 `1.0.0-beta1`，随附的 Compose 与 `.env.example` 也使用此默认版本。预发布不会更新 `latest`；升级时请明确调整 `PAPERSEEK_VERSION`。
+Compose 默认只发布 **127.0.0.1:8765**；`PAPERSEEK_PORT` 修改宿主机端口，容器内部固定为 8765。服务端口为 **8765**，数据存入 `paperseek-data` 命名卷。以上命令显式固定为 `1.0.0-beta1`，随附的 Compose 与 `.env.example` 也使用此默认版本。预发布不会更新 `latest`；升级时请明确调整 `PAPERSEEK_VERSION`。
 
 ```sh
 docker compose logs -f paperseek
@@ -70,7 +70,7 @@ paperseek worker --database /srv/paperseek/paperseek.db
 
 ## 网络访问
 
-默认服务只监听本机。社区版面向可信本地环境；使用 `--host 0.0.0.0` 或映射 Docker 端口可能向其他设备开放访问。共享前请配置合适的认证与网络访问控制。更换监听地址不会把社区版变成在线版的多用户系统。
+默认服务只监听本机。社区版面向可信本地环境；CLI 使用 `--host 0.0.0.0`，或 Compose 设置 `PAPERSEEK_HOST=0.0.0.0`，会向其他设备开放访问。共享前请配置合适的认证与网络访问控制。更换监听地址不会把社区版变成在线版的多用户系统。
 
 ## 备份
 

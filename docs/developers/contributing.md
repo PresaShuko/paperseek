@@ -52,7 +52,7 @@ npm --prefix web run build -- --outDir ../backend/src/paperseek_community/static
 uv run --locked --project backend paperseek serve
 ```
 
-For frontend iteration, run `npm --prefix web run dev` while the backend is available. Check `web/vite.config.ts` for the development proxy.
+For frontend iteration, run `npm --prefix web run dev` while the backend is available. Vite proxies `/api` to the local backend at `http://127.0.0.1:8765`; start `paperseek serve` on its default port.
 
 ## Checks
 
@@ -65,6 +65,8 @@ npm --prefix web run typecheck
 npm --prefix web run build
 ```
 
+Ruff checks production Python for syntax, unused names and selected correctness rules. Mypy currently checks the seven transport, credential and shared-settings modules listed in `backend/pyproject.toml`; it is not a whole-backend type check. Web TypeScript is checked in strict mode.
+
 Run checks appropriate to the changed behavior and consult CI for the complete release checks. Keep provider-backed experiments separate from deterministic tests. Never use a production database for migration or integration tests.
 
 ## Work on the docs
@@ -75,6 +77,8 @@ npm run docs:dev
 npm run docs:build
 npm run docs:check
 npm run docs:lint
+cd web
+npx playwright test --config playwright.docs.config.ts scrolling.spec.ts
 ```
 
 English pages live at `docs/`; Chinese equivalents at `docs/zh/`. The two trees mirror each other file for file, and `docs:check` fails when a page exists in only one language. Update both languages when behavior changes. Site configuration and theme are in `docs/.vitepress/`.

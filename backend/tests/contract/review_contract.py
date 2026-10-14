@@ -2,38 +2,64 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
+import unittest
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
-import tempfile
-import unittest
 from uuid import uuid4
 from zipfile import ZipFile
 
 from docx import Document
+from fixtures.review_support import ROUTE, ReviewLLM, create_source
 from sqlalchemy import event, text
 
 from paperseek_app.errors import RunNotFound, RunOwnershipLost, RunStateError
 from paperseek_app.models import PendingEvent
 from paperseek_app.review.execution import ReviewExecution, ReviewExecutor
 from paperseek_app.review.exports import export_review
-from paperseek_app.review.models import OutlineSave, ReviewCreate, ReviewError, ReviewJobRequest, SectionSave
+from paperseek_app.review.models import (
+    OutlineSave,
+    ReviewCreate,
+    ReviewError,
+    ReviewJobRequest,
+    SectionSave,
+)
 from paperseek_app.review.rendering import render_review
 from paperseek_app.review.services import ReviewService
-from paperseek_app.services import RunCleanupService, RunExecutionService, RunQueryService
+from paperseek_app.services import (
+    RunCleanupService,
+    RunExecutionService,
+    RunQueryService,
+)
 from paperseek_app.worker import RunExecutor
 from paperseek_community.artifacts import FileArtifactStore
 from paperseek_community.persistence import SQLiteRunUnitOfWork
 from paperseek_community.persistence.sqlite_review_jobs import SQLiteReviewUnitOfWork
 from paperseek_core.models import FinalPaperResult
-from paperseek_core.review.evidence import normalize_abstract, snapshot, validate_body, validate_cards
+from paperseek_core.review.evidence import (
+    normalize_abstract,
+    snapshot,
+    validate_body,
+    validate_cards,
+)
 from paperseek_core.review.models import EvidenceBatch, SectionBody
-from fixtures.review_support import ROUTE, ReviewLLM, create_source
-
-
 
 
 class ReviewEvidenceTest(unittest.TestCase):
+    def test_shared_quote_preserves_distinct_scope_and_research_observations(self):
+        from paperseek_core.review.evidence import usable_cards
+
+        paper = snapshot(FinalPaperResult(rank=1, uid='one', title='Study',
+                         abstract='Retention improved in the adult participants.'), 'source', 1)
+        batch = EvidenceBatch(cards=[{'paper_id': paper.id, 'evidence': [
+            {'category': 'scope', 'text': 'Participants were adults.', 'quote': paper.abstract},
+            {'category': 'finding', 'text': 'Retention improved.', 'quote': paper.abstract},
+        ]}])
+        cards = validate_cards(batch, [paper], 'test')
+        self.assertEqual([item.category for item in cards[0].evidence], ['scope', 'finding'])
+        self.assertEqual(usable_cards(cards, [paper]), cards)
+
     def test_typographic_quotes_restore_exact_source_text_offsets_and_identity(self):
         sentence = ("First, a valid and reliable flow experience instrument for addressing the different "
                     "dimensions of users' flow experience was developed.")
@@ -405,9 +431,64 @@ class ReviewWorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.review.content.cards), 2)
         self.assertFalse(self.review.content.evidence_errors)
 
+    async def test_a_paper_whose_evidence_keeps_failing_is_flagged_while_the_outline_proceeds(self):
+        run = await asyncio.to_thread(create_source, Path(self.temporary.name), 3)
+        request = ReviewCreate(source_run_id=run.id, paper_uids=[row.record.uid for row in self.store.get_results(run.id)],
+                               topic="Compare methods and scope", language="en", length="short", section_count=1)
+        self.review = ReviewService(self.store, self.store).create(request, "three-papers")
+        original = self.llm.chat_json
+
+        async def bad_quote(messages, **kwargs):
+            result = json.loads(await original(messages, **kwargs))
+            for card in result.get("cards", []):
+                if card["paper_id"] == "p_003":
+                    card["evidence"][0]["quote"] = "A claim absent from the source abstract."
+            return json.dumps(result)
+
+        self.llm.chat_json = bad_quote
+        self.submit("prepare_outline")
+        finished = await self.executor.run_once()
+        self.assertEqual(finished.status.value, "completed_with_warnings")
+        review = self.store.get_review(self.review.id)
+        self.assertEqual([card.paper_id for card in review.content.cards], ["p_001", "p_002"])
+        self.assertEqual(review.content.evidence_errors, {"p_003": "review_evidence_failed"})
+        self.assertTrue(all("p_003" not in section.paper_ids for section in review.content.outline.sections))
+
+    async def test_replanning_retries_cached_unusable_cards_and_reuses_verified_papers(self):
+        run = await asyncio.to_thread(create_source, Path(self.temporary.name), 3)
+        request = ReviewCreate(source_run_id=run.id, paper_uids=[row.record.uid for row in self.store.get_results(run.id)],
+                               topic='Compare methods', language='en', length='short', section_count=1)
+        self.review = ReviewService(self.store, self.store).create(request, 'empty-card-retry')
+        original = self.llm.chat_json
+
+        async def empty(messages, **kwargs):
+            result = json.loads(await original(messages, **kwargs))
+            for card in result.get('cards', []):
+                if card['paper_id'] == 'p_003':
+                    card['evidence'] = []
+            return json.dumps(result)
+
+        self.llm.chat_json = empty
+        self.submit('prepare_outline')
+        self.assertEqual((await self.executor.run_once()).status.value, 'completed_with_warnings')
+        batches = []
+
+        async def recovered(messages, **kwargs):
+            if 'TASK: evidence\n' in messages[0]['content']:
+                batches.append([p['id'] for p in json.loads(messages[1]['content'])['papers']])
+            return await original(messages, **kwargs)
+
+        self.llm.chat_json = recovered
+        await self.prepare()
+        self.assertEqual(batches, [['p_003']])
+        self.assertFalse(self.review.content.evidence_errors)
+        self.assertEqual(self.review.content.outline.sections[0].paper_ids, ['p_001', 'p_002', 'p_003'])
+
     async def test_summary_input_cannot_leak_evidence_outside_confirmed_assignment(self):
-        from paperseek_core.review.generation import write_section
         from paperseek_app.execution import CancellationScope
+        from paperseek_core.review.generation import (
+            write_section,
+        )
 
         await self.prepare()
         cards = self.review.content.cards

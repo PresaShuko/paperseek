@@ -39,11 +39,16 @@ class RankingScorer:
             )
         matched, missing = self.codec.match_scores(documents, scores)
         if missing:
-            scores = await self.request_scores_in_chunks(
-                question, documents, plan_context
-            )
-            matched, missing = self.codec.match_scores(documents, scores)
-            if missing:
+            try:
+                recovered = await self.request_scores_in_chunks(
+                    question, missing, plan_context
+                )
+            except Exception:
+                if not matched:
+                    raise
+            else:
+                matched, missing = self.codec.match_scores(documents, [*matched, *recovered])
+            if not matched:
                 raise EmptyRankingBatchError(
                     f"Chunked score-only ranking omitted {len(missing)}/{len(documents)} candidate(s)."
                 )
@@ -58,16 +63,26 @@ class RankingScorer:
     ) -> list[dict[str, Any]]:
         reason_documents = self.reason_documents(documents, scores)
         reason_by_uid: dict[str, str] = {}
+        exhausted: set[str] = set()
         self.missing_reason_count = 0
         self.reason_failures = []
-        for start in range(0, len(reason_documents), 64):
-            batch = reason_documents[start : start + 64]
-            try:
-                reason_by_uid.update(
-                    await self.request_reasons(question, batch, scores, plan_context)
-                )
-            except Exception as exc:
-                self.reason_failures.append(failure_details(exc))
+        # One pass in moderate batches, then one retry for whatever a batch left out in smaller ones.
+        for size in (32, 12):
+            pending = [
+                document
+                for document in reason_documents
+                if document_identity(document) not in reason_by_uid and document_identity(document) not in exhausted
+            ]
+            for start in range(0, len(pending), size):
+                batch = pending[start : start + size]
+                try:
+                    reason_by_uid.update(
+                        await self.request_reasons(question, batch, scores, plan_context)
+                    )
+                except Exception as exc:
+                    self.reason_failures.append(failure_details(exc))
+                    if not self.should_retry_in_chunks(exc):
+                        exhausted.update(document_identity(document) for document in batch)
         self.missing_reason_count = sum(
             document_identity(document) not in reason_by_uid
             for document in reason_documents
@@ -158,14 +173,15 @@ class RankingScorer:
         scores = []
         for start in range(0, len(documents), chunk_size):
             batch = documents[start : start + chunk_size]
-            batch_scores = await self.request_compact_scores(
-                question, batch, plan_context
-            )
-            matched, missing = self.codec.match_scores(batch, batch_scores)
-            if missing:
-                raise EmptyRankingBatchError(
-                    f"Score-only chunk {start // chunk_size + 1} omitted {len(missing)}/{len(batch)} candidate(s)."
+            try:
+                batch_scores = await self.request_compact_scores(
+                    question, batch, plan_context
                 )
+            except Exception:
+                if not scores:
+                    raise
+                break  # Retain completed chunks without multiplying upstream failures.
+            matched, _ = self.codec.match_scores(batch, batch_scores)
             scores.extend(matched)
         return scores
 
@@ -179,7 +195,7 @@ class RankingScorer:
             for entry in scores
         }
         ordered = sorted(
-            documents,
+            [document for document in documents if document_identity(document) in score_by_uid],
             key=lambda document: score_by_uid.get(document_identity(document), 0),
             reverse=True,
         )
@@ -230,6 +246,7 @@ class RankingScorer:
                 ),
             },
         ]
-        max_tokens = min(8192, max(2048, len(documents) * 96))
+        # A one-sentence reason in Chinese can take 150 tokens; a tight budget cuts the JSON off.
+        max_tokens = min(8192, max(2048, len(documents) * 180))
         raw = await self.llm.chat_json(messages, temperature=0.0, max_tokens=max_tokens)
         return self.codec.parse_reasons(raw, identities)

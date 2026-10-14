@@ -7,14 +7,28 @@ from time import monotonic
 
 from paperseek_app.execution import run_blocking
 from paperseek_app.models import LeaseToken, PendingEvent
-from paperseek_app.review.models import ReviewContent, ReviewDetail, ReviewError, ReviewJobContext
+from paperseek_app.review.models import (
+    ReviewContent,
+    ReviewDetail,
+    ReviewError,
+    ReviewJobContext,
+)
 from paperseek_app.review.ports import ReviewStore
 from paperseek_core.errors import LLMRequestError
 from paperseek_core.ports import CancellationToken, LLMPort
-from paperseek_core.review.evidence import PROMPT_VERSION, fingerprint, usable_cards
 from paperseek_core.review.consistency import check_consistency
-from paperseek_core.review.generation import ReviewOutputError, extract_evidence, prepare_outline, write_section
+from paperseek_core.review.evidence import PROMPT_VERSION, fingerprint, usable_cards
+from paperseek_core.review.generation import (
+    write_section,
+)
 from paperseek_core.review.models import OutlineSection, ReviewPaper, WrittenSection
+from paperseek_core.review.planning import (
+    extract_evidence,
+    prepare_outline,
+)
+from paperseek_core.review.structured import (
+    ReviewOutputError,
+)
 
 
 class ReviewStageWorkflow:
@@ -61,7 +75,9 @@ class ReviewStageWorkflow:
         content = self.review.content
         signature = fingerprint([PROMPT_VERSION, content.corpus_hash, content.language, self.route])
         # Existing prose cites these immutable quotes, including when changing the writing model.
-        ready = {card.paper_id for card in content.cards if card.signature == signature or content.sections}
+        usable_ids = {card.paper_id for card in usable_cards(content.cards, content.papers)}
+        ready = {card.paper_id for card in content.cards
+                 if content.sections or card.signature == signature and card.paper_id in usable_ids}
         papers = [paper for paper in content.papers if paper.has_abstract and paper.id not in ready]
         semaphore = asyncio.Semaphore(2)
 
@@ -106,8 +122,10 @@ class ReviewStageWorkflow:
         cards = [card for card in self.review.content.cards if card.signature == signature or content.sections]
         if len(cards) < 2:
             raise ReviewError("review_insufficient_evidence", status=422)
-        if len(cards) != sum(paper.has_abstract for paper in content.papers):
-            raise ReviewError("review_evidence_incomplete", status=422)
+        # A paper whose evidence still fails after its own retry is left out and flagged, rather than
+        # blocking a review built from many other papers; a later run retries only those papers.
+        carded = {card.paper_id for card in cards}
+        failed = [paper.id for paper in content.papers if paper.has_abstract and paper.id not in carded]
         usable = usable_cards(cards, content.papers)
         if len(usable) < 2:
             raise ReviewError("review_insufficient_evidence", status=422)
@@ -124,6 +142,7 @@ class ReviewStageWorkflow:
             usable_ids = {card.paper_id for card in usable}
             value.cards = cards
             value.evidence_errors = {card.paper_id: "review_evidence_unusable" for card in cards if card.paper_id not in usable_ids}
+            value.evidence_errors.update({paper_id: "review_evidence_failed" for paper_id in failed})
             value.outline = outline
             value.section_count = len(outline.sections)
             value.outline_revision += 1

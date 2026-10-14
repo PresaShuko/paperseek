@@ -122,6 +122,14 @@ class RankingPipeline:
                 scheduler,
             )
 
+        _, missing = self.codec.match_scores(documents, scores)
+        if scores and missing and "ranking_partial_failure_local_order_retained" not in warnings:
+            warnings.append("ranking_partial_failure_local_order_retained")
+            self._event("ranking.degraded", {
+                "code": "ranking_partial_failure_local_order_retained",
+                "failed_candidates": len(missing),
+                "scored_count": len(scores),
+            })
         items = self._rank_from_scores(documents, scores, request.provenance_by_identity)
         self._event(
             "ranking.completed",

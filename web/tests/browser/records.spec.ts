@@ -55,3 +55,24 @@ test("analysis and review lists are tables with a create action", async ({ page 
   await page.goto("/reviews");
   await expect(page.getByText("还没有综述")).toBeVisible();
 });
+
+
+test("active searches survive refresh and cannot be cleared as finished history", async ({ page }) => {
+  const state = createState();
+  state.runs[ids.running] = { ...state.runs[ids.done], id: ids.running, question: "Recover active search", display_title: "", status: "running" };
+  await open(page, "/search", state);
+  await page.reload();
+  const record = page.locator(".sb-scroll .sb-btn", { hasText: "Recover active search" });
+  await expect(record).toHaveCount(1);
+  await expect(record.locator(".sb-badge")).toHaveText("运行中");
+  await page.goto("/history");
+  const row = page.locator("tr", { hasText: "Recover active search" });
+  await row.getByRole("button", { name: /更多操作/ }).click();
+  await expect(page.getByRole("menuitem", { name: "删除", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "清空已结束历史" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "清空已结束历史" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  expect(state.deleted).not.toContain(ids.running);
+  await expect(row).toBeVisible();
+});

@@ -7,6 +7,25 @@ on:
     branches: [main]
 
 jobs:
+  images:
+    name: Clean Docker build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: community
+            dockerfile: Dockerfile
+          - image: mcp
+            dockerfile: integrations/mcp/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      # Run before any wheel build can leave generated files in the context.
+      - name: Build from a clean checkout
+        run: docker build --file ${{ matrix.dockerfile }} --tag paperseek-${{ matrix.image }}:ci .
+      - name: Check installed entry point
+        run: docker run --rm paperseek-${{ matrix.image }}:ci --help
+
   backend:
     name: Backend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

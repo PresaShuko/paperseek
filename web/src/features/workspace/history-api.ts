@@ -40,7 +40,7 @@ export async function loadRecords(
         date: item.created_at,
         count: item.result_count,
         status: item.status,
-        active: false,
+        active: ["queued", "running", "cancelling"].includes(item.status),
       })),
       next: page.next_cursor || null,
     };

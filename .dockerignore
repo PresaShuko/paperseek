@@ -28,3 +28,18 @@ paperseek_core
 skills
 tests
 docs
+
+# Match generated content at every level of the build context.
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/build
+**/dist
+**/*.egg-info
+.mcp-dist
+.mcp-installed
+.release-mcp

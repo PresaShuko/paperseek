@@ -16,6 +16,11 @@
 | 分析视图、控件与浏览器布局 worker | `web/src/features/bibliometrics/` |
 | 检索草稿与模型连接输入 | `web/src/features/search/search-draft.ts`、`web/src/features/search/use-search-configuration.ts`、`web/src/features/settings/ConnectionSheet.vue` |
 | 综述证据与来源图谱快照 | `web/src/features/review/ReviewEvidence.vue` |
+| 共享设置契约与校验 | `paperseek_app/settings.py` |
+| 部署无关的连接检测 | `paperseek_app/settings_probes.py`（客户端与来源由部署层提供） |
+| 综述结构化输出与修复 | `paperseek_core/review/structured.py` |
+| 综述证据提取与大纲 | `paperseek_core/review/planning.py` |
+| 综述正文生成与核对 | `paperseek_core/review/generation.py`；共享提示词在 `prompts.py` |
 
 检索在通道选择与融合前保留已返回页面的元数据，排序输入仍受原有上限约束。完成的任务独立写入 `bibliometric_corpus` 产物；结果 API 与事件流不传输候选集。社区版恢复检查点保留候选集；在线版可按策略跳过检查点，但仍保留最终产物。
 

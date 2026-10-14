@@ -52,7 +52,7 @@ npm --prefix web run build -- --outDir ../backend/src/paperseek_community/static
 uv run --locked --project backend paperseek serve
 ```
 
-前端开发可在后端运行时执行 `npm --prefix web run dev`，开发代理配置见 `web/vite.config.ts`。
+前端迭代时，在后端启动后运行 `npm --prefix web run dev`。Vite 将 `/api` 代理到 `http://127.0.0.1:8765`，请让 `paperseek serve` 使用默认端口。
 
 ## 验证改动
 
@@ -65,6 +65,8 @@ npm --prefix web run typecheck
 npm --prefix web run build
 ```
 
+Python 的 Ruff 检查覆盖生产源码的语法、未使用名称及部分正确性规则；mypy 当前检查 `backend/pyproject.toml` 列出的七个传输、凭据和共享设置模块，并非全后端类型检查。Web 使用严格 TypeScript 检查。
+
 按实际改动选择检查，完整发行检查参考 CI。真实提供方实验与确定性测试分开，迁移和集成测试不能连接生产数据库。
 
 ## 修改文档站
@@ -75,6 +77,8 @@ npm run docs:dev
 npm run docs:build
 npm run docs:check
 npm run docs:lint
+cd web
+npx playwright test --config playwright.docs.config.ts scrolling.spec.ts
 ```
 
 英文页面位于 `docs/`，中文对应页面位于 `docs/zh/`。两棵树逐文件对应；某个页面只存在一种语言时 `docs:check` 会失败。行为变化时同步更新两种语言。站点配置和主题位于 `docs/.vitepress/`。

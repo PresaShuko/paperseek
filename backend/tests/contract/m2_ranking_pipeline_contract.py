@@ -143,6 +143,28 @@ class RateLimitOnceLLM(GeneratedBatchLLM):
 
 
 class M2RankingPipelineContractTest(unittest.TestCase):
+    def test_reason_output_repair_does_not_repeat_exhausted_transport_requests(self):
+        from paperseek_core.errors import LLMRequestError
+
+        class ExhaustedLLM:
+            calls = 0
+
+            async def chat_json(self, messages, **kwargs):
+                self.calls += 1
+                error = LLMRequestError('HTTP 429 after request retries')
+                error.retry_details = {'http_status': 429, 'attempts': 5, 'retryable': True}
+                raise error
+
+        llm = ExhaustedLLM()
+        records = [PaperRecord(uid=f'paper-{i}', title=f'Study {i}') for i in range(32)]
+        scores = [{'uid': record.uid, 'score': 9} for record in records]
+        scorer = RankingScorer(llm)
+        result = asyncio.run(scorer.attach_reasons(QUESTION, records, scores, '{}'))
+        self.assertEqual(llm.calls, 1)
+        self.assertEqual(scorer.missing_reason_count, 32)
+        self.assertEqual(scorer.reason_failures, [{'http_status': 429, 'attempts': 5, 'retryable': True}])
+        self.assertTrue(all(not score['reasoning'] and score['score'] == 9 for score in result))
+
     def test_m0_prompt_codec_scores_and_reasons_are_exact(self) -> None:
         self.assertEqual(
             hashlib.sha256(SYSTEM_RESULT_RANKING.encode("utf-8")).hexdigest().upper(),
@@ -202,6 +224,46 @@ class M2RankingPipelineContractTest(unittest.TestCase):
             asyncio.run(RankingScorer(failing).score_batch(QUESTION, documents(), "{}"))
         self.assertEqual(len(failing.calls), 2)
 
+    def test_score_repair_only_requests_missing_candidates(self) -> None:
+        records = documents()
+        llm = FixtureLLM('{"scores":[[1,9],[3,3]]}', '{"scores":[[1,6]]}')
+        scores = asyncio.run(RankingScorer(llm).score_batch(QUESTION, records, "{}"))
+        self.assertEqual({item["uid"]: item["score"] for item in scores},
+                         {records[0].uid: 9, records[1].uid: 6, records[2].uid: 3})
+        prompt = str(llm.calls[1]["messages"])
+        self.assertIn(records[1].title, prompt)
+        self.assertNotIn(records[0].title, prompt)
+        self.assertNotIn(records[2].title, prompt)
+
+    def test_partial_scores_survive_repair_with_an_explicit_warning(self) -> None:
+        llm = FixtureLLM('{"scores":[[1,9]]}', '{"scores":[[1,6]]}',
+                         '{"reasons":[[1,"Direct evidence"],[2,"Adjacent evidence"]]}')
+        observer = RecordingObserver()
+        result = asyncio.run(RankingPipeline(llm, observer).run(
+            RankingRequest(question=QUESTION, documents=documents())))
+        self.assertEqual([item.score for item in result.items], [9, 6, None])
+        self.assertEqual(result.items[-1].reasoning, "")
+        self.assertEqual(result.warnings, ["ranking_partial_failure_local_order_retained"])
+        degraded = [event for event in observer.events if event.event_type == "ranking.degraded"]
+        self.assertEqual(degraded[-1].payload["failed_candidates"], 1)
+        self.assertNotIn(documents()[2].title, str(llm.calls[-1]["messages"]))
+
+    def test_later_score_chunk_failure_keeps_valid_earlier_scores(self) -> None:
+        class InterruptedLLM:
+            calls = 0
+
+            async def chat_json(self, messages, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return '{"scores":[[1,8]]}'
+                raise RuntimeError("upstream unavailable")
+
+        llm = InterruptedLLM()
+        scores = asyncio.run(RankingScorer(llm).request_scores_in_chunks(
+            QUESTION, documents(), "{}", chunk_size=1))
+        self.assertEqual([(item["uid"], item["score"]) for item in scores], [(documents()[0].uid, 8)])
+        self.assertEqual(llm.calls, 2)
+
     def test_invalid_reason_output_keeps_scores_without_inventing_reasons(self) -> None:
         llm = FixtureLLM(read_fixture("llm/query_invalid.txt"))
         scores = [
@@ -213,6 +275,22 @@ class M2RankingPipelineContractTest(unittest.TestCase):
 
         self.assertTrue(all(item["reasoning"] == "" for item in output))
         self.assertEqual(len(llm.calls), 1)
+
+    def test_reasons_cut_off_mid_reply_are_kept_and_the_rest_requested_again(self) -> None:
+        # The first reply stops mid-list, as a long reply does when it reaches its token budget.
+        llm = FixtureLLM(
+            '{"reasons":[[1,"First paper fits the question."],[2,"Second paper is rel',
+            '{"reasons":[[1,"Second paper fits too."],[2,"Third paper is adjacent."]]}',
+        )
+        scores = [{"uid": record.uid, "score": score} for record, score in zip(documents(), (9.0, 6.0, 3.0))]
+        scorer = RankingScorer(llm)
+
+        output = asyncio.run(scorer.attach_reasons(QUESTION, documents(), scores, "{}"))
+
+        self.assertEqual([item["reasoning"] for item in output],
+                         ["First paper fits the question.", "Second paper fits too.", "Third paper is adjacent."])
+        self.assertEqual(scorer.missing_reason_count, 0)
+        self.assertEqual(len(llm.calls), 2)
 
     def test_pipeline_makes_missing_reasons_visible_without_inventing_text(self) -> None:
         llm = FixtureLLM(
